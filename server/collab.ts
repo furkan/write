@@ -2,7 +2,7 @@ import { Database } from '@hocuspocus/extension-database'
 import { Server } from '@hocuspocus/server'
 import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { Connect, Plugin } from 'vite'
 import * as Y from 'yjs'
@@ -15,10 +15,22 @@ import * as Y from 'yjs'
  * `/collab` WebSocket proxy, so everything — including Tailscale access — uses one port.
  * Documents are persisted as Yjs updates in `.collab-data/`, with an `index.json` holding
  * each document's title, preview text and timestamps.
+ *
+ * Deleting a document moves it to the Trash, where it can be restored for 30 days. A daily
+ * snapshot of `.collab-data/` is copied to `.collab-backups/` (or `$WRITE_BACKUP_DIR`).
  */
 
-const DATA_DIR = resolve(import.meta.dirname, '..', '.collab-data')
+const ROOT = resolve(import.meta.dirname, '..')
+const DATA_DIR = join(ROOT, '.collab-data')
 const INDEX_FILE = join(DATA_DIR, 'index.json')
+const BACKUP_DIR = resolve(ROOT, process.env.WRITE_BACKUP_DIR ?? '.collab-backups')
+
+const HOUR = 3_600_000
+const DAY = 24 * HOUR
+/** Documents in the Trash are deleted forever after this long. */
+const TRASH_RETENTION_MS = 30 * DAY
+const BACKUP_INTERVAL_MS = DAY
+const BACKUPS_TO_KEEP = 14
 
 // ---------- Files ----------
 
@@ -54,6 +66,8 @@ export type DocMeta = {
   words: number
   createdAt: number
   updatedAt: number
+  /** Set while the document is in the Trash. */
+  trashedAt?: number
 }
 
 type IndexFile = { docs: Record<string, Omit<DocMeta, 'id'>>; deleted: string[] }
@@ -110,7 +124,11 @@ function scheduleIndexSave() {
   indexState.pending = setTimeout(() => void saveIndex().catch(() => undefined), 1000)
 }
 
+/** Deleted forever (tombstoned). */
 const isDeleted = (id: string) => deleted.has(id)
+const isTrashed = (id: string) => docs[id]?.trashedAt !== undefined
+/** Trashed and deleted documents can't be opened or synced. */
+const isClosed = (id: string) => isDeleted(id) || isTrashed(id)
 
 /**
  * Plain text of a Yjs document's editor content. Walks the Yjs tree rather than parsing
@@ -151,10 +169,16 @@ function updateIndexFromDoc(id: string, doc: Y.Doc) {
     words: text ? text.split(' ').length : 0,
     createdAt: existing?.createdAt ?? Date.now(),
     updatedAt: Date.now(),
+    ...(existing?.trashedAt !== undefined && { trashedAt: existing.trashedAt }),
   }
 }
 
 const toMeta = (id: string): DocMeta => ({ id, ...docs[id] })
+
+const toTrashed = (id: string) => {
+  const meta = toMeta(id)
+  return { ...meta, purgeAt: (meta.trashedAt ?? 0) + TRASH_RETENTION_MS }
+}
 
 const newId = () => randomBytes(9).toString('base64url')
 
@@ -179,9 +203,10 @@ function ensureServer(port: number): Promise<Server> {
       // Persist quickly so little is lost if the dev server is stopped abruptly.
       debounce: 500,
       maxDebounce: 2000,
-      // Deleted documents stay deleted: refuse connections so an open tab can't resurrect one.
+      // Trashed and deleted documents are closed: refuse connections so an open tab can't
+      // keep editing (or resurrect) one.
       async onConnect({ documentName }) {
-        if (isDeleted(documentName)) throw new Error('Document was deleted')
+        if (isClosed(documentName)) throw new Error('Document is in the trash or was deleted')
       },
       extensions: [
         new Database({
@@ -201,6 +226,7 @@ function ensureServer(port: number): Promise<Server> {
       ],
     })
     await server.listen()
+    startMaintenance(server)
     return server
   })()
   // Let a later restart retry if startup failed (e.g. the port was busy).
@@ -208,6 +234,110 @@ function ensureServer(port: number): Promise<Server> {
     delete g[globalKey]
   })
   return g[globalKey]
+}
+
+// ---------- Trash ----------
+
+/** The current Yjs state of a document: from memory if it's open, otherwise from disk. */
+async function currentState(server: Server, id: string) {
+  const loaded = server.hocuspocus.documents.get(id)
+  return loaded ? Y.encodeStateAsUpdate(loaded) : readState(id)
+}
+
+async function moveToTrash(server: Server, id: string) {
+  if (isTrashed(id)) return
+  // Documents opened by a raw ?doc= link may not be indexed yet; index them so they show in the Trash.
+  if (!docs[id]) {
+    const state = await currentState(server, id)
+    const doc = new Y.Doc()
+    if (state) Y.applyUpdate(doc, state)
+    updateIndexFromDoc(id, doc)
+  }
+  docs[id] = { ...docs[id], trashedAt: Date.now() }
+  await saveIndex()
+  // Open tabs get disconnected; their reconnects are refused and they show a "moved to trash" banner.
+  // Hocuspocus stores the latest state as the document unloads, so nothing typed is lost.
+  server.hocuspocus.closeConnections(id)
+}
+
+async function restoreFromTrash(id: string) {
+  docs[id] = { ...docs[id], trashedAt: undefined }
+  await saveIndex()
+}
+
+/** Deletes a document forever. Its ID is tombstoned so it can never be synced again. */
+async function purge(server: Server, id: string) {
+  deleted.add(id)
+  delete docs[id]
+  await saveIndex()
+  server.hocuspocus.closeConnections(id)
+  await rm(fileFor(id), { force: true })
+}
+
+const trashedIds = () => Object.keys(docs).filter(isTrashed)
+
+async function purgeExpired(server: Server) {
+  const now = Date.now()
+  for (const id of trashedIds()) {
+    if (now - (docs[id].trashedAt ?? now) >= TRASH_RETENTION_MS) await purge(server, id)
+  }
+}
+
+// ---------- Backups ----------
+
+// Snapshot folders are named by UTC time, so they sort chronologically.
+const SNAPSHOT_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/
+
+async function listSnapshots() {
+  try {
+    return (await readdir(BACKUP_DIR)).filter((name) => SNAPSHOT_NAME.test(name)).sort()
+  } catch {
+    return []
+  }
+}
+
+/** Copies `.collab-data/` into a new timestamped folder and keeps the newest few. */
+async function backup() {
+  await mkdir(BACKUP_DIR, { recursive: true })
+  // Let any index write in progress finish; document files are written atomically.
+  await indexState.write
+  const name = new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-')
+  const partial = join(BACKUP_DIR, `${name}.partial`)
+  await cp(DATA_DIR, partial, { recursive: true, filter: (src) => !src.endsWith('.tmp') })
+  // Only complete copies get a snapshot name.
+  await rename(partial, join(BACKUP_DIR, name))
+  const snapshots = await listSnapshots()
+  for (const old of snapshots.slice(0, -BACKUPS_TO_KEEP)) {
+    await rm(join(BACKUP_DIR, old), { recursive: true, force: true })
+  }
+}
+
+/** Snapshot time from a folder name like 2026-11-05T09-30-00Z. */
+const snapshotTime = (name: string) =>
+  Date.parse(name.replace(/T(\d{2})-(\d{2})-(\d{2})Z$/, 'T$1:$2:$3Z'))
+
+async function backupIfDue() {
+  const latest = (await listSnapshots()).at(-1)
+  if (latest && Date.now() - snapshotTime(latest) < BACKUP_INTERVAL_MS) return
+  await backup()
+}
+
+/** Hourly: delete expired Trash items and take a backup when the last one is a day old. */
+function startMaintenance(server: Server) {
+  const run = async () => {
+    try {
+      await backupIfDue()
+    } catch (error) {
+      console.error('[write] backup failed:', error)
+    }
+    try {
+      await purgeExpired(server)
+    } catch (error) {
+      console.error('[write] emptying expired trash failed:', error)
+    }
+  }
+  void run()
+  setInterval(() => void run(), HOUR).unref()
 }
 
 // ---------- REST API ----------
@@ -239,93 +369,20 @@ async function setTitle(server: Server, id: string, title: string) {
   }
 }
 
-/** The current Yjs state of a document: from memory if it's open, otherwise from disk. */
-async function currentState(server: Server, id: string) {
-  const loaded = server.hocuspocus.documents.get(id)
-  return loaded ? Y.encodeStateAsUpdate(loaded) : readState(id)
-}
+type Handler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  next: () => void,
+  route: { id?: string; action?: string; server: Server },
+) => Promise<void>
 
-function createApi(port: number): Connect.NextHandleFunction {
+/** Parses `/:id/:action` and handles errors. A malformed escape (e.g. %E0) must not crash the server. */
+function route(port: number, handler: Handler): Connect.NextHandleFunction {
   return async (req, res, next) => {
     try {
       const url = new URL(req.url ?? '/', 'http://localhost')
-      // Mounted at /api/docs, so paths here are "/", "/:id", "/:id/status" or "/:id/duplicate".
-      // Decoding is inside the try: a malformed escape (e.g. %E0) must not crash the server.
       const [id, action] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
-      const server = await ensureServer(port)
-
-      if (!id && req.method === 'GET') {
-        const list = Object.keys(docs)
-          .filter((docId) => !isDeleted(docId))
-          .map(toMeta)
-          .sort((a, b) => b.updatedAt - a.updatedAt)
-        return send(res, 200, { docs: list })
-      }
-
-      if (!id && req.method === 'POST') {
-        const body = await readJson(req)
-        const docId = newId()
-        const title = cleanTitle(body.title)
-        const doc = new Y.Doc()
-        if (title) doc.getMap('meta').set('title', title)
-        await writeAtomic(fileFor(docId), Y.encodeStateAsUpdate(doc))
-        const now = Date.now()
-        docs[docId] = { title, preview: '', words: 0, createdAt: now, updatedAt: now }
-        await saveIndex()
-        return send(res, 201, toMeta(docId))
-      }
-
-      if (!id) return next()
-
-      // Always 200, so opening a brand-new or deleted document doesn't log a failed request.
-      if (action === 'status' && req.method === 'GET') {
-        return send(res, 200, { deleted: isDeleted(id), exists: Boolean(docs[id]) })
-      }
-
-      if (isDeleted(id)) return send(res, 410, { error: 'deleted' })
-
-      if (!action && req.method === 'GET') {
-        return docs[id] ? send(res, 200, toMeta(id)) : send(res, 404, { error: 'not found' })
-      }
-
-      if (!action && req.method === 'PATCH') {
-        const title = cleanTitle((await readJson(req)).title)
-        await setTitle(server, id, title)
-        // Documents opened by a raw ?doc= link may not be indexed yet; index them now.
-        const state = await currentState(server, id)
-        const doc = new Y.Doc()
-        if (state) Y.applyUpdate(doc, state)
-        updateIndexFromDoc(id, doc)
-        docs[id] = { ...docs[id], title }
-        await saveIndex()
-        return send(res, 200, toMeta(id))
-      }
-
-      // Deletes work for any document name, indexed or not, and are permanent (tombstoned).
-      if (!action && req.method === 'DELETE') {
-        deleted.add(id)
-        delete docs[id]
-        await saveIndex()
-        server.hocuspocus.closeConnections(id)
-        await rm(fileFor(id), { force: true })
-        return send(res, 204)
-      }
-
-      if (action === 'duplicate' && req.method === 'POST') {
-        const state = await currentState(server, id)
-        if (!state && !docs[id]) return send(res, 404, { error: 'not found' })
-        const doc = new Y.Doc()
-        if (state) Y.applyUpdate(doc, state)
-        const sourceTitle = getTitle(doc) || extractText(doc).slice(0, 60) || 'Untitled document'
-        doc.getMap('meta').set('title', `Copy of ${sourceTitle}`)
-        const copyId = newId()
-        await writeAtomic(fileFor(copyId), Y.encodeStateAsUpdate(doc))
-        updateIndexFromDoc(copyId, doc)
-        await saveIndex()
-        return send(res, 201, toMeta(copyId))
-      }
-
-      return next()
+      await handler(req, res, next, { id, action, server: await ensureServer(port) })
     } catch (error) {
       if (error instanceof URIError) return send(res, 400, { error: 'bad request' })
       return send(res, 500, { error: error instanceof Error ? error.message : 'error' })
@@ -333,12 +390,121 @@ function createApi(port: number): Connect.NextHandleFunction {
   }
 }
 
+/** `/api/trash`: list, restore, delete forever, empty. */
+const trashApi = (port: number) =>
+  route(port, async (req, res, next, { id, action, server }) => {
+    if (!id && req.method === 'GET') {
+      const list = trashedIds()
+        .map(toTrashed)
+        .sort((a, b) => (b.trashedAt ?? 0) - (a.trashedAt ?? 0))
+      return send(res, 200, { docs: list, retentionDays: TRASH_RETENTION_MS / DAY })
+    }
+
+    if (!id && req.method === 'DELETE') {
+      const ids = trashedIds()
+      for (const trashed of ids) await purge(server, trashed)
+      return send(res, 200, { purged: ids.length })
+    }
+
+    if (!id) return next()
+    // Only documents in the Trash can be restored or deleted forever.
+    if (!isTrashed(id)) return send(res, 404, { error: 'not in trash' })
+
+    if (action === 'restore' && req.method === 'POST') {
+      await restoreFromTrash(id)
+      return send(res, 200, toMeta(id))
+    }
+
+    if (!action && req.method === 'DELETE') {
+      await purge(server, id)
+      return send(res, 204)
+    }
+
+    return next()
+  })
+
+/** `/api/docs`: the document library. */
+const docsApi = (port: number) =>
+  route(port, async (req, res, next, { id, action, server }) => {
+    if (!id && req.method === 'GET') {
+      const list = Object.keys(docs)
+        .filter((docId) => !isClosed(docId))
+        .map(toMeta)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+      return send(res, 200, { docs: list })
+    }
+
+    if (!id && req.method === 'POST') {
+      const body = await readJson(req)
+      const docId = newId()
+      const title = cleanTitle(body.title)
+      const doc = new Y.Doc()
+      if (title) doc.getMap('meta').set('title', title)
+      await writeAtomic(fileFor(docId), Y.encodeStateAsUpdate(doc))
+      const now = Date.now()
+      docs[docId] = { title, preview: '', words: 0, createdAt: now, updatedAt: now }
+      await saveIndex()
+      return send(res, 201, toMeta(docId))
+    }
+
+    if (!id) return next()
+
+    // Always 200, so opening a brand-new or deleted document doesn't log a failed request.
+    if (action === 'status' && req.method === 'GET') {
+      return send(res, 200, { deleted: isDeleted(id), trashed: isTrashed(id), exists: Boolean(docs[id]) })
+    }
+
+    if (isDeleted(id)) return send(res, 410, { error: 'deleted' })
+
+    // Moves the document to the Trash. Works for any document name, indexed or not.
+    if (!action && req.method === 'DELETE') {
+      await moveToTrash(server, id)
+      return send(res, 204)
+    }
+
+    if (isTrashed(id)) return send(res, 410, { error: 'trashed' })
+
+    if (!action && req.method === 'GET') {
+      return docs[id] ? send(res, 200, toMeta(id)) : send(res, 404, { error: 'not found' })
+    }
+
+    if (!action && req.method === 'PATCH') {
+      const title = cleanTitle((await readJson(req)).title)
+      await setTitle(server, id, title)
+      // Documents opened by a raw ?doc= link may not be indexed yet; index them now.
+      const state = await currentState(server, id)
+      const doc = new Y.Doc()
+      if (state) Y.applyUpdate(doc, state)
+      updateIndexFromDoc(id, doc)
+      docs[id] = { ...docs[id], title }
+      await saveIndex()
+      return send(res, 200, toMeta(id))
+    }
+
+    if (action === 'duplicate' && req.method === 'POST') {
+      const state = await currentState(server, id)
+      if (!state && !docs[id]) return send(res, 404, { error: 'not found' })
+      const doc = new Y.Doc()
+      if (state) Y.applyUpdate(doc, state)
+      const sourceTitle = getTitle(doc) || extractText(doc).slice(0, 60) || 'Untitled document'
+      doc.getMap('meta').set('title', `Copy of ${sourceTitle}`)
+      const copyId = newId()
+      await writeAtomic(fileFor(copyId), Y.encodeStateAsUpdate(doc))
+      updateIndexFromDoc(copyId, doc)
+      await saveIndex()
+      return send(res, 201, toMeta(copyId))
+    }
+
+    return next()
+  })
+
 async function attach(
   middlewares: Connect.Server,
   httpServer: { once(event: 'close', listener: () => void): unknown } | null,
   port: number,
 ) {
-  middlewares.use('/api/docs', createApi(port))
+  middlewares.use('/api/docs', docsApi(port))
+  middlewares.use('/api/trash', trashApi(port))
   const server = await ensureServer(port)
   httpServer?.once('close', () => {
     server.hocuspocus.flushPendingStores()

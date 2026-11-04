@@ -1,8 +1,9 @@
+import 'katex/dist/katex.min.css'
 import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getDocStatus, libraryUrl } from '../api'
+import { getDocStatus, libraryUrl, restoreDoc, trashUrl } from '../api'
 import { EditorMenus } from '../components/EditorMenus'
 import { Header, type ViewOptions } from '../components/Header'
 import { Sidebar, type EditorEvent } from '../components/Sidebar'
@@ -56,29 +57,69 @@ function useInitialSync(session: Session): { ready: boolean; empty: boolean } {
   return state
 }
 
-/** Whether the document was deleted from the library (the server refuses to sync it). */
-function useDeleted(name: string): boolean | null {
-  const [deleted, setDeleted] = useState<boolean | null>(null)
+/** Trashed and deleted documents are closed: the server refuses to sync them. */
+type Closed = 'trashed' | 'deleted'
+
+const closedState = (status: { deleted: boolean; trashed: boolean }): Closed | null =>
+  status.deleted ? 'deleted' : status.trashed ? 'trashed' : null
+
+/** Whether the document is open, in the Trash, or deleted forever. */
+function useClosed(name: string): Closed | 'open' | undefined {
+  const [state, setState] = useState<Closed | 'open' | undefined>(undefined)
   useEffect(() => {
     let cancelled = false
     getDocStatus(name)
-      .then((status) => !cancelled && setDeleted(status.deleted))
+      .then((status) => !cancelled && setState(closedState(status) ?? 'open'))
       // Server unreachable: try to open the document anyway (it works offline).
-      .catch(() => !cancelled && setDeleted(false))
+      .catch(() => !cancelled && setState('open'))
     return () => {
       cancelled = true
     }
   }, [name])
-  return deleted
+  return state
+}
+
+/** Restores the document from the Trash and reloads the page to reconnect. */
+function RestoreButton({ name, className }: { name: string; className?: string }) {
+  const [busy, setBusy] = useState(false)
+  const restore = async () => {
+    setBusy(true)
+    try {
+      await restoreDoc(name)
+      window.location.reload()
+    } catch {
+      setBusy(false)
+      window.alert('Could not restore the document. It may have been deleted forever.')
+    }
+  }
+  return (
+    <button type="button" className={className} disabled={busy} onClick={() => void restore()}>
+      {busy ? 'Restoring…' : 'Restore'}
+    </button>
+  )
 }
 
 type DocumentPageProps = { name: string; templateId: string | null }
 
 export function DocumentPage({ name, templateId }: DocumentPageProps) {
-  const deleted = useDeleted(name)
+  const state = useClosed(name)
 
-  if (deleted === null) return <Loading text="Opening document…" />
-  if (deleted) {
+  if (state === undefined) return <Loading text="Opening document…" />
+  if (state === 'trashed') {
+    return (
+      <div className="loading deleted" role="alert">
+        <p className="deleted-title">This document is in the trash.</p>
+        <p className="muted">Restore it to keep editing.</p>
+        <div className="closed-actions">
+          <RestoreButton name={name} className="primary-button" />
+          <a className="secondary-button" href={trashUrl()}>
+            Open the trash
+          </a>
+        </div>
+      </div>
+    )
+  }
+  if (state === 'deleted') {
     return (
       <div className="loading deleted" role="alert">
         <p className="deleted-title">This document was deleted.</p>
@@ -223,9 +264,10 @@ function Workspace({ session, template }: { session: Session; template: Template
   const presence = usePresence(session.provider)
   const status = useConnectionStatus(session.provider)
 
-  // If the server stops accepting this document, check whether it was deleted
-  // (by someone else, or in another tab) rather than showing "Offline" forever.
-  const [deletedWhileOpen, setDeletedWhileOpen] = useState(false)
+  // If the server stops accepting this document, check whether it was moved to the trash
+  // or deleted (by someone else, or in another tab) rather than showing "Offline" forever.
+  const [closed, setClosed] = useState<Closed | null>(null)
+  const closedWhileOpen = closed !== null
   useEffect(() => {
     const { provider } = session
     let cancelled = false
@@ -235,7 +277,10 @@ function Workspace({ session, template }: { session: Session; template: Template
       if (Date.now() - lastCheck < 3000) return
       lastCheck = Date.now()
       getDocStatus(session.name)
-        .then((s) => !cancelled && s.deleted && setDeletedWhileOpen(true))
+        .then((s) => {
+          const next = closedState(s)
+          if (!cancelled && next) setClosed(next)
+        })
         .catch(() => undefined)
     }
     provider.on('close', onClose)
@@ -246,14 +291,14 @@ function Workspace({ session, template }: { session: Session; template: Template
   }, [session])
 
   useEffect(() => {
-    if (!deletedWhileOpen) return
+    if (!closedWhileOpen) return
     session.provider.destroy()
     editor.setEditable(false)
-  }, [deletedWhileOpen, editor, session.provider])
+  }, [closedWhileOpen, editor, session.provider])
 
   useEffect(() => {
-    editor.setEditable(!view.readOnly && !deletedWhileOpen)
-  }, [editor, view.readOnly, deletedWhileOpen])
+    editor.setEditable(!view.readOnly && !closedWhileOpen)
+  }, [editor, view.readOnly, closedWhileOpen])
   const title = useDocTitle(session)
 
   useEffect(() => {
@@ -279,18 +324,24 @@ function Workspace({ session, template }: { session: Session; template: Template
         editor={editor}
         session={session}
         presence={presence}
-        view={deletedWhileOpen ? { ...view, readOnly: true } : view}
+        view={closedWhileOpen ? { ...view, readOnly: true } : view}
         onViewChange={(next) => setView((prev) => ({ ...prev, ...next }))}
       />
-      {deletedWhileOpen && (
+      {closed && (
         <div className="deleted-banner" role="alert">
-          This document was deleted. Your view is read-only and changes are no longer saved.{' '}
+          {closed === 'trashed' ? 'This document was moved to the trash.' : 'This document was deleted.'} Your view
+          is read-only and changes are no longer saved.{' '}
+          {closed === 'trashed' && (
+            <>
+              <RestoreButton name={session.name} className="link-button banner-button" /> ·{' '}
+            </>
+          )}
           <a href={libraryUrl()}>Back to all documents</a>
         </div>
       )}
       <div className="workspace">
         <main className="main">
-          <Toolbar editor={editor} readOnly={view.readOnly || deletedWhileOpen} />
+          <Toolbar editor={editor} readOnly={view.readOnly || closedWhileOpen} />
           <div className="editor-shell" data-tour="editor">
             <EditorContent editor={editor} className="editor" />
             <EditorMenus editor={editor} />

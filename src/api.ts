@@ -9,8 +9,15 @@ export type DocMeta = {
   updatedAt: number
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/docs${path}`, {
+export type TrashedDoc = DocMeta & {
+  /** When it was moved to the Trash. */
+  trashedAt: number
+  /** When it will be deleted forever. */
+  purgeAt: number
+}
+
+async function request<T>(path: string, init?: RequestInit, base = '/api/docs'): Promise<T> {
+  const response = await fetch(`${base}${path}`, {
     ...init,
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   })
@@ -30,17 +37,30 @@ export const listDocs = () => request<{ docs: DocMeta[] }>('').then((r) => r.doc
 
 export const getDoc = (id: string) => request<DocMeta>(`/${encodeURIComponent(id)}`)
 
-export const getDocStatus = (id: string) =>
-  request<{ deleted: boolean; exists: boolean }>(`/${encodeURIComponent(id)}/status`)
+export type DocStatus = { deleted: boolean; trashed: boolean; exists: boolean }
+
+export const getDocStatus = (id: string) => request<DocStatus>(`/${encodeURIComponent(id)}/status`)
 
 export const createDoc = (title = '') => request<DocMeta>('', { method: 'POST', body: JSON.stringify({ title }) })
 
 export const renameDoc = (id: string, title: string) =>
   request<DocMeta>(`/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title }) })
 
-export const deleteDoc = (id: string) => request<void>(`/${encodeURIComponent(id)}`, { method: 'DELETE' })
+/** Moves a document to the Trash; it can be restored for 30 days. */
+export const trashDoc = (id: string) => request<void>(`/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
 export const duplicateDoc = (id: string) => request<DocMeta>(`/${encodeURIComponent(id)}/duplicate`, { method: 'POST' })
+
+const trash = <T>(path: string, init?: RequestInit) => request<T>(path, init, '/api/trash')
+
+export const listTrash = () => trash<{ docs: TrashedDoc[]; retentionDays: number }>('')
+
+export const restoreDoc = (id: string) => trash<DocMeta>(`/${encodeURIComponent(id)}/restore`, { method: 'POST' })
+
+/** Deletes a document in the Trash forever. */
+export const deleteForever = (id: string) => trash<void>(`/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+export const emptyTrash = () => trash<{ purged: number }>('', { method: 'DELETE' })
 
 /** URL of a document; `template` seeds a brand-new document on first open. */
 export const docUrl = (id: string, template?: string) => {
@@ -49,7 +69,11 @@ export const docUrl = (id: string, template?: string) => {
   return `${location.pathname}?${params}`
 }
 
-export const libraryUrl = () => location.pathname
+/** URL of the library; `trashed` shows an "Undo" toast for a document just moved to the Trash. */
+export const libraryUrl = (trashed?: string) =>
+  trashed ? `${location.pathname}?${new URLSearchParams({ trashed })}` : location.pathname
+
+export const trashUrl = () => `${location.pathname}#trash`
 
 /** Display title: the explicit title, else the first words of the document. */
 export const displayTitle = (doc: Pick<DocMeta, 'title' | 'preview'>) =>

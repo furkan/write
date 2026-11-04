@@ -11,8 +11,9 @@ bun dev
 
 Open the URL Vite prints. The server listens on every interface, so other devices on your Tailscale network can use `http://<tailscale-ip>:5173` or `http://<machine>.<tailnet>.ts.net:5173`.
 
-- **Library:** the home page lists every document. Start one from a template (Blank, Feature tour, Meeting notes, Project brief, Journal), then search, sort, switch between grid and list, rename, copy or delete.
-- **Documents:** each opens at `?doc=<id>`. Everyone with the link edits together. Rename it in the title field (✍️ goes back to the library), and use **File** for new documents, copies, import, export and delete.
+- **Library:** the home page lists every document. Start one from a template (Blank, Feature tour, Meeting notes, Project brief, Journal), then search, sort, switch between grid and list, rename, copy or move to the trash.
+- **Trash:** deleting moves a document to the Trash (with an **Undo** button right after). Restore it from the Trash for 30 days; after that it is deleted forever. You can also delete forever or empty the Trash by hand.
+- **Documents:** each opens at `?doc=<id>`. Everyone with the link edits together. Rename it in the title field (✍️ goes back to the library), and use **File** for new documents, copies, import, export and moving it to the trash.
 - **Theme:** use the theme button for System, Light or Dark. The choice is remembered per browser and applied before first paint.
 - **Guided tours:** the library and welcome tours open on your first visit, unless you start typing or clicking first. Replay them, or take the others, from the **?** button or by pressing `?`.
 
@@ -38,9 +39,19 @@ The library is backed by a small REST API that the same Vite plugin serves:
 | `GET` | `/api/docs/:id/status` | `{ deleted, exists }` |
 | `PATCH` | `/api/docs/:id` | Rename. This writes the title into the live Yjs document, so open editors update immediately |
 | `POST` | `/api/docs/:id/duplicate` | Copy the document's current state as "Copy of …" |
-| `DELETE` | `/api/docs/:id` | Delete. The ID is tombstoned and the server refuses to sync it again, so an open tab can't bring it back |
+| `DELETE` | `/api/docs/:id` | Move to the Trash. Open tabs are disconnected and show a banner with **Restore** |
+| `GET` | `/api/trash` | List the Trash (with `trashedAt` and `purgeAt`) |
+| `POST` | `/api/trash/:id/restore` | Restore from the Trash |
+| `DELETE` | `/api/trash/:id` | Delete forever (only documents in the Trash). The ID is tombstoned, so an open tab can't bring it back |
+| `DELETE` | `/api/trash` | Empty the Trash |
 
-Titles live in the shared Yjs document (`meta.title`) and sync live. Each time the server persists a document, it also updates `.collab-data/index.json` with the title, preview text and edit time.
+Titles live in the shared Yjs document (`meta.title`) and sync live. Each time the server persists a document, it also updates `.collab-data/index.json` with the title, preview text and edit time. Trashed documents keep their file until they are deleted forever; the server checks hourly for ones older than 30 days.
+
+## Backups
+
+When the server starts, and then once a day while it runs, it copies `.collab-data/` to a timestamped folder in `.collab-backups/` (for example `.collab-backups/2026-11-05T09-30-00Z/`) and keeps the newest 14. Set `WRITE_BACKUP_DIR` to keep them somewhere else, such as another disk. Copies are written to a `.partial` folder first and renamed when complete.
+
+To restore, stop the server, replace `.collab-data/` with a snapshot (or copy single `.ydoc` files back along with its `index.json`), then start it again.
 
 ## How collaboration works
 
@@ -73,6 +84,6 @@ src/tours.ts              Tutorial overlays (driver.js)
 ## Scripts
 
 - `bun dev`: dev server with the collaboration server
-- `bun run build`: type-check and production build
+- `bun run build`: type-check and production build. Each page and the large libraries (editor, emoji, KaTeX, syntax highlighting, Yjs, React) are separate chunks, so the library page doesn't download the editor
 - `bun run preview`: serve the build (collaboration included)
 - `bun run lint`: oxlint
