@@ -1,5 +1,11 @@
 /** Client for the document library API served by `server/collab.ts`. */
 
+export type ShareRole = 'editor' | 'viewer'
+/** The caller's role on a document; `owner` is never granted by a share. */
+export type Role = 'owner' | ShareRole
+/** Shares keyed by lowercased email. */
+export type Shares = Record<string, ShareRole>
+
 export type DocMeta = {
   id: string
   title: string
@@ -7,6 +13,12 @@ export type DocMeta = {
   words: number
   createdAt: number
   updatedAt: number
+  /** The owner's email. */
+  owner: string
+  /** The caller's role. */
+  role: Role
+  /** Who the document is shared with: on list items only for the owner, always from `getDoc`. */
+  shares?: Shares
 }
 
 export type TrashedDoc = DocMeta & {
@@ -33,11 +45,24 @@ export class ApiError extends Error {
   }
 }
 
+export type Me = { email: string; mode: 'access' | 'dev' }
+
+/** The signed-in user and the auth mode. */
+export const getMe = () => request<Me>('', undefined, '/api/me')
+
+/** My documents plus Shared with me: every open document the caller owns or has a share on. */
 export const listDocs = () => request<{ docs: DocMeta[] }>('').then((r) => r.docs)
 
-export const getDoc = (id: string) => request<DocMeta>(`/${encodeURIComponent(id)}`)
+/** One document, with its owner and shares (everyone with access sees who has access). 404 for No access. */
+export const getDoc = (id: string) => request<DocMeta & { shares: Shares }>(`/${encodeURIComponent(id)}`)
 
-export type DocStatus = { deleted: boolean; trashed: boolean; exists: boolean }
+/**
+ * `access` is the caller's role, or `none` (No access, which reveals nothing more). Only people
+ * who had a role learn why a document closed: the owner of a trashed document gets
+ * `{ access: 'owner', trashed: true }`, a collaborator on one `{ access: 'none', trashed: true }`,
+ * and the former owner of a purged one `{ access: 'none', deleted: true }`.
+ */
+export type DocStatus = { access: Role | 'none'; trashed: boolean; deleted: boolean }
 
 export const getDocStatus = (id: string) => request<DocStatus>(`/${encodeURIComponent(id)}/status`)
 
@@ -49,7 +74,23 @@ export const renameDoc = (id: string, title: string) =>
 /** Moves a document to the Trash; it can be restored for 30 days. */
 export const trashDoc = (id: string) => request<void>(`/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
+/** Copies a document (any role may); the copy is the caller's, with no shares. */
 export const duplicateDoc = (id: string) => request<DocMeta>(`/${encodeURIComponent(id)}/duplicate`, { method: 'POST' })
+
+const sharePath = (id: string, email: string) => `/${encodeURIComponent(id)}/shares/${encodeURIComponent(email)}`
+
+/**
+ * Shares a document with `email`, or changes their role (owner only). Fails with 400 for an
+ * invalid email or the owner's own, and 409 past 50 shares. Resolves to the document with its shares.
+ */
+export const shareDoc = (id: string, email: string, role: ShareRole) =>
+  request<DocMeta & { shares: Shares }>(sharePath(id, email), { method: 'PUT', body: JSON.stringify({ role }) })
+
+/** Removes someone's share (owner only). */
+export const unshareDoc = (id: string, email: string) => request<void>(sharePath(id, email), { method: 'DELETE' })
+
+/** Remove from my list: a collaborator deletes their own share. */
+export const removeFromMyList = (id: string, myEmail: string) => unshareDoc(id, myEmail)
 
 const trash = <T>(path: string, init?: RequestInit) => request<T>(path, init, '/api/trash')
 
@@ -73,7 +114,7 @@ export async function restoreOrConfirmOpen(id: string): Promise<void> {
     await restoreDoc(id)
   } catch (error) {
     const status = await getDocStatus(id).catch(() => null)
-    if (status && status.exists && !status.trashed && !status.deleted) return
+    if (status && status.access === 'owner' && !status.trashed) return
     throw error
   }
 }

@@ -3,7 +3,7 @@ import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getDocStatus, libraryUrl, restoreOrConfirmOpen, trashUrl } from '../api'
+import { getDocStatus, libraryUrl, restoreOrConfirmOpen, trashUrl, type DocStatus } from '../api'
 import { EditorMenus } from '../components/EditorMenus'
 import { Header, type ViewOptions } from '../components/Header'
 import { Sidebar, type EditorEvent } from '../components/Sidebar'
@@ -57,11 +57,11 @@ function useInitialSync(session: Session): { ready: boolean; empty: boolean } {
   return state
 }
 
-/** Trashed and deleted documents are closed: the server refuses to sync them. */
-type Closed = 'trashed' | 'deleted'
+/** Trashed, deleted and inaccessible documents are closed: the server refuses to sync them. */
+type Closed = 'trashed' | 'deleted' | 'none'
 
-const closedState = (status: { deleted: boolean; trashed: boolean }): Closed | null =>
-  status.deleted ? 'deleted' : status.trashed ? 'trashed' : null
+const closedState = (status: DocStatus): Closed | null =>
+  status.deleted ? 'deleted' : status.trashed ? 'trashed' : status.access === 'none' ? 'none' : null
 
 /** Whether the document is open, in the Trash, or deleted forever. */
 function useClosed(name: string): Closed | 'open' | undefined {
@@ -116,6 +116,16 @@ export function DocumentPage({ name, templateId }: DocumentPageProps) {
             Open the trash
           </a>
         </div>
+      </div>
+    )
+  }
+  if (state === 'none') {
+    return (
+      <div className="loading deleted" role="alert">
+        <p className="deleted-title">This document doesn’t exist or hasn’t been shared with you.</p>
+        <a className="primary-button" href={libraryUrl()}>
+          Back to all documents
+        </a>
       </div>
     )
   }
@@ -329,7 +339,12 @@ function Workspace({ session, template }: { session: Session; template: Template
       />
       {closed && (
         <div className="deleted-banner" role="alert">
-          {closed === 'trashed' ? 'This document was moved to the trash.' : 'This document was deleted.'} Your view
+          {closed === 'trashed'
+            ? 'This document was moved to the trash.'
+            : closed === 'deleted'
+              ? 'This document was deleted.'
+              : 'You no longer have access to this document.'}{' '}
+          Your view
           is read-only and changes are no longer saved.{' '}
           {closed === 'trashed' && (
             <>
