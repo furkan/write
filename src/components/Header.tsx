@@ -37,10 +37,11 @@ function download(filename: string, content: string, type: string) {
 }
 
 /** Google Docs-style title field bound to the shared document's `meta.title`. */
-function TitleField({ session }: { session: Session }) {
+function TitleField({ session, readOnly }: { session: Session; readOnly: boolean }) {
   const title = useDocTitle(session)
   return (
     <input
+      readOnly={readOnly}
       className="title-input"
       data-tour="title"
       aria-label="Document title"
@@ -85,7 +86,8 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
     try {
       await deleteDoc(session.name)
     } catch {
-      // Already gone (or never saved): fall through to the library either way.
+      window.alert('Could not delete the document. Is the server running? Nothing was deleted.')
+      return
     }
     window.location.assign(libraryUrl())
   }
@@ -136,7 +138,7 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
           </span>
           <span className="visually-hidden">All documents</span>
         </a>
-        <TitleField session={session} />
+        <TitleField session={session} readOnly={view.readOnly} />
       </div>
 
       <div className="header-actions">

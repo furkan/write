@@ -2,7 +2,7 @@ import { Database } from '@hocuspocus/extension-database'
 import { Server } from '@hocuspocus/server'
 import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { Connect, Plugin } from 'vite'
 import * as Y from 'yjs'
@@ -58,39 +58,83 @@ export type DocMeta = {
 
 type IndexFile = { docs: Record<string, Omit<DocMeta, 'id'>>; deleted: string[] }
 
-let index: IndexFile = { docs: {}, deleted: [] }
-let indexWrite = Promise.resolve()
+// Vite re-imports this module when its config changes, but the collaboration server (and
+// its store hook) lives on, so the index must be shared across module instances too.
+type IndexState = {
+  docs: IndexFile['docs']
+  deleted: Set<string>
+  loaded: boolean
+  write: Promise<void>
+  pending?: ReturnType<typeof setTimeout>
+}
+const stateKey = Symbol.for('write.docIndex')
+const shared = globalThis as typeof globalThis & { [stateKey]?: IndexState }
+const indexState: IndexState = (shared[stateKey] ??= {
+  docs: {},
+  deleted: new Set(),
+  loaded: false,
+  write: Promise.resolve(),
+})
+const { docs, deleted } = indexState
 
 async function loadIndex() {
+  if (indexState.loaded) return
+  indexState.loaded = true
+  // Remove temp files left by writes that were interrupted (the originals are intact).
+  for (const name of await readdir(DATA_DIR)) {
+    if (name.endsWith('.tmp')) await rm(join(DATA_DIR, name), { force: true })
+  }
   try {
     const parsed = JSON.parse(await readFile(INDEX_FILE, 'utf8')) as Partial<IndexFile>
-    index = { docs: parsed.docs ?? {}, deleted: parsed.deleted ?? [] }
+    Object.assign(docs, parsed.docs ?? {})
+    for (const id of parsed.deleted ?? []) deleted.add(id)
   } catch {
-    index = { docs: {}, deleted: [] }
+    // No index yet.
   }
 }
 
-function saveIndex() {
-  // Serialise writes so concurrent updates can't interleave.
-  indexWrite = indexWrite.then(() => writeAtomic(INDEX_FILE, JSON.stringify(index, null, 2))).catch(() => undefined)
-  return indexWrite
+/** Writes the index now. Writes are serialised; a failure rejects for this caller only. */
+function saveIndex(): Promise<void> {
+  clearTimeout(indexState.pending)
+  indexState.pending = undefined
+  const write = indexState.write.then(() =>
+    writeAtomic(INDEX_FILE, JSON.stringify({ docs, deleted: [...deleted] } satisfies IndexFile, null, 2)),
+  )
+  indexState.write = write.catch(() => undefined)
+  return write
 }
 
-const isDeleted = (id: string) => index.deleted.includes(id)
+/** Coalesces frequent index updates (document stores while people type) into one write. */
+function scheduleIndexSave() {
+  if (indexState.pending) return
+  indexState.pending = setTimeout(() => void saveIndex().catch(() => undefined), 1000)
+}
 
-/** Plain text of a Yjs document's editor content, with block boundaries kept as spaces. */
+const isDeleted = (id: string) => deleted.has(id)
+
+/**
+ * Plain text of a Yjs document's editor content. Walks the Yjs tree rather than parsing
+ * `toString()`, which neither escapes text nor keeps words together across marks.
+ */
 function extractText(doc: Y.Doc) {
-  return doc
-    .getXmlFragment('default')
-    .toString()
-    .replace(/<\/[^>]+>/g, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const parts: string[] = []
+  const walk = (node: Y.XmlFragment | Y.XmlElement) => {
+    for (const child of node.toArray()) {
+      if (child instanceof Y.XmlText) {
+        for (const op of child.toDelta() as { insert: unknown }[]) {
+          if (typeof op.insert === 'string') parts.push(op.insert)
+        }
+      } else if (child instanceof Y.XmlElement) {
+        const label = child.getAttribute('label')
+        if (child.nodeName === 'mention' && typeof label === 'string') parts.push(`@${label}`)
+        walk(child)
+        // Block boundaries become spaces; inline nodes (mentions, emoji, math) too.
+        parts.push(' ')
+      }
+    }
+  }
+  walk(doc.getXmlFragment('default'))
+  return parts.join('').replace(/\s+/g, ' ').trim()
 }
 
 const getTitle = (doc: Y.Doc) => {
@@ -100,18 +144,17 @@ const getTitle = (doc: Y.Doc) => {
 
 function updateIndexFromDoc(id: string, doc: Y.Doc) {
   const text = extractText(doc)
-  const existing = index.docs[id]
-  index.docs[id] = {
+  const existing = docs[id]
+  docs[id] = {
     title: getTitle(doc),
     preview: text.slice(0, 400),
     words: text ? text.split(' ').length : 0,
     createdAt: existing?.createdAt ?? Date.now(),
     updatedAt: Date.now(),
   }
-  return saveIndex()
 }
 
-const toMeta = (id: string): DocMeta => ({ id, ...index.docs[id] })
+const toMeta = (id: string): DocMeta => ({ id, ...docs[id] })
 
 const newId = () => randomBytes(9).toString('base64url')
 
@@ -146,7 +189,13 @@ function ensureServer(port: number): Promise<Server> {
           store: async ({ documentName, state, document }) => {
             if (isDeleted(documentName)) return
             await writeAtomic(fileFor(documentName), state)
-            await updateIndexFromDoc(documentName, document)
+            // A DELETE may have landed while the file was being written.
+            if (isDeleted(documentName)) {
+              await rm(fileFor(documentName), { force: true })
+              return
+            }
+            updateIndexFromDoc(documentName, document)
+            scheduleIndexSave()
           },
         }),
       ],
@@ -198,18 +247,19 @@ async function currentState(server: Server, id: string) {
 
 function createApi(port: number): Connect.NextHandleFunction {
   return async (req, res, next) => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    // Mounted at /api/docs, so paths here are "/", "/:id" or "/:id/duplicate".
-    const [id, action] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
     try {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      // Mounted at /api/docs, so paths here are "/", "/:id", "/:id/status" or "/:id/duplicate".
+      // Decoding is inside the try: a malformed escape (e.g. %E0) must not crash the server.
+      const [id, action] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
       const server = await ensureServer(port)
 
       if (!id && req.method === 'GET') {
-        const docs = Object.keys(index.docs)
+        const list = Object.keys(docs)
           .filter((docId) => !isDeleted(docId))
           .map(toMeta)
           .sort((a, b) => b.updatedAt - a.updatedAt)
-        return send(res, 200, { docs })
+        return send(res, 200, { docs: list })
       }
 
       if (!id && req.method === 'POST') {
@@ -220,7 +270,7 @@ function createApi(port: number): Connect.NextHandleFunction {
         if (title) doc.getMap('meta').set('title', title)
         await writeAtomic(fileFor(docId), Y.encodeStateAsUpdate(doc))
         const now = Date.now()
-        index.docs[docId] = { title, preview: '', words: 0, createdAt: now, updatedAt: now }
+        docs[docId] = { title, preview: '', words: 0, createdAt: now, updatedAt: now }
         await saveIndex()
         return send(res, 201, toMeta(docId))
       }
@@ -229,28 +279,32 @@ function createApi(port: number): Connect.NextHandleFunction {
 
       // Always 200, so opening a brand-new or deleted document doesn't log a failed request.
       if (action === 'status' && req.method === 'GET') {
-        return send(res, 200, { deleted: isDeleted(id), exists: Boolean(index.docs[id]) })
+        return send(res, 200, { deleted: isDeleted(id), exists: Boolean(docs[id]) })
       }
 
       if (isDeleted(id)) return send(res, 410, { error: 'deleted' })
 
       if (!action && req.method === 'GET') {
-        return index.docs[id] ? send(res, 200, toMeta(id)) : send(res, 404, { error: 'not found' })
+        return docs[id] ? send(res, 200, toMeta(id)) : send(res, 404, { error: 'not found' })
       }
 
       if (!action && req.method === 'PATCH') {
-        if (!index.docs[id]) return send(res, 404, { error: 'not found' })
         const title = cleanTitle((await readJson(req)).title)
         await setTitle(server, id, title)
-        index.docs[id] = { ...index.docs[id], title, updatedAt: Date.now() }
+        // Documents opened by a raw ?doc= link may not be indexed yet; index them now.
+        const state = await currentState(server, id)
+        const doc = new Y.Doc()
+        if (state) Y.applyUpdate(doc, state)
+        updateIndexFromDoc(id, doc)
+        docs[id] = { ...docs[id], title }
         await saveIndex()
         return send(res, 200, toMeta(id))
       }
 
+      // Deletes work for any document name, indexed or not, and are permanent (tombstoned).
       if (!action && req.method === 'DELETE') {
-        if (!index.docs[id]) return send(res, 404, { error: 'not found' })
-        index.deleted.push(id)
-        delete index.docs[id]
+        deleted.add(id)
+        delete docs[id]
         await saveIndex()
         server.hocuspocus.closeConnections(id)
         await rm(fileFor(id), { force: true })
@@ -258,20 +312,22 @@ function createApi(port: number): Connect.NextHandleFunction {
       }
 
       if (action === 'duplicate' && req.method === 'POST') {
-        if (!index.docs[id]) return send(res, 404, { error: 'not found' })
-        const doc = new Y.Doc()
         const state = await currentState(server, id)
+        if (!state && !docs[id]) return send(res, 404, { error: 'not found' })
+        const doc = new Y.Doc()
         if (state) Y.applyUpdate(doc, state)
         const sourceTitle = getTitle(doc) || extractText(doc).slice(0, 60) || 'Untitled document'
         doc.getMap('meta').set('title', `Copy of ${sourceTitle}`)
         const copyId = newId()
         await writeAtomic(fileFor(copyId), Y.encodeStateAsUpdate(doc))
-        await updateIndexFromDoc(copyId, doc)
+        updateIndexFromDoc(copyId, doc)
+        await saveIndex()
         return send(res, 201, toMeta(copyId))
       }
 
       return next()
     } catch (error) {
+      if (error instanceof URIError) return send(res, 400, { error: 'bad request' })
       return send(res, 500, { error: error instanceof Error ? error.message : 'error' })
     }
   }
@@ -284,7 +340,10 @@ async function attach(
 ) {
   middlewares.use('/api/docs', createApi(port))
   const server = await ensureServer(port)
-  httpServer?.once('close', () => server.hocuspocus.flushPendingStores())
+  httpServer?.once('close', () => {
+    server.hocuspocus.flushPendingStores()
+    void saveIndex().catch(() => undefined)
+  })
 }
 
 export function collabServer({ port }: { port: number }): Plugin {

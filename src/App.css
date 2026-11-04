@@ -116,6 +116,20 @@
   border-radius: 8px;
 }
 
+.deleted-banner {
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  text-align: center;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.deleted-banner a {
+  color: inherit;
+  font-weight: 600;
+}
+
 .loading.deleted {
   flex-direction: column;
 }

@@ -449,6 +449,9 @@ export const toursFor = (scope: Tour['scope']) =>
 
 export function startTour(id: TourId) {
   const tour = TOURS[id]
+  // Skip steps whose element isn't on the page right now (e.g. an empty library or a
+  // hidden sidebar), instead of showing a floating card about something that isn't there.
+  const steps = tour.steps.filter((step) => typeof step.element !== 'string' || document.querySelector(step.element))
   const instance = driver({
     showProgress: true,
     animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -460,7 +463,7 @@ export function startTour(id: TourId) {
     nextBtnText: 'Next →',
     prevBtnText: '← Back',
     doneBtnText: 'Done',
-    steps: tour.steps,
+    steps,
     onDestroyed: () => {
       if (id === 'welcome' || id === 'library') writeStorage(seenKey(id), '1')
     },

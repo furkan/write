@@ -197,9 +197,6 @@ function Workspace({ session, template }: { session: Session; template: Template
     }
   }, [editor])
 
-  useEffect(() => {
-    editor.setEditable(!view.readOnly)
-  }, [editor, view.readOnly])
 
   useEffect(() => {
     editor.commands.showInvisibleCharacters(view.invisibles)
@@ -225,6 +222,38 @@ function Workspace({ session, template }: { session: Session; template: Template
 
   const presence = usePresence(session.provider)
   const status = useConnectionStatus(session.provider)
+
+  // If the server stops accepting this document, check whether it was deleted
+  // (by someone else, or in another tab) rather than showing "Offline" forever.
+  const [deletedWhileOpen, setDeletedWhileOpen] = useState(false)
+  useEffect(() => {
+    const { provider } = session
+    let cancelled = false
+    let lastCheck = 0
+    // The provider retries rejected connections in a loop; check at most every 3 s.
+    const onClose = () => {
+      if (Date.now() - lastCheck < 3000) return
+      lastCheck = Date.now()
+      getDocStatus(session.name)
+        .then((s) => !cancelled && s.deleted && setDeletedWhileOpen(true))
+        .catch(() => undefined)
+    }
+    provider.on('close', onClose)
+    return () => {
+      cancelled = true
+      provider.off('close', onClose)
+    }
+  }, [session])
+
+  useEffect(() => {
+    if (!deletedWhileOpen) return
+    session.provider.destroy()
+    editor.setEditable(false)
+  }, [deletedWhileOpen, editor, session.provider])
+
+  useEffect(() => {
+    editor.setEditable(!view.readOnly && !deletedWhileOpen)
+  }, [editor, view.readOnly, deletedWhileOpen])
   const title = useDocTitle(session)
 
   useEffect(() => {
@@ -250,12 +279,18 @@ function Workspace({ session, template }: { session: Session; template: Template
         editor={editor}
         session={session}
         presence={presence}
-        view={view}
+        view={deletedWhileOpen ? { ...view, readOnly: true } : view}
         onViewChange={(next) => setView((prev) => ({ ...prev, ...next }))}
       />
+      {deletedWhileOpen && (
+        <div className="deleted-banner" role="alert">
+          This document was deleted. Your view is read-only and changes are no longer saved.{' '}
+          <a href={libraryUrl()}>Back to all documents</a>
+        </div>
+      )}
       <div className="workspace">
         <main className="main">
-          <Toolbar editor={editor} readOnly={view.readOnly} />
+          <Toolbar editor={editor} readOnly={view.readOnly || deletedWhileOpen} />
           <div className="editor-shell" data-tour="editor">
             <EditorContent editor={editor} className="editor" />
             <EditorMenus editor={editor} />
