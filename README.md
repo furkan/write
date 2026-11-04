@@ -13,9 +13,9 @@ Open the URL Vite prints. The server listens on every interface, so other device
 
 `bun dev` runs in **Dev mode**: there is no sign-in, and you are `dev@localhost` (or `WRITE_DEV_USER`, or whoever the `write-dev-user` cookie names, so you can try several users in one browser). `bun run preview` runs in **Access mode** (see [Running the pilot](#running-the-pilot-access-mode)). Settings are `WRITE_*` environment variables, all listed in [`.env.example`](.env.example); they can also go in a `.env.local` file. Both ports are fixed: if the app port or the collaboration port is taken, startup stops with an error instead of moving to another port.
 
-- **Library:** the home page lists every document. Start one from a template (Blank, Feature tour, Meeting notes, Project brief, Journal), then search, sort, switch between grid and list, rename, copy or move to the trash.
+- **Library:** the home page lists your documents and the ones shared with you. Start one from a template (Blank, Feature tour, Meeting notes, Project brief, Journal), then search, sort, switch between grid and list, rename, copy or move to the trash.
 - **Trash:** deleting moves a document to the Trash (with an **Undo** button right after). Restore it from the Trash for 30 days; after that it is deleted forever. You can also delete forever or empty the Trash by hand.
-- **Documents:** each opens at `?doc=<id>`. Everyone with the link edits together. Rename it in the title field (✍️ goes back to the library), and use **File** for new documents, copies, import, export and moving it to the trash.
+- **Documents:** each opens at `?doc=<id>`, for its owner and the people it is shared with (editors edit together; viewers read). Rename it in the title field (✍️ goes back to the library), and use **File** for new documents, copies, import, export and moving it to the trash.
 - **Theme:** use the theme button for System, Light or Dark. The choice is remembered per browser and applied before first paint.
 - **Guided tours:** the library and welcome tours open on your first visit, unless you start typing or clicking first. Replay them, or take the others, from the **?** button or by pressing `?`.
 
@@ -32,25 +32,34 @@ Open the URL Vite prints. The server listens on every interface, so other device
 
 ## Document library
 
-The library is backed by a small REST API that the same Vite plugin serves:
+The library is backed by a small REST API that the same Vite plugin serves. Every document has one **Owner** (whoever created it) and a list of **Shares** (`email → editor | viewer`); see [`GLOSSARY.md`](GLOSSARY.md) for the terms.
 
-| Method | Path | |
-| --- | --- | --- |
-| `GET` | `/api/me` | `{ email, mode }`: the signed-in user and the auth mode (`access` or `dev`) |
-| `GET` | `/api/docs` | List documents (title, preview text, word count, timestamps) |
-| `POST` | `/api/docs` | Create a document (optional `title`) |
-| `GET` | `/api/docs/:id/status` | `{ deleted, trashed, exists }` |
-| `PATCH` | `/api/docs/:id` | Rename. This writes the title into the live Yjs document, so open editors update immediately |
-| `POST` | `/api/docs/:id/duplicate` | Copy the document's current state as "Copy of …" |
-| `DELETE` | `/api/docs/:id` | Move to the Trash. Open tabs are disconnected and show a banner with **Restore** |
-| `GET` | `/api/trash` | List the Trash (with `trashedAt` and `purgeAt`) |
-| `POST` | `/api/trash/:id/restore` | Restore from the Trash |
-| `DELETE` | `/api/trash/:id` | Delete forever (only documents in the Trash). The ID is tombstoned, so an open tab can't bring it back |
-| `DELETE` | `/api/trash` | Empty the Trash: deletes forever the IDs in the body (`{ "ids": [...] }`), so anything trashed after the caller looked is kept |
+| Method | Path | Who | |
+| --- | --- | --- | --- |
+| `GET` | `/api/me` | anyone | `{ email, mode }`: the signed-in user and the auth mode (`access` or `dev`) |
+| `GET` | `/api/docs` | anyone | Your open documents plus those shared with you (title, preview, word count, timestamps, `owner`, your `role`; `shares` only on your own) |
+| `POST` | `/api/docs` | anyone | Create a document (optional `title`), owned by you with no shares. The only way to create one |
+| `GET` | `/api/docs/:id` | any role | The document with `owner`, your `role` and its `shares` |
+| `GET` | `/api/docs/:id/status` | anyone | `{ access, trashed, deleted }`; `access` is `owner`, `editor`, `viewer` or `none`. Always 200. See below |
+| `PATCH` | `/api/docs/:id` | owner, editor | Rename. This writes the title into the live Yjs document, so open editors update immediately |
+| `POST` | `/api/docs/:id/duplicate` | any role | Copy the document's current state as "Copy of …", owned by you with no shares |
+| `DELETE` | `/api/docs/:id` | owner | Move to the Trash. Shares stay but are inactive; open tabs are disconnected |
+| `PUT` | `/api/docs/:id/shares/:email` | owner | Share with `email` or change their role. Body `{ "role": "editor" \| "viewer" }`. The email is lowercased; 400 for an invalid email or the owner's own, 409 past 50 shares |
+| `DELETE` | `/api/docs/:id/shares/:email` | owner, or that user | Unshare, or **Remove from my list** when it is your own email |
+| `GET` | `/api/trash` | anyone | Your own Trash (with `trashedAt` and `purgeAt`) |
+| `POST` | `/api/trash/:id/restore` | owner | Restore from the Trash; its shares become active again |
+| `DELETE` | `/api/trash/:id` | owner | Delete forever (only documents in the Trash), with its shares. The ID is tombstoned, so an open tab can't bring it back |
+| `DELETE` | `/api/trash` | anyone | Empty your Trash: deletes forever the IDs in the body (`{ "ids": [...] }`) that are your own trashed documents, so anything trashed after you looked, or anyone else's, is kept |
 
 Every `/api/*` request needs an identity (401 without one). Requests other than `GET` and `HEAD` also need an `Origin` header matching the request's `Host` (or one of `WRITE_ALLOWED_ORIGINS`), otherwise they get 403.
 
-Titles live in the shared Yjs document (`meta.title`) and sync live. Each time the server persists a document, it also updates `.collab-data/index.json` with the title, preview text and edit time. Trashed documents keep their file until they are deleted forever; the server checks hourly for ones older than 30 days.
+**No access looks like not found.** Every handler resolves your role on the document before doing anything else. Without one, every route answers 404 (and the collaboration socket `permission-denied`), the same whether the document never existed, is someone else's, is in someone's Trash or was deleted forever, so IDs leak nothing. With a role that doesn't allow the action (a viewer renaming, an editor trashing) you get 403. `status` tells only people who had a role why a document closed: its owner sees `{ access: "owner", trashed: true }` for a trashed document, a collaborator `{ access: "none", trashed: true }`, and the former owner of a purged one `{ access: "none", deleted: true }`; everyone else gets `{ access: "none", trashed: false, deleted: false }`.
+
+**The collaboration socket** opens only documents in the index, for users with a role: a `?doc=` name nobody created is refused rather than created. A viewer's connection is read-only, enforced by the server, which drops their updates. Whenever access to a document changes (share, unshare, role change, trash, restore, delete forever), the server closes every socket on that document; clients reconnect, are authorized again with their new role, and Yjs merges anything they had not synced.
+
+Titles live in the shared Yjs document (`meta.title`) and sync live. Each time the server persists a document, it also updates `index.json` in the data dir with the title, preview text and edit time. `index.json` (version 2) also holds each document's `owner` and `shares`, and the tombstones with their former owner. Trashed documents keep their file until they are deleted forever; the server checks hourly for ones older than 30 days.
+
+**Upgrading from an index without owners** (version 1): on first start, the server takes a backup snapshot, gives every document without an owner to the Legacy owner, `WRITE_OWNER_EMAIL`, and rewrites the index as version 2. In Dev mode `WRITE_OWNER_EMAIL` defaults to the dev identity (`WRITE_DEV_USER`, else `dev@localhost`); in Access mode the server refuses to start while ownerless documents exist and it is unset. `.ydoc` files with no index entry are left on disk and never served. After pulling this change, stop and start the server: Vite's automatic in-process restart can't replace a running collaboration server, and fails on the busy collaboration port.
 
 ## Identity
 
@@ -61,7 +70,7 @@ Titles live in the shared Yjs document (`meta.title`) and sync live. Each time t
 
 The same check runs on every collaboration connection, in Hocuspocus's `onAuthenticate`, using the WebSocket upgrade's headers (Vite's `/collab` proxy passes them through). It runs there rather than in the proxy because Hocuspocus listens on `127.0.0.1`, which any local process can reach directly. Collaboration connections also need a same-origin `Origin`, which stops other sites from opening a socket with the user's cookie.
 
-Each authentication failure is logged as one JSON line on stdout, such as `{"audit":"auth_fail","status":401,"reason":"ERR_JWT_EXPIRED","via":"api",...}`.
+Each security event is logged as one JSON line on stdout, such as `{"audit":"auth_fail","status":401,"reason":"ERR_JWT_EXPIRED","via":"api",...}`: `auth_fail`, `create`, `share`, `role_change`, `unshare`, `trash`, `restore`, `purge` (with `actor`: the user, or `expiry` for the 30-day cleanup) and `migration`.
 
 ## Running the pilot (Access mode)
 

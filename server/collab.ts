@@ -1,5 +1,5 @@
 import { Database } from '@hocuspocus/extension-database'
-import { Server } from '@hocuspocus/server'
+import { Server, type Connection } from '@hocuspocus/server'
 import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -12,12 +12,25 @@ import {
   fetchHeaders,
   identifyRequest,
   nodeHeaders,
+  normalizeEmail,
   type Authenticator,
   type HeaderGetter,
   type Identity,
   type User,
 } from './auth.ts'
 import { describeConfig, type WriteConfig } from './config.ts'
+import {
+  canEdit,
+  isShareRole,
+  isValidEmail,
+  MAX_SHARES,
+  roleOf,
+  sanitizeShares,
+  shareOf,
+  statusFor,
+  type Role,
+  type Shares,
+} from './roles.ts'
 
 /**
  * Runs a Hocuspocus (Yjs) collaboration server next to the Vite dev/preview server,
@@ -26,10 +39,13 @@ import { describeConfig, type WriteConfig } from './config.ts'
  * The collaboration server only listens on 127.0.0.1; browsers reach it through Vite's
  * `/collab` WebSocket proxy, so everything — including Tailscale access — uses one port.
  * Documents are persisted as Yjs updates in the data dir (`WRITE_DATA_DIR`, default
- * `.collab-data/`), with an `index.json` holding each document's title, preview text and timestamps.
+ * `.collab-data/`), with an `index.json` holding each document's title, preview text, timestamps,
+ * Owner and Shares.
  *
  * Every `/api/*` request and every collaboration connection is identified first (see
  * `server/auth.ts`): Access mode verifies the Cloudflare Access JWT, Dev mode trusts a cookie.
+ * Then the caller's role on the document is resolved (`server/roles.ts`): No access is a 404 or
+ * `permission-denied`, and a viewer's collaboration connection is read-only.
  *
  * Deleting a document moves it to the Trash, where it can be restored for 30 days. A daily
  * snapshot of the data dir is copied to the backup dir (`WRITE_BACKUP_DIR`, default `.collab-backups/`).
@@ -46,11 +62,13 @@ const BACKUPS_TO_KEEP = 14
 
 // Document names come from the URL (`?doc=`). Keep a readable, filesystem-safe prefix and add
 // a hash of the full name so different names never share a file.
-const fileFor = (documentName: string) => {
+export const docFileName = (documentName: string) => {
   const readable = documentName.replace(/[^\w-]/g, '_').slice(0, 60) || 'doc'
   const hash = createHash('sha256').update(documentName).digest('hex').slice(0, 12)
-  return join(dirs().data, `${readable}-${hash}.ydoc`)
+  return `${readable}-${hash}.ydoc`
 }
+
+const fileFor = (documentName: string) => join(dirs().data, docFileName(documentName))
 
 async function readState(documentName: string): Promise<Uint8Array | null> {
   try {
@@ -69,8 +87,8 @@ async function writeAtomic(path: string, data: string | Uint8Array) {
 
 // ---------- Document index ----------
 
-export type DocMeta = {
-  id: string
+/** One document in `index.json` (version 2): its library metadata, Owner and Shares. */
+type IndexEntry = {
   title: string
   preview: string
   words: number
@@ -78,26 +96,48 @@ export type DocMeta = {
   updatedAt: number
   /** Set while the document is in the Trash. */
   trashedAt?: number
+  owner: string
+  shares: Shares
 }
 
-type IndexFile = { docs: Record<string, Omit<DocMeta, 'id'>>; deleted: string[] }
+/** A library item as the API returns it. `shares` is only included for the owner (and in `GET /:id`). */
+export type DocMeta = Omit<IndexEntry, 'owner' | 'shares'> & {
+  id: string
+  owner: string
+  /** The caller's role. */
+  role: Role
+  shares?: Shares
+}
+
+const INDEX_VERSION = 2
+
+type IndexFile = {
+  version: typeof INDEX_VERSION
+  docs: Record<string, IndexEntry>
+  /** Tombstones: each purged ID with the email of its former owner. */
+  deleted: Record<string, string>
+}
 
 // Vite re-imports this module when its config changes, but the collaboration server (and
 // its store hook) lives on, so the index must be shared across module instances too.
+// (`v2`: an older module's state has a different shape, so a server started before
+// ownership existed is never reused; restart the process after upgrading.)
 type IndexState = {
   /** Set from the plugin options when the collaboration server starts. */
   dirs?: { data: string; backups: string }
-  docs: IndexFile['docs']
-  deleted: Set<string>
+  /** Null-prototype, so IDs like `constructor` never match a built-in property. */
+  docs: Record<string, IndexEntry>
+  /** Tombstones: purged ID → former owner. */
+  deleted: Map<string, string>
   loaded: boolean
   write: Promise<void>
   pending?: ReturnType<typeof setTimeout>
 }
-const stateKey = Symbol.for('write.docIndex')
+const stateKey = Symbol.for('write.docIndex.v2')
 const shared = globalThis as typeof globalThis & { [stateKey]?: IndexState }
 const indexState: IndexState = (shared[stateKey] ??= {
-  docs: {},
-  deleted: new Set(),
+  docs: Object.create(null) as Record<string, IndexEntry>,
+  deleted: new Map(),
   loaded: false,
   write: Promise.resolve(),
 })
@@ -110,19 +150,94 @@ function dirs() {
 
 const indexFile = () => join(dirs().data, 'index.json')
 
-async function loadIndex() {
+/** The index entry for an ID, if the document exists (open or trashed). */
+const entryOf = (id: string): IndexEntry | undefined => docs[id]
+
+type RawIndex = {
+  version?: unknown
+  docs?: Record<string, Partial<IndexEntry> & Record<string, unknown>>
+  deleted?: unknown
+}
+
+async function readIndexFile(): Promise<RawIndex | null> {
+  let text: string
+  try {
+    text = await readFile(indexFile(), 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (parsed && typeof parsed === 'object') return parsed as RawIndex
+  } catch {
+    // reported below
+  }
+  // Starting with an empty index would overwrite it and lose every document's owner and shares.
+  throw new Error(`[write] ${indexFile()} is not valid JSON. Fix or restore it from a backup, then restart.`)
+}
+
+/**
+ * Loads `index.json`, migrating a version-1 index (from before ownership) once: a forced backup
+ * snapshot first, then every entry without an owner goes to the Legacy owner (`WRITE_OWNER_EMAIL`)
+ * and the file is rewritten as version 2. Throws, so the server refuses to start, when ownerless
+ * documents exist and no Legacy owner is configured (Access mode without `WRITE_OWNER_EMAIL`).
+ * `.ydoc` files with no index entry stay on disk and are never served.
+ */
+async function loadIndex(config: WriteConfig) {
   if (indexState.loaded) return
-  indexState.loaded = true
   // Remove temp files left by writes that were interrupted (the originals are intact).
   for (const name of await readdir(dirs().data)) {
     if (name.endsWith('.tmp')) await rm(join(dirs().data, name), { force: true })
   }
-  try {
-    const parsed = JSON.parse(await readFile(indexFile(), 'utf8')) as Partial<IndexFile>
-    Object.assign(docs, parsed.docs ?? {})
-    for (const id of parsed.deleted ?? []) deleted.add(id)
-  } catch {
-    // No index yet.
+  const raw = await readIndexFile()
+  if (!raw) {
+    indexState.loaded = true
+    return
+  }
+
+  const rawDocs = raw.docs && typeof raw.docs === 'object' ? raw.docs : {}
+  const ownerless = Object.keys(rawDocs).filter((id) => !normalizeEmail(rawDocs[id]?.owner))
+  const legacyOwner = config.ownerEmail
+  if (ownerless.length && (!legacyOwner || !isValidEmail(legacyOwner))) {
+    throw new Error(
+      `[write] ${indexFile()} has ${ownerless.length} document(s) without an owner (from before per-user ` +
+        `access). Set WRITE_OWNER_EMAIL to the email that should own them, then restart.` +
+        (legacyOwner ? ` "${legacyOwner}" is not an email.` : ''),
+    )
+  }
+  const migrating = raw.version !== INDEX_VERSION || ownerless.length > 0
+  // Before changing anything, keep a copy of the data exactly as it was.
+  const snapshot = migrating ? await backup() : undefined
+
+  for (const [id, value] of Object.entries(rawDocs)) {
+    if (!value || typeof value !== 'object') continue
+    const owner = normalizeEmail(value.owner) || (legacyOwner as string)
+    docs[id] = {
+      ...(value as IndexEntry),
+      owner,
+      shares: sanitizeShares(value.shares, owner),
+    }
+  }
+  // Version 1 kept tombstones as a list of IDs, with no owner.
+  if (Array.isArray(raw.deleted)) {
+    for (const id of raw.deleted) if (typeof id === 'string') deleted.set(id, legacyOwner ?? '')
+  } else if (raw.deleted && typeof raw.deleted === 'object') {
+    for (const [id, owner] of Object.entries(raw.deleted)) deleted.set(id, normalizeEmail(owner))
+  }
+  indexState.loaded = true
+
+  if (migrating) {
+    await saveIndex()
+    audit('migration', {
+      from: typeof raw.version === 'number' ? raw.version : 1,
+      to: INDEX_VERSION,
+      owner: ownerless.length ? legacyOwner : null,
+      assigned: ownerless.length,
+      docs: Object.keys(docs).length,
+      tombstones: deleted.size,
+      backup: snapshot,
+    })
   }
 }
 
@@ -130,9 +245,10 @@ async function loadIndex() {
 function saveIndex(): Promise<void> {
   clearTimeout(indexState.pending)
   indexState.pending = undefined
-  const write = indexState.write.then(() =>
-    writeAtomic(indexFile(), JSON.stringify({ docs, deleted: [...deleted] } satisfies IndexFile, null, 2)),
-  )
+  const write = indexState.write.then(() => {
+    const file: IndexFile = { version: INDEX_VERSION, docs, deleted: Object.fromEntries(deleted) }
+    return writeAtomic(indexFile(), JSON.stringify(file, null, 2))
+  })
   indexState.write = write.catch(() => undefined)
   return write
 }
@@ -145,9 +261,10 @@ function scheduleIndexSave() {
 
 /** Deleted forever (tombstoned). */
 const isDeleted = (id: string) => deleted.has(id)
-const isTrashed = (id: string) => docs[id]?.trashedAt !== undefined
-/** Trashed and deleted documents can't be opened or synced. */
-const isClosed = (id: string) => isDeleted(id) || isTrashed(id)
+const isTrashed = (id: string) => entryOf(id)?.trashedAt !== undefined
+
+/** The caller's role on a document they can open now (not trashed or deleted), or null for No access. */
+const roleFor = (id: string, user: User) => roleOf(entryOf(id), user.email)
 
 /**
  * Plain text of a Yjs document's editor content. Walks the Yjs tree rather than parsing
@@ -179,24 +296,39 @@ const getTitle = (doc: Y.Doc) => {
   return typeof title === 'string' ? title.trim() : ''
 }
 
+/** Refreshes an indexed document's title, preview and edit time. Never creates an entry. */
 function updateIndexFromDoc(id: string, doc: Y.Doc) {
+  const existing = entryOf(id)
+  if (!existing) return
   const text = extractText(doc)
-  const existing = docs[id]
-  // Spread the existing entry so other fields (e.g. trashedAt) survive.
+  // Spread the existing entry so other fields (owner, shares, trashedAt) survive.
   docs[id] = {
     ...existing,
     title: getTitle(doc),
     preview: text.slice(0, 400),
     words: text ? text.split(' ').length : 0,
-    createdAt: existing?.createdAt ?? Date.now(),
     updatedAt: Date.now(),
   }
 }
 
-const toMeta = (id: string): DocMeta => ({ id, ...docs[id] })
+/** Adds a new document to the index, owned by `owner`, with no shares. */
+function addEntry(id: string, owner: string, doc: Y.Doc) {
+  const now = Date.now()
+  docs[id] = { title: '', preview: '', words: 0, createdAt: now, updatedAt: now, owner, shares: {} }
+  updateIndexFromDoc(id, doc)
+}
+
+/**
+ * A document as someone with `role` sees it. Shares are listed for the owner, or for anyone
+ * when `withShares` is set (`GET /:id`: everyone with access sees who has access).
+ */
+function toMeta(id: string, role: Role, { withShares = false } = {}): DocMeta {
+  const { shares, ...entry } = docs[id]
+  return { id, ...entry, role, ...(withShares || role === 'owner' ? { shares: { ...shares } } : {}) }
+}
 
 const toTrashed = (id: string) => {
-  const meta = toMeta(id)
+  const meta = toMeta(id, 'owner')
   return { ...meta, purgeAt: (meta.trashedAt ?? 0) + TRASH_RETENTION_MS }
 }
 
@@ -205,7 +337,7 @@ const newId = () => randomBytes(9).toString('base64url')
 // ---------- Collaboration server ----------
 
 /** What Hocuspocus hooks see as `context` once a connection is authenticated. */
-export type CollabContext = { user: User }
+export type CollabContext = { user: User; role: Role }
 
 /** The running collaboration server and the configuration it was started with. */
 type Runtime = {
@@ -259,7 +391,7 @@ function listen(server: Server<CollabContext>, port: number) {
 async function startRuntime(config: WriteConfig): Promise<Runtime> {
   indexState.dirs = { data: config.dataDir, backups: config.backupDir }
   await mkdir(config.dataDir, { recursive: true })
-  await loadIndex()
+  await loadIndex(config)
   const authenticator = createAuthenticator(config.auth)
   const server = new Server<CollabContext>({
     port: config.collabPort,
@@ -274,7 +406,7 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
     // an auth message (an empty token when none is set), so no token is needed on the client: the
     // identity comes from the upgrade request's headers, which Vite's proxy passes through. This
     // check runs here, not in the proxy, because anything on this machine can reach 127.0.0.1.
-    async onAuthenticate({ requestHeaders, documentName }) {
+    async onAuthenticate({ requestHeaders, documentName, connectionConfig }) {
       const header = fetchHeaders(requestHeaders)
       const identity = await identifyRequest(authenticator, header, {
         checkOrigin: true,
@@ -284,16 +416,26 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
         logAuthFailure(identity, { via: 'collab', doc: documentName, ip: clientIp(header) })
         throw new CollabRejection(identity.status === 403 ? 'permission-denied' : 'unauthenticated')
       }
-      // Trashed and deleted documents are closed: refuse connections so an open tab can't
-      // keep editing (or resurrect) one.
-      if (isClosed(documentName)) throw new Error('Document is in the trash or was deleted')
-      return { user: identity.user } satisfies CollabContext
+      // No access looks the same whether the document never existed (only `POST /api/docs`
+      // creates documents, so a `?doc=` name can't), is someone else's, is in the Trash or
+      // was deleted forever.
+      const role = roleFor(documentName, identity.user)
+      if (!role) throw new CollabRejection('permission-denied')
+      // The server drops a viewer's updates (and answers them with "not synced").
+      if (role === 'viewer') connectionConfig.readOnly = true
+      return { user: identity.user, role } satisfies CollabContext
+    },
+    // Access may have changed while this connection was being set up (after onAuthenticate,
+    // before it was registered, so `closeConnections` missed it): check once more.
+    async connected({ documentName, context, connection }) {
+      if (roleFor(documentName, context.user) !== context.role) resetConnection(connection)
     },
     extensions: [
       new Database({
         fetch: ({ documentName }) => readState(documentName),
         store: async ({ documentName, state, document }) => {
-          if (isDeleted(documentName)) return
+          // Only indexed documents are stored, so nothing can bring back a purged one.
+          if (isDeleted(documentName) || !entryOf(documentName)) return
           await writeAtomic(fileFor(documentName), state)
           // A DELETE may have landed while the file was being written.
           if (isDeleted(documentName)) {
@@ -313,7 +455,7 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
 
 // Vite re-imports the config (and this module) when it restarts, so keep the
 // running server on globalThis to avoid binding the port twice.
-const globalKey = Symbol.for('write.collabServer')
+const globalKey = Symbol.for('write.collabServer.v2')
 type GlobalWithServer = typeof globalThis & {
   [globalKey]?: { configJson: string; runtime: Promise<Runtime> }
 }
@@ -346,54 +488,84 @@ async function currentState(server: Server, id: string) {
   return loaded ? Y.encodeStateAsUpdate(loaded) : readState(id)
 }
 
-/** Returns false if there is no such document. */
-async function moveToTrash(server: Server, id: string) {
-  if (isTrashed(id)) return true
-  // Documents opened by a raw ?doc= link may not be indexed yet; index them so they show in the Trash.
-  if (!docs[id]) {
-    const state = await currentState(server, id)
-    if (!state) return false
-    const doc = new Y.Doc()
-    Y.applyUpdate(doc, state)
-    updateIndexFromDoc(id, doc)
-  }
-  docs[id] = { ...docs[id], trashedAt: Date.now() }
-  await saveIndex()
-  // Open tabs get disconnected; their reconnects are refused and they show a "moved to trash" banner.
-  // Hocuspocus stores the latest state as the document unloads, so nothing typed is lost.
-  server.hocuspocus.closeConnections(id)
-  return true
+/** WebSocket close code for "access changed, reconnect" (Hocuspocus's own "Reset Connection"). */
+const RESET_CONNECTION = 4205
+
+/**
+ * Drops every open connection to a document, after any change to who may open it (share,
+ * unshare, role change, trash, restore, purge). Each client reconnects and is authorized
+ * again (ADR 0006); Hocuspocus stores the latest state as the document unloads, and Yjs
+ * merges anything unsynced on reconnect, so nothing typed is lost.
+ *
+ * Hocuspocus's `closeConnections()` only ends the document's session on the socket, and the
+ * provider then stays detached without retrying, so a promoted viewer or a collaborator who
+ * kept access would never sync again. Closing the socket itself makes the provider reconnect
+ * and authenticate afresh, as after a network drop.
+ */
+function closeConnections(server: Server, id: string) {
+  const document = server.hocuspocus.documents.get(id)
+  if (!document) return
+  for (const connection of document.getConnections()) resetConnection(connection)
 }
 
-async function restoreFromTrash(id: string) {
+function resetConnection(connection: Connection) {
+  // Detach from the document first, so nothing more this socket sends is applied to it.
+  connection.close()
+  connection.webSocket.close(RESET_CONNECTION, 'Reset Connection')
+}
+
+/** Moves an open document to the Trash. Its shares stay, inactive, until it is restored. */
+async function moveToTrash(server: Server, id: string, actor: string) {
+  const entry = entryOf(id)
+  if (!entry || entry.trashedAt !== undefined) return
+  docs[id] = { ...entry, trashedAt: Date.now() }
+  await saveIndex()
+  // Open tabs reconnect, are refused, and show a "moved to the trash" banner.
+  closeConnections(server, id)
+  audit('trash', { actor, doc: id, shares: Object.keys(entry.shares).length })
+}
+
+async function restoreFromTrash(server: Server, id: string, actor: string) {
   docs[id] = { ...docs[id], trashedAt: undefined }
   await saveIndex()
+  closeConnections(server, id)
+  audit('restore', { actor, doc: id, shares: Object.keys(docs[id].shares).length })
 }
 
 /**
- * Deletes documents forever; their IDs are tombstoned so they can never be synced again.
- * Only IDs still in the Trash are purged, and that check and the index change happen
- * synchronously, so a document restored a moment earlier is never caught. Returns the purged IDs.
+ * Deletes documents forever, with their shares; their IDs are tombstoned (with the former
+ * owner, so only they are told it was deleted) and can never be synced again. Only IDs still
+ * in the Trash are purged, and that check and the index change happen synchronously, so a
+ * document restored a moment earlier is never caught. Returns the purged IDs.
+ *
+ * @param actor Who asked, or `expiry` for the hourly 30-day cleanup.
  */
-async function purge(server: Server, ids: string[]) {
-  const purged = ids.filter(isTrashed)
+async function purge(server: Server, ids: string[], actor: string) {
+  const purged = [...new Set(ids)].filter(isTrashed)
   if (!purged.length) return purged
-  for (const id of purged) {
-    deleted.add(id)
+  const removed = purged.map((id) => ({ id, entry: docs[id] }))
+  for (const { id, entry } of removed) {
+    deleted.set(id, entry.owner)
     delete docs[id]
   }
   await saveIndex()
-  for (const id of purged) server.hocuspocus.closeConnections(id)
+  for (const id of purged) closeConnections(server, id)
   await Promise.all(purged.map((id) => rm(fileFor(id), { force: true })))
+  for (const { id, entry } of removed) {
+    audit('purge', { actor, doc: id, owner: entry.owner, shares: Object.keys(entry.shares).length })
+  }
   return purged
 }
 
 const trashedIds = () => Object.keys(docs).filter(isTrashed)
 
+/** The caller's own documents in the Trash. */
+const isOwnTrashed = (id: string, user: User) => isTrashed(id) && entryOf(id)?.owner === user.email
+
 function purgeExpired(server: Server) {
   const cutoff = Date.now() - TRASH_RETENTION_MS
   const expired = trashedIds().filter((id) => (docs[id].trashedAt ?? Infinity) <= cutoff)
-  return purge(server, expired)
+  return purge(server, expired, 'expiry')
 }
 
 // ---------- Backups ----------
@@ -409,7 +581,7 @@ async function listSnapshots() {
   }
 }
 
-/** Copies the data dir into a new timestamped folder and keeps the newest few. */
+/** Copies the data dir into a new timestamped folder, keeps the newest few, and returns the new folder. */
 async function backup() {
   const { data, backups } = dirs()
   await mkdir(backups, { recursive: true })
@@ -434,6 +606,7 @@ async function backup() {
   for (const old of snapshots.slice(0, -BACKUPS_TO_KEEP)) {
     await rm(join(backups, old), { recursive: true, force: true })
   }
+  return join(backups, name)
 }
 
 /** Snapshot time from a folder name like 2026-11-05T09-30-00Z. */
@@ -547,11 +720,11 @@ type Handler = (
   req: IncomingMessage,
   res: ServerResponse,
   next: () => void,
-  route: { id?: string; action?: string; server: Server<CollabContext>; user: User },
+  route: { id?: string; action?: string; sub?: string; server: Server<CollabContext>; user: User },
 ) => Promise<void>
 
 /**
- * Parses `/:id/:action`, passes the caller (`user`) and handles errors. A malformed escape
+ * Parses `/:id/:action/:sub`, passes the caller (`user`) and handles errors. A malformed escape
  * (e.g. %E0) must not crash the server.
  */
 function route({ server }: Runtime, handler: Handler): Connect.NextHandleFunction {
@@ -561,8 +734,11 @@ function route({ server }: Runtime, handler: Handler): Connect.NextHandleFunctio
     if (!user) return send(res, 401, { error: 'unauthenticated' })
     try {
       const url = new URL(req.url ?? '/', 'http://localhost')
-      const [id, action] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
-      await handler(req, res, next, { id, action, server, user })
+      const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+      // Longer paths are nobody's route.
+      if (segments.length > 3) return next()
+      const [id, action, sub] = segments
+      await handler(req, res, next, { id, action, sub, server, user })
     } catch (error) {
       // Malformed escapes in the URL or malformed JSON bodies.
       if (error instanceof URIError || error instanceof SyntaxError) return send(res, 400, { error: 'bad request' })
@@ -571,113 +747,193 @@ function route({ server }: Runtime, handler: Handler): Connect.NextHandleFunctio
   }
 }
 
-/** `/api/trash`: list, restore, delete forever, empty. */
+/** No access: the same answer whether the document never existed, is someone else's or was purged (ADR 0003). */
+const notFound = (res: ServerResponse) => send(res, 404, { error: 'not found' })
+
+/** The caller has a role, but not one that allows this. */
+const forbidden = (res: ServerResponse) => send(res, 403, { error: 'forbidden' })
+
+/** `/api/trash`: the caller's own Trash. List, restore, delete forever, empty. */
 const trashApi = (runtime: Runtime) =>
-  route(runtime, async (req, res, next, { id, action, server }) => {
+  route(runtime, async (req, res, next, { id, action, sub, server, user }) => {
+    if (sub) return next()
     if (!id && req.method === 'GET') {
       const list = trashedIds()
+        .filter((docId) => isOwnTrashed(docId, user))
         .map(toTrashed)
         .sort((a, b) => (b.trashedAt ?? 0) - (a.trashedAt ?? 0))
       return send(res, 200, { docs: list, retentionDays: TRASH_RETENTION_MS / DAY })
     }
 
-    // Empties the Trash as the caller saw it: only the IDs listed, so documents someone else
-    // trashed in the meantime are not deleted unseen.
+    // Empties the Trash as the caller saw it: only the IDs listed, so documents trashed in the
+    // meantime are not deleted unseen. IDs that aren't the caller's own trashed documents are skipped.
     if (!id && req.method === 'DELETE') {
       const { ids } = await readJson(req)
       if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) {
         return send(res, 400, { error: 'expected { ids: string[] }' })
       }
-      const purged = await purge(server, ids)
+      const purged = await purge(
+        server,
+        ids.filter((docId) => isOwnTrashed(docId, user)),
+        user.email,
+      )
       return send(res, 200, { purged: purged.length })
     }
 
     if (!id) return next()
-    // Only documents in the Trash can be restored or deleted forever.
-    if (!isTrashed(id)) return send(res, 404, { error: 'not in trash' })
+    // Only the owner's documents in the Trash can be restored or deleted forever.
+    if (!isOwnTrashed(id, user)) return notFound(res)
 
-    if (action === 'restore' && req.method === 'POST') {
-      await restoreFromTrash(id)
-      return send(res, 200, toMeta(id))
+    if (action === 'restore' && !sub && req.method === 'POST') {
+      await restoreFromTrash(server, id, user.email)
+      return send(res, 200, toMeta(id, 'owner'))
     }
 
     if (!action && req.method === 'DELETE') {
-      await purge(server, [id])
+      await purge(server, [id], user.email)
       return send(res, 204)
     }
 
     return next()
   })
 
-/** `/api/docs`: the document library. */
+/** `PUT|DELETE /api/docs/:id/shares/:email`. The caller's role on `id` is `role` (never null). */
+async function sharesRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  { id, target, role, server, user }: { id: string; target: string; role: Role; server: Server; user: User },
+) {
+  const email = normalizeEmail(target)
+  const entry = docs[id]
+
+  // Shares change only through the owner, except that a collaborator may remove their own
+  // ("Remove from my list").
+  if (req.method === 'DELETE') {
+    if (role !== 'owner' && email !== user.email) return forbidden(res)
+    if (shareOf(entry, email)) {
+      const { [email]: removed, ...rest } = entry.shares
+      docs[id] = { ...entry, shares: rest }
+      await saveIndex()
+      closeConnections(server, id)
+      audit('unshare', { actor: user.email, doc: id, email, role: removed, self: email === user.email })
+    }
+    return send(res, 204)
+  }
+
+  if (req.method !== 'PUT') return send(res, 405, { error: 'method not allowed' })
+  if (role !== 'owner') return forbidden(res)
+  const body = await readJson(req)
+  if (!isShareRole(body.role)) return send(res, 400, { error: 'role must be "editor" or "viewer"' })
+  if (!isValidEmail(email)) return send(res, 400, { error: 'invalid email' })
+  // The caller is the owner, so this also covers sharing with yourself.
+  if (email === entry.owner) return send(res, 400, { error: 'the owner already has access' })
+  const previous = shareOf(entry, email)
+  if (!previous && Object.keys(entry.shares).length >= MAX_SHARES) {
+    return send(res, 409, { error: `a document can be shared with at most ${MAX_SHARES} people` })
+  }
+  if (previous !== body.role) {
+    docs[id] = { ...entry, shares: { ...entry.shares, [email]: body.role } satisfies Shares }
+    await saveIndex()
+    // A role change matters to open sockets too: a viewer's connection is read-only.
+    closeConnections(server, id)
+    audit(previous ? 'role_change' : 'share', {
+      actor: user.email,
+      doc: id,
+      email,
+      role: body.role,
+      ...(previous ? { from: previous } : {}),
+    })
+  }
+  return send(res, 200, toMeta(id, 'owner'))
+}
+
+/**
+ * `/api/docs`: the library. Every handler for one document resolves the caller's role first,
+ * before touching the document (in particular before `openDirectConnection` and `currentState`,
+ * which skip the collaboration server's hooks).
+ */
 const docsApi = (runtime: Runtime) =>
-  route(runtime, async (req, res, next, { id, action, server }) => {
+  route(runtime, async (req, res, next, { id, action, sub, server, user }) => {
+    // My documents and Shared with me: open documents the caller owns or has a share on.
     if (!id && req.method === 'GET') {
-      const list = Object.keys(docs)
-        .filter((docId) => !isClosed(docId))
-        .map(toMeta)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
+      const list: DocMeta[] = []
+      for (const docId of Object.keys(docs)) {
+        const role = roleFor(docId, user)
+        if (role) list.push(toMeta(docId, role))
+      }
+      list.sort((a, b) => b.updatedAt - a.updatedAt)
       return send(res, 200, { docs: list })
     }
 
+    // The only way to create a document: it belongs to the caller and has no shares.
     if (!id && req.method === 'POST') {
       const body = await readJson(req)
       const docId = newId()
-      const title = cleanTitle(body.title)
       const doc = new Y.Doc()
+      const title = cleanTitle(body.title)
       if (title) doc.getMap('meta').set('title', title)
       await writeAtomic(fileFor(docId), Y.encodeStateAsUpdate(doc))
-      const now = Date.now()
-      docs[docId] = { title, preview: '', words: 0, createdAt: now, updatedAt: now }
+      addEntry(docId, user.email, doc)
       await saveIndex()
-      return send(res, 201, toMeta(docId))
+      audit('create', { actor: user.email, doc: docId })
+      return send(res, 201, toMeta(docId, 'owner'))
     }
 
     if (!id) return next()
 
-    // Always 200, so opening a brand-new or deleted document doesn't log a failed request.
-    if (action === 'status' && req.method === 'GET') {
-      return send(res, 200, { deleted: isDeleted(id), trashed: isTrashed(id), exists: Boolean(docs[id]) })
+    // Always 200, so opening a document doesn't log a failed request. `none` reveals nothing more.
+    if (action === 'status' && !sub && req.method === 'GET') {
+      return send(res, 200, statusFor(entryOf(id), deleted.get(id), user.email))
     }
 
-    if (isDeleted(id)) return send(res, 410, { error: 'deleted' })
-
-    // Moves the document to the Trash. Works for any existing document, indexed or not.
+    // Moves the document to the Trash (owner only). Repeating it is fine.
     if (!action && req.method === 'DELETE') {
-      return (await moveToTrash(server, id)) ? send(res, 204) : send(res, 404, { error: 'not found' })
+      if (isOwnTrashed(id, user)) return send(res, 204)
+      const role = roleFor(id, user)
+      if (!role) return notFound(res)
+      if (role !== 'owner') return forbidden(res)
+      await moveToTrash(server, id, user.email)
+      return send(res, 204)
     }
 
-    if (isTrashed(id)) return send(res, 410, { error: 'trashed' })
+    const role = roleFor(id, user)
+    if (!role) return notFound(res)
 
-    if (!action && req.method === 'GET') {
-      return docs[id] ? send(res, 200, toMeta(id)) : send(res, 404, { error: 'not found' })
-    }
+    if (action === 'shares' && sub) return sharesRoute(req, res, { id, target: sub, role, server, user })
+    if (sub) return next()
+
+    // Everyone with access sees who has access.
+    if (!action && req.method === 'GET') return send(res, 200, toMeta(id, role, { withShares: true }))
 
     if (!action && req.method === 'PATCH') {
+      if (!canEdit(role)) return forbidden(res)
       const title = cleanTitle((await readJson(req)).title)
       await setTitle(server, id, title)
-      // Documents opened by a raw ?doc= link may not be indexed yet; index them now.
+      // Access may have changed while the title was being written.
+      const after = roleFor(id, user)
+      if (!after) return notFound(res)
       const state = await currentState(server, id)
       const doc = new Y.Doc()
       if (state) Y.applyUpdate(doc, state)
       updateIndexFromDoc(id, doc)
       docs[id] = { ...docs[id], title }
       await saveIndex()
-      return send(res, 200, toMeta(id))
+      return send(res, 200, toMeta(id, after))
     }
 
+    // Anyone with access may copy: the copy is the caller's, with no shares.
     if (action === 'duplicate' && req.method === 'POST') {
       const state = await currentState(server, id)
-      if (!state && !docs[id]) return send(res, 404, { error: 'not found' })
       const doc = new Y.Doc()
       if (state) Y.applyUpdate(doc, state)
       const sourceTitle = getTitle(doc) || extractText(doc).slice(0, 60) || 'Untitled document'
       doc.getMap('meta').set('title', `Copy of ${sourceTitle}`)
       const copyId = newId()
       await writeAtomic(fileFor(copyId), Y.encodeStateAsUpdate(doc))
-      updateIndexFromDoc(copyId, doc)
+      addEntry(copyId, user.email, doc)
       await saveIndex()
-      return send(res, 201, toMeta(copyId))
+      audit('create', { actor: user.email, doc: copyId, from: id })
+      return send(res, 201, toMeta(copyId, 'owner'))
     }
 
     return next()
