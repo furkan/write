@@ -7,11 +7,12 @@
  */
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { exportJWK, generateKeyPair, SignJWT, type CryptoKey, type JWTPayload } from 'jose'
 import * as Y from 'yjs'
+import { docFileName } from '../server/collab.ts'
 
 export const ROOT = resolve(import.meta.dirname, '..')
 const VITE = join(ROOT, 'node_modules', '.bin', 'vite')
@@ -51,6 +52,7 @@ export type RunningServer = {
   port: number
   collabPort: number
   dataDir: string
+  backupDir: string
   /** Everything the process wrote to stdout and stderr so far. */
   output: () => string
   /** Resolves with the exit code when the process ends. */
@@ -65,12 +67,18 @@ type StartOptions = {
   env?: Record<string, string>
   /** For `preview`: the build to serve. */
   outDir?: string
+  /** Writes fixture files into the (new, empty) data dir before the server starts. */
+  seed?: (dataDir: string) => Promise<void>
 }
 
 /** Spawns `vite` (Dev mode) or `vite preview` (Access mode) with WRITE_* settings from `env`. */
-export async function spawnServer({ command, port, collabPort, env = {}, outDir }: StartOptions) {
+export async function spawnServer({ command, port, collabPort, env = {}, outDir, seed }: StartOptions) {
   const dir = await tempDir()
   const dataDir = join(dir, 'data')
+  if (seed) {
+    await mkdir(dataDir, { recursive: true })
+    await seed(dataDir)
+  }
   // Only the variables given here: never inherit WRITE_* from the shell running the tests.
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('WRITE_')))
   const args = command === 'preview' ? ['preview', ...(outDir ? ['--outDir', outDir] : [])] : []
@@ -105,6 +113,7 @@ export async function spawnServer({ command, port, collabPort, env = {}, outDir 
     port,
     collabPort,
     dataDir,
+    backupDir: join(dir, 'backups'),
     output: () => output,
     exited,
     stop: async () => {
@@ -242,4 +251,125 @@ export async function openDocument(url: string, name: string, headers: Record<st
   provider?.destroy()
   socket.destroy()
   return result
+}
+
+/** An open collaboration connection that stays open, recording what happens to it. */
+export type LiveDocument = {
+  doc: Y.Doc
+  provider: HocuspocusProvider
+  /** In order: `authenticated:<scope>`, `synced`, `denied:<reason>`, `close`. */
+  events: string[]
+  /** Waits until an event matching `pattern` arrives after the first `from` events. */
+  waitFor: (pattern: RegExp, options?: { from?: number; ms?: number }) => Promise<string>
+  destroy: () => void
+}
+
+/** Like `openDocument`, but keeps the connection open. Resolves once it is synced or denied. */
+export async function connectDocument(url: string, name: string, headers: Record<string, string>): Promise<LiveDocument> {
+  class WebSocketWithHeaders extends WebSocket {
+    constructor(target: string | URL) {
+      super(target, { headers } as unknown as string[])
+    }
+  }
+  const socket = new HocuspocusProviderWebsocket({ url, WebSocketPolyfill: WebSocketWithHeaders })
+  const doc = new Y.Doc()
+  const events: string[] = []
+  const waiters = new Set<() => void>()
+  const record = (event: string) => {
+    events.push(event)
+    for (const wake of waiters) wake()
+  }
+  const provider = new HocuspocusProvider({
+    websocketProvider: socket,
+    name,
+    document: doc,
+    onAuthenticated: ({ scope }) => record(`authenticated:${scope}`),
+    onSynced: () => record('synced'),
+    onAuthenticationFailed: ({ reason }) => record(`denied:${reason}`),
+    onClose: () => record('close'),
+  })
+  provider.attach()
+  const waitFor: LiveDocument['waitFor'] = (pattern, { from = 0, ms = 5000 } = {}) =>
+    new Promise((done, fail) => {
+      const check = () => {
+        const found = events.slice(from).find((event) => pattern.test(event))
+        if (found === undefined) return false
+        clearTimeout(timer)
+        waiters.delete(check)
+        done(found)
+        return true
+      }
+      const timer = setTimeout(() => {
+        waiters.delete(check)
+        fail(new Error(`no ${pattern} event within ${ms} ms; got ${events.join(', ') || 'nothing'}`))
+      }, ms)
+      if (!check()) waiters.add(check)
+    })
+  const live: LiveDocument = {
+    doc,
+    provider,
+    events,
+    waitFor,
+    destroy: () => {
+      provider.destroy()
+      socket.destroy()
+    },
+  }
+  await waitFor(/^(synced|denied:)/).catch(() => undefined)
+  return live
+}
+
+/** Plain text of a document's editor content, as the server has it now (via a fresh connection). */
+export async function readText(url: string, name: string, headers: Record<string, string>) {
+  const live = await connectDocument(url, name, headers)
+  try {
+    if (!live.events.includes('synced')) throw new Error(`could not open ${name}: ${live.events.join(', ')}`)
+    return live.doc.getXmlFragment('default').toString()
+  } finally {
+    live.destroy()
+  }
+}
+
+/** Appends a paragraph to a document's editor content, as the editor would. */
+export function typeParagraph(doc: Y.Doc, text: string) {
+  const paragraph = new Y.XmlElement('paragraph')
+  paragraph.insert(0, [new Y.XmlText(text)])
+  const fragment = doc.getXmlFragment('default')
+  fragment.insert(fragment.length, [paragraph])
+}
+
+// ---------- Fixtures ----------
+
+/** The original contents of the version-1 index written by `writeV1Fixture`. */
+export type V1Fixture = { indexText: string }
+
+/**
+ * A data dir from before ownership (index version 1): an open document with text, a trashed
+ * one, a tombstone, and an orphan `.ydoc` file that was never indexed.
+ */
+export async function writeV1Fixture(dataDir: string, { docs = true } = {}): Promise<V1Fixture> {
+  const now = Date.now()
+  const entry = (title: string, extra = {}) => ({ title, preview: '', words: 0, createdAt: now, updatedAt: now, ...extra })
+  const index = docs
+    ? {
+        docs: {
+          'legacy-one': entry('Legacy one'),
+          'legacy-trashed': entry('Legacy trashed', { trashedAt: now }),
+        },
+        deleted: ['legacy-gone'],
+      }
+    : { docs: {}, deleted: [] }
+  const indexText = JSON.stringify(index, null, 2)
+  await writeFile(join(dataDir, 'index.json'), indexText)
+  const ydoc = (text: string) => {
+    const doc = new Y.Doc()
+    typeParagraph(doc, text)
+    return Y.encodeStateAsUpdate(doc)
+  }
+  if (docs) {
+    await writeFile(join(dataDir, docFileName('legacy-one')), ydoc('legacy content'))
+    await writeFile(join(dataDir, docFileName('legacy-trashed')), ydoc('trashed content'))
+  }
+  await writeFile(join(dataDir, docFileName('orphan-doc')), ydoc('orphan content'))
+  return { indexText }
 }

@@ -3,7 +3,8 @@
  * Cloudflare Access (`WRITE_ACCESS_CERTS_URL`) and tokens signed by the test.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { rm } from 'node:fs/promises'
+import { readdir, readFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import {
   api,
   AUD,
@@ -15,8 +16,10 @@ import {
   startAccessKeys,
   startServer,
   TEAM_DOMAIN,
+  writeV1Fixture,
   type AccessKeys,
   type RunningServer,
+  type V1Fixture,
 } from './helpers.ts'
 
 let outDir: string
@@ -107,6 +110,31 @@ describe('Access mode', () => {
     expect(ok.status).toBe(201)
   })
 
+  test('sharing between Access users: role by verified email, 404 for a stranger', async () => {
+    const alice = { ...jwt(await keys.sign()), origin }
+    const bob = { ...jwt(await keys.sign({ email: 'Bob@Example.com' })), origin }
+    const mallory = { ...jwt(await keys.sign({ email: 'mallory@example.com' })), origin }
+    const { body } = await api(server, '/api/docs', { method: 'POST', headers: alice })
+    const id = String(body?.id)
+    expect(body).toMatchObject({ owner: 'alice@example.com', role: 'owner', shares: {} })
+
+    const shared = await api(server, `/api/docs/${id}/shares/bob%40example.com`, {
+      method: 'PUT',
+      headers: { ...alice, 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'viewer' }),
+    })
+    expect(shared.body?.shares).toEqual({ 'bob@example.com': 'viewer' })
+    expect((await api(server, `/api/docs/${id}/status`, { headers: bob })).body?.access).toBe('viewer')
+    expect((await api(server, `/api/docs/${id}`, { headers: mallory })).status).toBe(404)
+    // A share can't be forged with the dev cookie in Access mode.
+    expect((await api(server, `/api/docs/${id}`, { headers: { cookie: 'write-dev-user=alice@example.com' } })).status).toBe(401)
+
+    const url = `ws://127.0.0.1:${server.port}/collab`
+    expect(await openDocument(url, id, bob)).toEqual({ status: 'synced' })
+    expect(await openDocument(url, id, mallory)).toEqual({ status: 'denied', reason: 'permission-denied' })
+    expect(await openDocument(url, 'never-created', alice)).toEqual({ status: 'denied', reason: 'permission-denied' })
+  })
+
   describe('collaboration socket', () => {
     let id: string
     beforeAll(async () => {
@@ -151,6 +179,87 @@ describe('Access mode', () => {
       expect(await openDocument(direct, id, { ...jwt(token), origin: directOrigin })).toEqual({ status: 'synced' })
     })
   })
+})
+
+describe('Access mode migration', () => {
+  let keys: AccessKeys
+  beforeAll(async () => {
+    keys = await startAccessKeys()
+  })
+  afterAll(() => keys?.stop())
+  const env = () => ({
+    WRITE_ACCESS_TEAM_DOMAIN: TEAM_DOMAIN,
+    WRITE_ACCESS_AUD: AUD,
+    WRITE_ACCESS_CERTS_URL: keys.certsUrl,
+  })
+
+  test('refuses to start without WRITE_OWNER_EMAIL when documents have no owner', async () => {
+    let dataDir = ''
+    let fixture: V1Fixture | undefined
+    const server = await spawnServer({
+      command: 'preview',
+      ...PREVIEW_PORTS,
+      outDir,
+      // Must not stand in for the Legacy owner in Access mode.
+      env: { ...env(), WRITE_DEV_USER: 'devuser@example.com' },
+      seed: async (dir) => {
+        dataDir = dir
+        fixture = await writeV1Fixture(dir)
+      },
+    })
+    const code = await Promise.race([server.exited, Bun.sleep(15_000).then(() => 'timeout' as const)])
+    try {
+      expect(code).not.toBe('timeout')
+      expect(code).not.toBe(0)
+      expect(server.output()).toContain('2 document(s) without an owner')
+      expect(server.output()).toContain('WRITE_OWNER_EMAIL')
+      expect(server.output()).not.toContain('Local:')
+      // Nothing was changed or backed up.
+      expect(await readFile(join(dataDir, 'index.json'), 'utf8')).toBe(String(fixture?.indexText))
+      expect(await readdir(server.backupDir).catch(() => [])).toEqual([])
+    } finally {
+      await exitCodeWithin(server, 1000)
+    }
+  }, 20_000)
+
+  test('starts without WRITE_OWNER_EMAIL when no document lacks an owner', async () => {
+    const server = await startServer({
+      command: 'preview',
+      ...PREVIEW_PORTS,
+      outDir,
+      env: env(),
+      seed: async (dir) => void (await writeV1Fixture(dir, { docs: false })),
+    })
+    try {
+      const token = await keys.sign()
+      expect((await api(server, '/api/docs', { headers: { 'cf-access-jwt-assertion': token } })).body?.docs).toEqual([])
+      const index = JSON.parse(await readFile(join(server.dataDir, 'index.json'), 'utf8')) as { version: number }
+      expect(index.version).toBe(2)
+    } finally {
+      await server.stop()
+    }
+  }, 30_000)
+
+  test('with WRITE_OWNER_EMAIL, the Legacy owner gets every ownerless document', async () => {
+    const server = await startServer({
+      command: 'preview',
+      ...PREVIEW_PORTS,
+      outDir,
+      env: { ...env(), WRITE_OWNER_EMAIL: 'Alice@Example.com' },
+      seed: async (dir) => void (await writeV1Fixture(dir)),
+    })
+    try {
+      const alice = { 'cf-access-jwt-assertion': await keys.sign() }
+      const bob = { 'cf-access-jwt-assertion': await keys.sign({ email: 'bob@example.com' }) }
+      const list = (await api(server, '/api/docs', { headers: alice })).body?.docs as { id: string; owner: string }[]
+      expect(list.map((doc) => [doc.id, doc.owner])).toEqual([['legacy-one', 'alice@example.com']])
+      expect((await api(server, '/api/docs', { headers: bob })).body?.docs).toEqual([])
+      expect(await readdir(server.backupDir)).toHaveLength(1)
+      expect(server.output()).toContain('"audit":"migration"')
+    } finally {
+      await server.stop()
+    }
+  }, 30_000)
 })
 
 describe('Access mode without its settings', () => {
