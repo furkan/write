@@ -1,0 +1,42 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 31497b0476491eee64424e5eafd9fefd20446513..d62d25ec4c3cc17354e9dc4968c1abe175d6f74b 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -1793,7 +1793,15 @@ const mapCharacterPosition = (position, transaction, docs, indexes) => {
+ const mapPositionMigration = (transaction, binding, previous) => {
+ 	const pending = (previous === null || previous === void 0 ? void 0 : previous.doc) === transaction.before && previous.doc !== binding.syncedDoc ? previous : null;
+ 	if (!transaction.docChanged || !binding.prosemirrorView || !pending && transaction.steps.every((step, index) => isTextReplacement(step, transaction.docs[index]))) return pending;
+-	const source = pending !== null && pending !== void 0 ? pending : getPositionContent(binding.type, transaction.before);
++	// Patched (write): an appended transaction that follows a plain-typing transaction in the same
++	// dispatch sees a Yjs fragment that does not contain the typed text yet. getPositionContent then
++	// throws, which aborts the whole dispatch and drops the keystroke. Skip migration instead.
++	let source = pending;
++	if (source === null || source === void 0) try {
++		source = getPositionContent(binding.type, transaction.before);
++	} catch {
++		return null;
++	}
+ 	const docs = [...transaction.docs, transaction.doc];
+ 	const indexes = docs.map(indexNodes);
+ 	const characters = source.characters.map((character) => ({
+diff --git a/dist/index.js b/dist/index.js
+index 014929cd5b5f80158318843b91d32d483fd0377b..1c978b03916c5c58651182ea07bfbdafb2e22d64 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1760,7 +1760,15 @@ const mapCharacterPosition = (position, transaction, docs, indexes) => {
+ const mapPositionMigration = (transaction, binding, previous) => {
+ 	const pending = (previous === null || previous === void 0 ? void 0 : previous.doc) === transaction.before && previous.doc !== binding.syncedDoc ? previous : null;
+ 	if (!transaction.docChanged || !binding.prosemirrorView || !pending && transaction.steps.every((step, index) => isTextReplacement(step, transaction.docs[index]))) return pending;
+-	const source = pending !== null && pending !== void 0 ? pending : getPositionContent(binding.type, transaction.before);
++	// Patched (write): an appended transaction that follows a plain-typing transaction in the same
++	// dispatch sees a Yjs fragment that does not contain the typed text yet. getPositionContent then
++	// throws, which aborts the whole dispatch and drops the keystroke. Skip migration instead.
++	let source = pending;
++	if (source === null || source === void 0) try {
++		source = getPositionContent(binding.type, transaction.before);
++	} catch {
++		return null;
++	}
+ 	const docs = [...transaction.docs, transaction.doc];
+ 	const indexes = docs.map(indexNodes);
+ 	const characters = source.characters.map((character) => ({

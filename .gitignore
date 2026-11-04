@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Collaboration documents (Hocuspocus)
+.collab-data
