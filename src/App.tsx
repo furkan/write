@@ -1,6 +1,10 @@
+import { lazy, Suspense } from 'react'
 import './App.css'
-import { DocumentPage } from './pages/DocumentPage'
-import { Library } from './pages/Library'
+
+// Each page is its own chunk: the library doesn't download the editor, and a document
+// doesn't download the library.
+const DocumentPage = lazy(() => import('./pages/DocumentPage').then((m) => ({ default: m.DocumentPage })))
+const Library = lazy(() => import('./pages/Library').then((m) => ({ default: m.Library })))
 
 /**
  * Tiny router: `?doc=<id>` opens a document, anything else shows the library.
@@ -10,6 +14,18 @@ import { Library } from './pages/Library'
 export default function App() {
   const params = new URLSearchParams(window.location.search)
   const doc = params.get('doc')?.trim()
-  if (doc) return <DocumentPage key={doc} name={doc} templateId={params.get('template')} />
-  return <Library />
+  return (
+    <Suspense fallback={<PageLoading />}>
+      {doc ? <DocumentPage key={doc} name={doc} templateId={params.get('template')} /> : <Library />}
+    </Suspense>
+  )
+}
+
+function PageLoading() {
+  return (
+    <div className="loading" role="status">
+      <span className="spinner" aria-hidden />
+      Loading…
+    </div>
+  )
 }
