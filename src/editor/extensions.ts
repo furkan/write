@@ -32,37 +32,46 @@ import { SlashCommand } from './extensions/slash-command'
 import { Spoiler } from './extensions/spoiler'
 import { emojiSuggestion, mentionSuggestion } from './suggestions'
 
+/** Soft limit shown in the status bar. Not enforced: a hard limit would also reject collaborators' changes. */
 export const CHARACTER_LIMIT = 50_000
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']
 
 export const lowlight = createLowlight(common)
 
-/** Reads dropped/pasted image files and inserts them as data-URL images. */
-function insertImageFiles(editor: Editor, files: File[], pos?: number) {
-  for (const file of files) {
-    if (file.size > MAX_IMAGE_BYTES) {
-      window.alert(`“${file.name}” is larger than 2 MB. Use an image URL instead.`)
-      continue
-    }
+const readAsDataURL = (file: File) =>
+  new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => {
-      const src = reader.result as string
-      const content = { type: 'image', attrs: { src, alt: file.name } }
-      const chain = editor.chain().focus()
-      ;(pos === undefined ? chain.insertContent(content) : chain.insertContentAt(pos, content)).run()
-    }
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(file)
+  })
+
+/** Reads dropped/pasted image files and inserts them, in order, as data-URL images. */
+async function insertImageFiles(editor: Editor, files: File[], pos?: number) {
+  const accepted = files.filter((file) => {
+    if (file.size <= MAX_IMAGE_BYTES) return true
+    window.alert(`“${file.name}” is larger than 2 MB. Use an image URL instead.`)
+    return false
+  })
+  if (!accepted.length) return
+  const sources = await Promise.all(accepted.map(readAsDataURL))
+  if (editor.isDestroyed) return
+  const content = sources.map((src, i) => ({ type: 'image', attrs: { src, alt: accepted[i].name } }))
+  if (pos === undefined) {
+    editor.chain().focus().insertContent(content).run()
+    return
   }
+  // Reading is async and collaborators may have edited meanwhile, so keep the drop point in range.
+  const at = Math.min(pos, editor.state.doc.content.size)
+  editor.chain().focus().insertContentAt(at, content).run()
 }
 
 function editMath(editor: Editor, kind: 'inline' | 'block', latex: string, pos: number) {
   const next = window.prompt(`Edit ${kind} LaTeX`, latex)
   if (next === null) return
-  const chain = editor.chain().setNodeSelection(pos)
-  if (kind === 'inline') chain.updateInlineMath({ latex: next })
-  else chain.updateBlockMath({ latex: next })
-  chain.focus().run()
+  if (kind === 'inline') editor.chain().updateInlineMath({ latex: next, pos }).focus().run()
+  else editor.chain().updateBlockMath({ latex: next, pos }).focus().run()
 }
 
 type Options = {
@@ -95,7 +104,7 @@ export function buildExtensions({ user, getEditor, onTableOfContents }: Options)
       },
       includeChildren: true,
     }),
-    CharacterCount.configure({ limit: CHARACTER_LIMIT }),
+    CharacterCount,
     Focus.configure({ className: 'has-focus', mode: 'deepest' }),
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Highlight.configure({ multicolor: true }),
@@ -136,11 +145,11 @@ export function buildExtensions({ user, getEditor, onTableOfContents }: Options)
     CodeBlockLowlight.configure({ lowlight, defaultLanguage: 'plaintext' }),
     FileHandler.configure({
       allowedMimeTypes: IMAGE_TYPES,
-      onDrop: (editor, files, pos) => insertImageFiles(editor, files, pos),
+      onDrop: (editor, files, pos) => void insertImageFiles(editor, files, pos),
       onPaste: (editor, files, htmlContent) => {
         // Pasted HTML that already contains the image is handled by the Image extension.
         if (htmlContent) return
-        insertImageFiles(editor, files)
+        void insertImageFiles(editor, files)
       },
     }),
     TableOfContents.configure({

@@ -46,7 +46,10 @@ export function StatusBar({ editor, user, onRename, status, readOnly }: StatusBa
 
   return (
     <footer className="status-bar" data-tour="status">
-      <span className="status-item" title={`${info.characters} of ${CHARACTER_LIMIT} characters`}>
+      <span
+        className={`status-item${info.characters > CHARACTER_LIMIT ? ' over-limit' : ''}`}
+        title={`${info.characters} characters (soft limit ${CHARACTER_LIMIT})`}
+      >
         <span className="meter" aria-hidden>
           <span style={{ width: `${percent}%` }} />
         </span>

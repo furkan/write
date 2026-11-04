@@ -113,6 +113,8 @@ function Workspace({ seed }: { seed: boolean }) {
     onUpdate: ({ editor: e, transaction }) => {
       const origin = isChangeOrigin(transaction) ? 'remote' : 'local'
       logEvent('update', `${origin} · ${transaction.steps.length} step(s) · size ${e.state.doc.content.size}`)
+      // Back up your own edits only, so a collaborator wiping the doc can't overwrite your backup.
+      if (origin === 'remote') return
       window.clearTimeout(backupTimer.current)
       backupTimer.current = window.setTimeout(() => saveBackup(e), 1000)
     },

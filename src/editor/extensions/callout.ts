@@ -56,6 +56,26 @@ export const Callout = Node.create({
     return `> [!${CALLOUT_VARIANTS[variant].alert}]\n${quoted}`
   },
 
+  // Parses GitHub-style alerts (`> [!NOTE]` …) back into callouts.
+  markdownTokenizer: {
+    name: 'callout',
+    level: 'block',
+    start: (src: string) => src.search(/^> \[!(?:NOTE|TIP|WARNING|CAUTION)\]/m),
+    tokenize(src, _tokens, lexer) {
+      const match = /^> \[!(NOTE|TIP|WARNING|CAUTION)\][^\n]*\n((?:>[^\n]*(?:\n|$))*)/.exec(src)
+      if (!match) return undefined
+      const body = match[2].replace(/^> ?/gm, '').trimEnd()
+      return { type: 'callout', raw: match[0], alert: match[1], tokens: lexer.blockTokens(body) }
+    },
+  },
+
+  parseMarkdown: (token, h) => {
+    const variant =
+      (Object.keys(CALLOUT_VARIANTS) as CalloutVariant[]).find((v) => CALLOUT_VARIANTS[v].alert === token.alert) ?? 'info'
+    const content = h.parseChildren(token.tokens ?? [])
+    return h.createNode('callout', { variant }, content.length ? content : [{ type: 'paragraph' }])
+  },
+
   addNodeView() {
     return ReactNodeViewRenderer(CalloutView)
   },

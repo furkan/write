@@ -1,7 +1,7 @@
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { TextSelection } from '@tiptap/pm/state'
-import { useEditorState, type Editor } from '@tiptap/react'
-import { useState } from 'react'
+import type { Editor } from '@tiptap/react'
+import { useEffect, useMemo, useState } from 'react'
 
 export type EditorEvent = { id: number; type: string; detail: string; at: number }
 
@@ -63,24 +63,39 @@ function Inspector({ editor, events, onClearEvents }: { editor: Editor; events: 
   const [tab, setTab] = useState<Tab>('JSON')
   const [open, setOpen] = useState(true)
 
-  const output = useEditorState({
-    editor,
-    selector: ({ editor: e }) => {
-      if (!open) return ''
-      switch (tab) {
-        case 'JSON':
-          return JSON.stringify(e.getJSON(), null, 2)
-        case 'HTML':
-          return e.getHTML().replace(/></g, '>\n<')
-        case 'Markdown':
-          return e.getMarkdown()
-        case 'Text':
-          return e.getText({ blockSeparator: '\n\n' })
-        case 'Events':
-          return ''
-      }
-    },
-  })
+  // Serialising the whole document is expensive, so re-run it only for content changes
+  // (not selection or cursor moves), debounced, and only while the panel shows it.
+  const [version, setVersion] = useState(0)
+  useEffect(() => {
+    if (!open || tab === 'Events') return
+    let timer: number | undefined
+    const onUpdate = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => setVersion((v) => v + 1), 250)
+    }
+    editor.on('update', onUpdate)
+    return () => {
+      window.clearTimeout(timer)
+      editor.off('update', onUpdate)
+    }
+  }, [editor, open, tab])
+
+  const output = useMemo(() => {
+    if (!open) return ''
+    switch (tab) {
+      case 'JSON':
+        return JSON.stringify(editor.getJSON(), null, 2)
+      case 'HTML':
+        return editor.getHTML().replace(/></g, '>\n<')
+      case 'Markdown':
+        return editor.getMarkdown()
+      case 'Text':
+        return editor.getText({ blockSeparator: '\n\n' })
+      case 'Events':
+        return ''
+    }
+    // `version` changes after document edits; it is the recompute trigger.
+  }, [editor, open, tab, version]) // oxlint-disable-line react-hooks/exhaustive-deps
 
   const copy = () => {
     const text = tab === 'Events' ? JSON.stringify(events, null, 2) : output

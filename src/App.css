@@ -1302,6 +1302,14 @@
   border-radius: 2px;
 }
 
+.over-limit {
+  color: var(--danger);
+}
+
+.over-limit .meter > span {
+  background: var(--danger);
+}
+
 .meter > span {
   display: block;
   height: 100%;

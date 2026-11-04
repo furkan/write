@@ -54,8 +54,15 @@ export function Toolbar({ editor, readOnly }: ToolbarProps) {
       table: e.isActive('table'),
       canUndo: e.can().undo(),
       canRedo: e.can().redo(),
-      canSink: e.can().sinkListItem('listItem') || e.can().sinkListItem('taskItem'),
-      canLift: e.can().liftListItem('listItem') || e.can().liftListItem('taskItem'),
+      // Pick the innermost list item type, so nested bullet-in-task lists indent the right thing.
+      listItemType: (() => {
+        const { $from } = e.state.selection
+        for (let d = $from.depth; d > 0; d--) {
+          const name = $from.node(d).type.name
+          if (name === 'listItem' || name === 'taskItem') return name
+        }
+        return null
+      })(),
     }),
   })
 
@@ -314,16 +321,16 @@ export function Toolbar({ editor, readOnly }: ToolbarProps) {
           <ToolButton
             title="Indent"
             shortcut="Tab"
-            disabled={readOnly || !s.canSink}
-            onClick={() => (s.taskList ? chain().sinkListItem('taskItem').run() : chain().sinkListItem('listItem').run())}
+            disabled={readOnly || !s.listItemType}
+            onClick={() => s.listItemType && chain().sinkListItem(s.listItemType).run()}
           >
             →
           </ToolButton>
           <ToolButton
             title="Outdent"
             shortcut="Shift+Tab"
-            disabled={readOnly || !s.canLift}
-            onClick={() => (s.taskList ? chain().liftListItem('taskItem').run() : chain().liftListItem('listItem').run())}
+            disabled={readOnly || !s.listItemType}
+            onClick={() => s.listItemType && chain().liftListItem(s.listItemType).run()}
           >
             ←
           </ToolButton>
