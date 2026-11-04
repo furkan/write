@@ -3,9 +3,21 @@ import { Server } from '@hocuspocus/server'
 import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { Connect, Plugin } from 'vite'
 import * as Y from 'yjs'
+import { audit } from './audit.ts'
+import {
+  createAuthenticator,
+  fetchHeaders,
+  identifyRequest,
+  nodeHeaders,
+  type Authenticator,
+  type HeaderGetter,
+  type Identity,
+  type User,
+} from './auth.ts'
+import { describeConfig, type WriteConfig } from './config.ts'
 
 /**
  * Runs a Hocuspocus (Yjs) collaboration server next to the Vite dev/preview server,
@@ -13,17 +25,15 @@ import * as Y from 'yjs'
  *
  * The collaboration server only listens on 127.0.0.1; browsers reach it through Vite's
  * `/collab` WebSocket proxy, so everything — including Tailscale access — uses one port.
- * Documents are persisted as Yjs updates in `.collab-data/`, with an `index.json` holding
- * each document's title, preview text and timestamps.
+ * Documents are persisted as Yjs updates in the data dir (`WRITE_DATA_DIR`, default
+ * `.collab-data/`), with an `index.json` holding each document's title, preview text and timestamps.
+ *
+ * Every `/api/*` request and every collaboration connection is identified first (see
+ * `server/auth.ts`): Access mode verifies the Cloudflare Access JWT, Dev mode trusts a cookie.
  *
  * Deleting a document moves it to the Trash, where it can be restored for 30 days. A daily
- * snapshot of `.collab-data/` is copied to `.collab-backups/` (or `$WRITE_BACKUP_DIR`).
+ * snapshot of the data dir is copied to the backup dir (`WRITE_BACKUP_DIR`, default `.collab-backups/`).
  */
-
-const ROOT = resolve(import.meta.dirname, '..')
-const DATA_DIR = join(ROOT, '.collab-data')
-const INDEX_FILE = join(DATA_DIR, 'index.json')
-const BACKUP_DIR = resolve(ROOT, process.env.WRITE_BACKUP_DIR ?? '.collab-backups')
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -39,7 +49,7 @@ const BACKUPS_TO_KEEP = 14
 const fileFor = (documentName: string) => {
   const readable = documentName.replace(/[^\w-]/g, '_').slice(0, 60) || 'doc'
   const hash = createHash('sha256').update(documentName).digest('hex').slice(0, 12)
-  return join(DATA_DIR, `${readable}-${hash}.ydoc`)
+  return join(dirs().data, `${readable}-${hash}.ydoc`)
 }
 
 async function readState(documentName: string): Promise<Uint8Array | null> {
@@ -75,6 +85,8 @@ type IndexFile = { docs: Record<string, Omit<DocMeta, 'id'>>; deleted: string[] 
 // Vite re-imports this module when its config changes, but the collaboration server (and
 // its store hook) lives on, so the index must be shared across module instances too.
 type IndexState = {
+  /** Set from the plugin options when the collaboration server starts. */
+  dirs?: { data: string; backups: string }
   docs: IndexFile['docs']
   deleted: Set<string>
   loaded: boolean
@@ -91,15 +103,22 @@ const indexState: IndexState = (shared[stateKey] ??= {
 })
 const { docs, deleted } = indexState
 
+function dirs() {
+  if (!indexState.dirs) throw new Error('The collaboration server has not started yet')
+  return indexState.dirs
+}
+
+const indexFile = () => join(dirs().data, 'index.json')
+
 async function loadIndex() {
   if (indexState.loaded) return
   indexState.loaded = true
   // Remove temp files left by writes that were interrupted (the originals are intact).
-  for (const name of await readdir(DATA_DIR)) {
-    if (name.endsWith('.tmp')) await rm(join(DATA_DIR, name), { force: true })
+  for (const name of await readdir(dirs().data)) {
+    if (name.endsWith('.tmp')) await rm(join(dirs().data, name), { force: true })
   }
   try {
-    const parsed = JSON.parse(await readFile(INDEX_FILE, 'utf8')) as Partial<IndexFile>
+    const parsed = JSON.parse(await readFile(indexFile(), 'utf8')) as Partial<IndexFile>
     Object.assign(docs, parsed.docs ?? {})
     for (const id of parsed.deleted ?? []) deleted.add(id)
   } catch {
@@ -112,7 +131,7 @@ function saveIndex(): Promise<void> {
   clearTimeout(indexState.pending)
   indexState.pending = undefined
   const write = indexState.write.then(() =>
-    writeAtomic(INDEX_FILE, JSON.stringify({ docs, deleted: [...deleted] } satisfies IndexFile, null, 2)),
+    writeAtomic(indexFile(), JSON.stringify({ docs, deleted: [...deleted] } satisfies IndexFile, null, 2)),
   )
   indexState.write = write.catch(() => undefined)
   return write
@@ -185,56 +204,138 @@ const newId = () => randomBytes(9).toString('base64url')
 
 // ---------- Collaboration server ----------
 
+/** What Hocuspocus hooks see as `context` once a connection is authenticated. */
+export type CollabContext = { user: User }
+
+/** The running collaboration server and the configuration it was started with. */
+type Runtime = {
+  server: Server<CollabContext>
+  config: WriteConfig
+  authenticator: Authenticator
+}
+
+/**
+ * Rejects a collaboration connection. Not an `Error`: Hocuspocus logs the stack of any hook
+ * error that has a message, and auth failures are already in the audit log. `reason` is what
+ * the provider's `onAuthenticationFailed` receives.
+ */
+class CollabRejection {
+  readonly reason: string
+  constructor(reason: 'unauthenticated' | 'permission-denied') {
+    this.reason = reason
+  }
+}
+
+/** Where a request came from, for the audit log (Cloudflare's header when behind the tunnel). */
+const clientIp = (header: HeaderGetter, socketAddress?: string) =>
+  header('cf-connecting-ip') ?? socketAddress ?? null
+
+function logAuthFailure(identity: Extract<Identity, { ok: false }>, fields: Record<string, unknown>) {
+  audit('auth_fail', { status: identity.status, reason: identity.reason, ...identity.detail, ...fields })
+}
+
+/** Starts listening, turning "port in use" into an error that says what to do. */
+function listen(server: Server<CollabContext>, port: number) {
+  return new Promise<void>((resolve, reject) => {
+    // Hocuspocus's own listen() never rejects; a busy port only emits `error` on its HTTP server.
+    const onError = (error: NodeJS.ErrnoException) => {
+      reject(
+        error.code === 'EADDRINUSE'
+          ? new Error(
+              `[write] The collaboration port 127.0.0.1:${port} is already in use (is another Write ` +
+                `server running?). Stop it, or set WRITE_COLLAB_PORT to a free port.`,
+            )
+          : error,
+      )
+    }
+    server.httpServer.once('error', onError)
+    server.listen().then(() => {
+      server.httpServer.off('error', onError)
+      resolve()
+    }, reject)
+  })
+}
+
+async function startRuntime(config: WriteConfig): Promise<Runtime> {
+  indexState.dirs = { data: config.dataDir, backups: config.backupDir }
+  await mkdir(config.dataDir, { recursive: true })
+  await loadIndex()
+  const authenticator = createAuthenticator(config.auth)
+  const server = new Server<CollabContext>({
+    port: config.collabPort,
+    address: '127.0.0.1',
+    quiet: true,
+    // Vite owns the process signals; we flush pending stores when its server closes.
+    stopOnSignals: false,
+    // Persist quickly so little is lost if the dev server is stopped abruptly.
+    debounce: 500,
+    maxDebounce: 2000,
+    // Runs for every document on every socket, before anything syncs. The provider always sends
+    // an auth message (an empty token when none is set), so no token is needed on the client: the
+    // identity comes from the upgrade request's headers, which Vite's proxy passes through. This
+    // check runs here, not in the proxy, because anything on this machine can reach 127.0.0.1.
+    async onAuthenticate({ requestHeaders, documentName }) {
+      const header = fetchHeaders(requestHeaders)
+      const identity = await identifyRequest(authenticator, header, {
+        checkOrigin: true,
+        allowedOrigins: config.allowedOrigins,
+      })
+      if (!identity.ok) {
+        logAuthFailure(identity, { via: 'collab', doc: documentName, ip: clientIp(header) })
+        throw new CollabRejection(identity.status === 403 ? 'permission-denied' : 'unauthenticated')
+      }
+      // Trashed and deleted documents are closed: refuse connections so an open tab can't
+      // keep editing (or resurrect) one.
+      if (isClosed(documentName)) throw new Error('Document is in the trash or was deleted')
+      return { user: identity.user } satisfies CollabContext
+    },
+    extensions: [
+      new Database({
+        fetch: ({ documentName }) => readState(documentName),
+        store: async ({ documentName, state, document }) => {
+          if (isDeleted(documentName)) return
+          await writeAtomic(fileFor(documentName), state)
+          // A DELETE may have landed while the file was being written.
+          if (isDeleted(documentName)) {
+            await rm(fileFor(documentName), { force: true })
+            return
+          }
+          updateIndexFromDoc(documentName, document)
+          scheduleIndexSave()
+        },
+      }),
+    ],
+  })
+  await listen(server, config.collabPort)
+  startMaintenance(server)
+  return { server, config, authenticator }
+}
+
 // Vite re-imports the config (and this module) when it restarts, so keep the
 // running server on globalThis to avoid binding the port twice.
 const globalKey = Symbol.for('write.collabServer')
-type GlobalWithServer = typeof globalThis & { [globalKey]?: Promise<Server> }
+type GlobalWithServer = typeof globalThis & {
+  [globalKey]?: { configJson: string; runtime: Promise<Runtime> }
+}
 
-function ensureServer(port: number): Promise<Server> {
+function ensureRuntime(config: WriteConfig): Promise<Runtime> {
   const g = globalThis as GlobalWithServer
-  g[globalKey] ??= (async () => {
-    await mkdir(DATA_DIR, { recursive: true })
-    await loadIndex()
-    const server = new Server({
-      port,
-      address: '127.0.0.1',
-      quiet: true,
-      // Vite owns the process signals; we flush pending stores when its server closes.
-      stopOnSignals: false,
-      // Persist quickly so little is lost if the dev server is stopped abruptly.
-      debounce: 500,
-      maxDebounce: 2000,
-      // Trashed and deleted documents are closed: refuse connections so an open tab can't
-      // keep editing (or resurrect) one.
-      async onConnect({ documentName }) {
-        if (isClosed(documentName)) throw new Error('Document is in the trash or was deleted')
-      },
-      extensions: [
-        new Database({
-          fetch: ({ documentName }) => readState(documentName),
-          store: async ({ documentName, state, document }) => {
-            if (isDeleted(documentName)) return
-            await writeAtomic(fileFor(documentName), state)
-            // A DELETE may have landed while the file was being written.
-            if (isDeleted(documentName)) {
-              await rm(fileFor(documentName), { force: true })
-              return
-            }
-            updateIndexFromDoc(documentName, document)
-            scheduleIndexSave()
-          },
-        }),
-      ],
-    })
-    await server.listen()
-    startMaintenance(server)
-    return server
-  })()
+  const configJson = JSON.stringify(config)
+  const running = g[globalKey]
+  if (running) {
+    // The running server keeps its data dir, ports and auth settings until the process restarts.
+    if (running.configJson !== configJson) {
+      console.warn('[write] WRITE_* settings changed; restart the server to apply them.')
+    }
+    return running.runtime
+  }
+  const runtime = startRuntime(config)
+  g[globalKey] = { configJson, runtime }
   // Let a later restart retry if startup failed (e.g. the port was busy).
-  g[globalKey].catch(() => {
+  runtime.catch(() => {
     delete g[globalKey]
   })
-  return g[globalKey]
+  return runtime
 }
 
 // ---------- Trash ----------
@@ -302,35 +403,36 @@ const SNAPSHOT_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/
 
 async function listSnapshots() {
   try {
-    return (await readdir(BACKUP_DIR)).filter((name) => SNAPSHOT_NAME.test(name)).sort()
+    return (await readdir(dirs().backups)).filter((name) => SNAPSHOT_NAME.test(name)).sort()
   } catch {
     return []
   }
 }
 
-/** Copies `.collab-data/` into a new timestamped folder and keeps the newest few. */
+/** Copies the data dir into a new timestamped folder and keeps the newest few. */
 async function backup() {
-  await mkdir(BACKUP_DIR, { recursive: true })
+  const { data, backups } = dirs()
+  await mkdir(backups, { recursive: true })
   // Remove copies left incomplete by a failed or interrupted backup.
-  for (const name of await readdir(BACKUP_DIR)) {
-    if (name.endsWith('.partial')) await rm(join(BACKUP_DIR, name), { recursive: true, force: true })
+  for (const name of await readdir(backups)) {
+    if (name.endsWith('.partial')) await rm(join(backups, name), { recursive: true, force: true })
   }
   // Let any index write in progress finish; document files are written atomically.
   await indexState.write
   const name = new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-')
-  const partial = join(BACKUP_DIR, `${name}.partial`)
+  const partial = join(backups, `${name}.partial`)
   try {
-    await cp(DATA_DIR, partial, { recursive: true, filter: (src) => !src.endsWith('.tmp') })
+    await cp(data, partial, { recursive: true, filter: (src) => !src.endsWith('.tmp') })
   } catch (error) {
     // e.g. a document deleted forever mid-copy; the next hourly check tries again.
     await rm(partial, { recursive: true, force: true })
     throw error
   }
   // Only complete copies get a snapshot name.
-  await rename(partial, join(BACKUP_DIR, name))
+  await rename(partial, join(backups, name))
   const snapshots = await listSnapshots()
   for (const old of snapshots.slice(0, -BACKUPS_TO_KEEP)) {
-    await rm(join(BACKUP_DIR, old), { recursive: true, force: true })
+    await rm(join(backups, old), { recursive: true, force: true })
   }
 }
 
@@ -391,20 +493,76 @@ async function setTitle(server: Server, id: string, title: string) {
   }
 }
 
+// ---------- Identity ----------
+
+/** The user of each `/api/*` request, set by `identify()` before any handler runs. */
+const requestUsers = new WeakMap<IncomingMessage, User>()
+
+/**
+ * Runs first for every `/api/*` request: the Origin check for anything but GET and HEAD,
+ * then the caller's identity. Without one the request ends here with 401 (or 403 for a
+ * foreign origin or a token without an email).
+ */
+const identify =
+  ({ authenticator, config }: Runtime): Connect.NextHandleFunction =>
+  async (req, res, next) => {
+    const header = nodeHeaders(req.headers)
+    let identity: Identity
+    try {
+      identity = await identifyRequest(authenticator, header, {
+        checkOrigin: req.method !== 'GET' && req.method !== 'HEAD',
+        allowedOrigins: config.allowedOrigins,
+      })
+    } catch (error) {
+      console.error('[write] identifying a request failed:', error)
+      return send(res, 500, { error: 'error' })
+    }
+    if (!identity.ok) {
+      logAuthFailure(identity, {
+        via: 'api',
+        method: req.method,
+        path: req.originalUrl ?? req.url,
+        ip: clientIp(header, req.socket.remoteAddress),
+      })
+      const error = { 401: 'unauthenticated', 403: 'forbidden', 503: 'unavailable' }[identity.status]
+      return send(res, identity.status, { error })
+    }
+    requestUsers.set(req, identity.user)
+    next()
+  }
+
+/** `GET /api/me`: who the server thinks the caller is. */
+const meApi =
+  ({ config }: Runtime): Connect.NextHandleFunction =>
+  (req, res, next) => {
+    if (req.method !== 'GET' || new URL(req.url ?? '/', 'http://localhost').pathname !== '/') return next()
+    const user = requestUsers.get(req)
+    if (!user) return send(res, 401, { error: 'unauthenticated' })
+    return send(res, 200, { email: user.email, mode: config.auth.mode })
+  }
+
+// ---------- REST API handlers ----------
+
 type Handler = (
   req: IncomingMessage,
   res: ServerResponse,
   next: () => void,
-  route: { id?: string; action?: string; server: Server },
+  route: { id?: string; action?: string; server: Server<CollabContext>; user: User },
 ) => Promise<void>
 
-/** Parses `/:id/:action` and handles errors. A malformed escape (e.g. %E0) must not crash the server. */
-function route(port: number, handler: Handler): Connect.NextHandleFunction {
+/**
+ * Parses `/:id/:action`, passes the caller (`user`) and handles errors. A malformed escape
+ * (e.g. %E0) must not crash the server.
+ */
+function route({ server }: Runtime, handler: Handler): Connect.NextHandleFunction {
   return async (req, res, next) => {
+    // `identify()` runs first, so this only fails if the middleware order is broken.
+    const user = requestUsers.get(req)
+    if (!user) return send(res, 401, { error: 'unauthenticated' })
     try {
       const url = new URL(req.url ?? '/', 'http://localhost')
       const [id, action] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
-      await handler(req, res, next, { id, action, server: await ensureServer(port) })
+      await handler(req, res, next, { id, action, server, user })
     } catch (error) {
       // Malformed escapes in the URL or malformed JSON bodies.
       if (error instanceof URIError || error instanceof SyntaxError) return send(res, 400, { error: 'bad request' })
@@ -414,8 +572,8 @@ function route(port: number, handler: Handler): Connect.NextHandleFunction {
 }
 
 /** `/api/trash`: list, restore, delete forever, empty. */
-const trashApi = (port: number) =>
-  route(port, async (req, res, next, { id, action, server }) => {
+const trashApi = (runtime: Runtime) =>
+  route(runtime, async (req, res, next, { id, action, server }) => {
     if (!id && req.method === 'GET') {
       const list = trashedIds()
         .map(toTrashed)
@@ -452,8 +610,8 @@ const trashApi = (port: number) =>
   })
 
 /** `/api/docs`: the document library. */
-const docsApi = (port: number) =>
-  route(port, async (req, res, next, { id, action, server }) => {
+const docsApi = (runtime: Runtime) =>
+  route(runtime, async (req, res, next, { id, action, server }) => {
     if (!id && req.method === 'GET') {
       const list = Object.keys(docs)
         .filter((docId) => !isClosed(docId))
@@ -528,25 +686,32 @@ const docsApi = (port: number) =>
 async function attach(
   middlewares: Connect.Server,
   httpServer: { once(event: 'close', listener: () => void): unknown } | null,
-  port: number,
+  config: WriteConfig,
 ) {
-  middlewares.use('/api/docs', docsApi(port))
-  middlewares.use('/api/trash', trashApi(port))
-  const server = await ensureServer(port)
+  const runtime = await ensureRuntime(config)
+  console.log(describeConfig(runtime.config))
+  // Identity first: nothing under /api is served without one.
+  middlewares.use('/api', identify(runtime))
+  middlewares.use('/api/me', meApi(runtime))
+  middlewares.use('/api/docs', docsApi(runtime))
+  middlewares.use('/api/trash', trashApi(runtime))
+  // Unknown API paths get a JSON 404, not the app's index.html.
+  middlewares.use('/api', (_req, res) => send(res, 404, { error: 'not found' }))
   httpServer?.once('close', () => {
-    server.hocuspocus.flushPendingStores()
+    runtime.server.hocuspocus.flushPendingStores()
     void saveIndex().catch(() => undefined)
   })
 }
 
-export function collabServer({ port }: { port: number }): Plugin {
+/** The Vite plugin. `config` comes from `resolveConfig()` in `vite.config.ts`. */
+export function collabServer(config: WriteConfig): Plugin {
   return {
     name: 'write:collab-server',
     async configureServer(vite) {
-      await attach(vite.middlewares, vite.httpServer, port)
+      await attach(vite.middlewares, vite.httpServer, config)
     },
     async configurePreviewServer(preview) {
-      await attach(preview.middlewares, preview.httpServer, port)
+      await attach(preview.middlewares, preview.httpServer, config)
     },
   }
 }

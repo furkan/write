@@ -46,6 +46,7 @@
     "@tiptap/suggestion": "^3.32.2",
     "@tiptap/y-tiptap": "^3.0.12",
     "driver.js": "^1.10.2",
+    "jose": "^6.2.15",
     "katex": "^0.19.1",
     "lowlight": "^3.3.0",
     "react": "^19.3.1",
