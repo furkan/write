@@ -1,10 +1,11 @@
+import type { HocuspocusProvider } from '@hocuspocus/provider'
 import { useEffect, useState } from 'react'
-import { provider } from './collab'
+import { getTitle, type Session } from './collab'
 
 export type Presence = { clientId: number; name: string; color: string; self: boolean }
 
 /** Everyone currently connected to the shared document (from Yjs awareness). */
-export function usePresence(): Presence[] {
+export function usePresence(provider: HocuspocusProvider): Presence[] {
   const [people, setPeople] = useState<Presence[]>([])
 
   useEffect(() => {
@@ -24,14 +25,14 @@ export function usePresence(): Presence[] {
     update()
     awareness.on('change', update)
     return () => awareness.off('change', update)
-  }, [])
+  }, [provider])
 
   return people
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
 
-export function useConnectionStatus(): ConnectionStatus {
+export function useConnectionStatus(provider: HocuspocusProvider): ConnectionStatus {
   const [status, setStatus] = useState<ConnectionStatus>(
     () => provider.configuration.websocketProvider.status as ConnectionStatus,
   )
@@ -42,7 +43,20 @@ export function useConnectionStatus(): ConnectionStatus {
     return () => {
       provider.off('status', onStatus)
     }
-  }, [])
+  }, [provider])
 
   return status
+}
+
+/** The shared document title, live across collaborators. */
+export function useDocTitle(session: Session): string {
+  const [title, setTitle] = useState(() => getTitle(session))
+
+  useEffect(() => {
+    const update = () => setTitle(getTitle(session))
+    session.meta.observe(update)
+    return () => session.meta.unobserve(update)
+  }, [session])
+
+  return title
 }

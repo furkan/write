@@ -7,6 +7,7 @@ import type { ConnectionStatus } from '../editor/hooks'
 
 type StatusBarProps = {
   editor: Editor
+  documentName: string
   user: CollabUser
   onRename: () => void
   status: ConnectionStatus
@@ -19,7 +20,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   disconnected: 'Offline: changes will sync when you reconnect',
 }
 
-export function StatusBar({ editor, user, onRename, status, readOnly }: StatusBarProps) {
+export function StatusBar({ editor, documentName, user, onRename, status, readOnly }: StatusBarProps) {
   const info = useEditorState({
     editor,
     selector: ({ editor: e }) => {
@@ -34,7 +35,7 @@ export function StatusBar({ editor, user, onRename, status, readOnly }: StatusBa
     },
   })
 
-  const [savedAt, setSavedAt] = useState<number | null>(() => loadBackup()?.savedAt ?? null)
+  const [savedAt, setSavedAt] = useState<number | null>(() => loadBackup(documentName)?.savedAt ?? null)
 
   useEffect(() => {
     const onSaved = (event: Event) => setSavedAt((event as CustomEvent<Backup>).detail.savedAt)

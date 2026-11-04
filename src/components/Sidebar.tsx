@@ -22,12 +22,15 @@ export function Sidebar({ editor, toc, events, onClearEvents }: SidebarProps) {
 }
 
 function TableOfContents({ editor, toc }: { editor: Editor; toc: TableOfContentData }) {
-  const jump = (pos: number, dom: HTMLElement) => {
+  const jump = (pos: number, fallback: HTMLElement) => {
     const { tr } = editor.state
     tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)))
     editor.view.dispatch(tr)
     editor.view.focus()
-    dom.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // The element in the TOC data can be stale after re-renders; look up the live one.
+    const live = editor.view.nodeDOM(pos)
+    const target = live instanceof HTMLElement && live.isConnected ? live : fallback
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   return (

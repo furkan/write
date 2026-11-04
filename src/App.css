@@ -42,13 +42,102 @@
 
 .brand {
   display: flex;
-  gap: 8px;
+  flex: 1 1 200px;
+  gap: 6px;
   align-items: center;
   min-width: 0;
 }
 
 .logo {
   font-size: 1.3rem;
+}
+
+.logo-link {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  text-decoration: none;
+  border-radius: 8px;
+}
+
+.logo-link:hover {
+  background: var(--surface);
+}
+
+.title-input {
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 8px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  text-overflow: ellipsis;
+}
+
+.title-input:hover {
+  border-color: var(--border);
+}
+
+.title-input:focus {
+  background: var(--bg);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.title-input::placeholder {
+  color: var(--muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  font-weight: 600;
+  color: var(--accent-contrast);
+  text-decoration: none;
+  background: var(--accent);
+  border-radius: 8px;
+}
+
+.loading.deleted {
+  flex-direction: column;
+}
+
+.deleted-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.theme-icon {
+  display: inline-flex;
+}
+
+.menu-icon svg {
+  vertical-align: -3px;
+}
+
+.theme-toggle > button {
+  width: 32px;
+  padding: 0 !important;
 }
 
 .brand-name {
@@ -422,6 +511,11 @@
   font-size: 2rem;
 }
 
+/* Keep headings clear of the sticky toolbar when jumping from the table of contents. */
+.tiptap :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: 140px;
+}
+
 .tiptap h2 {
   margin-top: 1.6em;
   font-size: 1.5rem;
@@ -443,16 +537,12 @@
 
 .tiptap mark {
   padding: 0 2px;
-  color: inherit;
+  /* Highlight colours are light in both themes, so keep the text dark. */
+  color: #1f1d24;
   background: #fef08a;
   border-radius: 2px;
 }
 
-@media (prefers-color-scheme: dark) {
-  .tiptap mark {
-    color: #1f1d24;
-  }
-}
 
 .tiptap blockquote {
   margin-left: 0;
@@ -538,65 +628,32 @@
 .tiptap pre .hljs-keyword,
 .tiptap pre .hljs-selector-tag,
 .tiptap pre .hljs-built_in {
-  color: #7c3aed;
+  color: var(--hl-keyword);
 }
 
 .tiptap pre .hljs-string,
 .tiptap pre .hljs-attr,
 .tiptap pre .hljs-template-tag {
-  color: #15803d;
+  color: var(--hl-string);
 }
 
 .tiptap pre .hljs-number,
 .tiptap pre .hljs-literal,
 .tiptap pre .hljs-variable,
 .tiptap pre .hljs-symbol {
-  color: #c2410c;
+  color: var(--hl-number);
 }
 
 .tiptap pre .hljs-title,
 .tiptap pre .hljs-name,
 .tiptap pre .hljs-section {
-  color: #2563eb;
+  color: var(--hl-title);
 }
 
 .tiptap pre .hljs-type,
 .tiptap pre .hljs-tag,
 .tiptap pre .hljs-meta {
-  color: #b45309;
-}
-
-@media (prefers-color-scheme: dark) {
-  .tiptap pre .hljs-keyword,
-  .tiptap pre .hljs-selector-tag,
-  .tiptap pre .hljs-built_in {
-    color: #c4b5fd;
-  }
-
-  .tiptap pre .hljs-string,
-  .tiptap pre .hljs-attr,
-  .tiptap pre .hljs-template-tag {
-    color: #86efac;
-  }
-
-  .tiptap pre .hljs-number,
-  .tiptap pre .hljs-literal,
-  .tiptap pre .hljs-variable,
-  .tiptap pre .hljs-symbol {
-    color: #fdba74;
-  }
-
-  .tiptap pre .hljs-title,
-  .tiptap pre .hljs-name,
-  .tiptap pre .hljs-section {
-    color: #93c5fd;
-  }
-
-  .tiptap pre .hljs-type,
-  .tiptap pre .hljs-tag,
-  .tiptap pre .hljs-meta {
-    color: #fcd34d;
-  }
+  color: var(--hl-type);
 }
 
 /* Tables */

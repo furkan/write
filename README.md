@@ -1,6 +1,6 @@
 # Write
 
-A playground for the [Tiptap](https://tiptap.dev) editor (v3) with most of its extensions enabled, real-time collaboration, and guided tutorial overlays.
+A playground for the [Tiptap](https://tiptap.dev) editor (v3) with most of its extensions enabled, a Google Docs-style document library, real-time collaboration, light and dark themes, and guided tutorial overlays.
 
 ## Run it
 
@@ -11,8 +11,10 @@ bun dev
 
 Open the URL Vite prints. The server listens on every interface, so other devices on your Tailscale network can use `http://<tailscale-ip>:5173` or `http://<machine>.<tailnet>.ts.net:5173`.
 
-- **Separate documents:** add `?doc=name` to the URL. Everyone on the same name edits together.
-- **Guided tours:** the welcome tour opens on your first visit. Replay it, or take the other tours, from the **?** button. Pressing `?` outside the document also replays the welcome tour.
+- **Library:** the home page lists every document. Start one from a template (Blank, Feature tour, Meeting notes, Project brief, Journal), then search, sort, switch between grid and list, rename, copy or delete.
+- **Documents:** each opens at `?doc=<id>`. Everyone with the link edits together. Rename it in the title field (✍️ goes back to the library), and use **File** for new documents, copies, import, export and delete.
+- **Theme:** use the theme button for System, Light or Dark. The choice is remembered per browser and applied before first paint.
+- **Guided tours:** the library and welcome tours open on your first visit, unless you start typing or clicking first. Replay them, or take the others, from the **?** button or by pressing `?`.
 
 ## What's inside
 
@@ -25,11 +27,26 @@ Open the URL Vite prints. The server listens on every interface, so other device
 | Custom extensions | `Callout` (node with a React node view and an input rule), `Spoiler` (mark with input and paste rules and Markdown support), `Shortcuts` (commands, keyboard shortcuts, `!today` and `!shrug`), `SlashCommand` |
 | Bigger lifts | Collaboration (Yjs and Hocuspocus) with live carets and presence, math (KaTeX) |
 
+## Document library
+
+The library is backed by a small REST API that the same Vite plugin serves:
+
+| Method | Path | |
+| --- | --- | --- |
+| `GET` | `/api/docs` | List documents (title, preview text, word count, timestamps) |
+| `POST` | `/api/docs` | Create a document (optional `title`) |
+| `GET` | `/api/docs/:id/status` | `{ deleted, exists }` |
+| `PATCH` | `/api/docs/:id` | Rename. This writes the title into the live Yjs document, so open editors update immediately |
+| `POST` | `/api/docs/:id/duplicate` | Copy the document's current state as "Copy of …" |
+| `DELETE` | `/api/docs/:id` | Delete. The ID is tombstoned and the server refuses to sync it again, so an open tab can't bring it back |
+
+Titles live in the shared Yjs document (`meta.title`) and sync live. Each time the server persists a document, it also updates `.collab-data/index.json` with the title, preview text and edit time.
+
 ## How collaboration works
 
 `server/collab.ts` is a Vite plugin that starts a [Hocuspocus](https://tiptap.dev/docs/hocuspocus) server on `127.0.0.1:1234` alongside the dev and preview servers. Browsers connect to `/collab` on the Vite port, and Vite forwards the WebSocket to it, so only port 5173 needs to be reachable. Documents are stored as Yjs updates in `.collab-data/`, which is gitignored. Pending writes are flushed when the dev server stops.
 
-The editor waits for the first sync before it mounts. A brand-new document is seeded with demo content by writing it straight into the Yjs document. If the server can't be reached within 4 seconds, the editor opens offline and merges its changes when the connection comes back.
+The editor waits for the first sync before it mounts. A brand-new document created from a template is seeded by writing the template straight into the Yjs document. If the server can't be reached within 4 seconds, the editor opens offline and merges its changes when the connection comes back.
 
 ## Patched dependency
 
@@ -39,7 +56,12 @@ The editor waits for the first sync before it mounts. A brand-new document is se
 
 ```
 server/collab.ts          Hocuspocus server and Vite plugin
-src/App.tsx               Editor setup, sync gating, view state
+src/App.tsx               Router: library or document
+src/pages/Library.tsx     Document library (templates, search, grid and list, actions)
+src/pages/DocumentPage.tsx  Editor page: sync gating, template seeding, view state
+src/api.ts                Library API client
+src/theme.ts              Theme choice (System, Light, Dark)
+src/editor/templates.ts   New-document templates
 src/editor/extensions.ts  Every extension and its configuration
 src/editor/extensions/    Custom extensions (Callout, Spoiler, Shortcuts, SlashCommand)
 src/editor/blocks.tsx     Block insert actions shared by the slash menu, "+" menu and toolbar

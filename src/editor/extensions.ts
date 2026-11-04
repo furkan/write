@@ -24,8 +24,7 @@ import { Markdown } from '@tiptap/markdown'
 import type { Editor, Extensions } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { common, createLowlight } from 'lowlight'
-import type { CollabUser } from './collab'
-import { provider, ydoc } from './collab'
+import type { CollabUser, Session } from './collab'
 import { Callout } from './extensions/callout'
 import { Shortcuts } from './extensions/shortcuts'
 import { SlashCommand } from './extensions/slash-command'
@@ -75,12 +74,14 @@ function editMath(editor: Editor, kind: 'inline' | 'block', latex: string, pos: 
 }
 
 type Options = {
+  session: Session
   user: CollabUser
+  onSave: (editor: Editor) => void
   getEditor: () => Editor | null
   onTableOfContents: (data: TableOfContentData) => void
 }
 
-export function buildExtensions({ user, getEditor, onTableOfContents }: Options): Extensions {
+export function buildExtensions({ session, user, onSave, getEditor, onTableOfContents }: Options): Extensions {
   return [
     StarterKit.configure({
       // Yjs has its own history; the regular undo/redo would fight it.
@@ -92,8 +93,8 @@ export function buildExtensions({ user, getEditor, onTableOfContents }: Options)
     }),
 
     // Collaboration
-    Collaboration.configure({ document: ydoc }),
-    CollaborationCaret.configure({ provider, user }),
+    Collaboration.configure({ document: session.ydoc }),
+    CollaborationCaret.configure({ provider: session.provider, user }),
 
     // Small additions
     Placeholder.configure({
@@ -161,7 +162,7 @@ export function buildExtensions({ user, getEditor, onTableOfContents }: Options)
     Markdown,
     Callout,
     Spoiler,
-    Shortcuts,
+    Shortcuts.configure({ onSave }),
 
     // Bigger lifts
     Mathematics.configure({

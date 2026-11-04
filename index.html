@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Apply the saved theme before first paint to avoid a flash of the wrong theme.
+      try {
+        var theme = localStorage.getItem('write:theme')
+        if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-theme', theme)
+      } catch (e) {}
+    </script>
     <title>Write</title>
   </head>
   <body>

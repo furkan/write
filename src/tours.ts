@@ -10,20 +10,91 @@ import { readStorage, writeStorage } from './editor/storage'
 
 const k = (keys: string) => `<kbd>${keys}</kbd>`
 
-export type TourId = 'welcome' | 'formatting' | 'blocks' | 'developer' | 'collaboration'
+export type TourId = 'library' | 'welcome' | 'formatting' | 'blocks' | 'developer' | 'collaboration'
 
-type Tour = { title: string; summary: string; steps: DriveStep[] }
+/** `scope` says which page a tour belongs to (its elements only exist there). */
+type Tour = { title: string; summary: string; scope: 'library' | 'document'; steps: DriveStep[] }
 
 export const TOURS: Record<TourId, Tour> = {
+  library: {
+    title: 'Library tour',
+    summary: 'Templates, your documents and how to manage them.',
+    scope: 'library',
+    steps: [
+      {
+        popover: {
+          title: 'Your documents 📚',
+          description:
+            'This is the library: every shared document on this server. Everything you see here is shared with anyone who can open this page.',
+        },
+      },
+      {
+        element: '[data-tour="templates"]',
+        popover: {
+          title: 'Start a new document',
+          description:
+            'Pick a blank page or a template. <b>Feature tour</b> is a document that shows off every editor feature.',
+          side: 'bottom',
+        },
+      },
+      {
+        element: '[data-tour="search"]',
+        popover: {
+          title: 'Search',
+          description: `Filter by title or content. Press ${k('/')} to jump here.`,
+          side: 'bottom',
+        },
+      },
+      {
+        element: '[data-tour="doc-list"]',
+        popover: {
+          title: 'Recent documents',
+          description:
+            'Sorted by last edit, with a live preview of each one. Use the controls above the list to switch between grid and list view, or to sort by title.',
+          side: 'top',
+        },
+      },
+      {
+        element: '[data-tour="doc-actions"]',
+        popover: {
+          title: 'Rename, copy, delete',
+          description:
+            'Each document’s ⋮ menu can rename it (open editors update live), make a copy, open it in a new tab or delete it.',
+          side: 'left',
+        },
+      },
+      {
+        element: '[data-tour="theme"]',
+        popover: {
+          title: 'Theme',
+          description: 'Choose light, dark, or follow your system. Your choice is remembered in this browser.',
+          side: 'bottom',
+          align: 'end',
+        },
+      },
+    ],
+  },
+
   welcome: {
     title: 'Welcome tour',
     summary: 'The layout and the essentials, in about a minute.',
+    scope: 'document',
     steps: [
       {
         popover: {
           title: 'Welcome to Write 👋',
           description:
             'This is a playground for the <b>Tiptap</b> editor, with most of its extensions turned on. Use the arrow keys or the buttons to move through the tour. Press <kbd>Esc</kbd> to leave.',
+        },
+      },
+      {
+        element: '[data-tour="title"]',
+        popover: {
+          title: 'Title',
+          description:
+            'Click to rename the document. The title syncs live to collaborators and to the library. The ✍️ logo takes you back to all documents.',
+          side: 'bottom',
+          align: 'start',
         },
       },
       {
@@ -87,6 +158,15 @@ export const TOURS: Record<TourId, Tour> = {
         },
       },
       {
+        element: '[data-tour="theme"]',
+        popover: {
+          title: 'Light or dark',
+          description: 'Switch the theme here, or let it follow your system setting.',
+          side: 'bottom',
+          align: 'end',
+        },
+      },
+      {
         element: '[data-tour="help"]',
         popover: {
           title: 'More tours',
@@ -101,6 +181,7 @@ export const TOURS: Record<TourId, Tour> = {
   formatting: {
     title: 'Formatting & shortcuts',
     summary: 'Marks, Markdown shortcuts, typography and colours.',
+    scope: 'document',
     steps: [
       {
         element: '[data-tour="marks"]',
@@ -164,6 +245,7 @@ export const TOURS: Record<TourId, Tour> = {
   blocks: {
     title: 'Blocks & embeds',
     summary: 'Lists, tables, code, math, media, callouts and toggles.',
+    scope: 'document',
     steps: [
       {
         element: '[data-tour="lists"]',
@@ -239,6 +321,7 @@ export const TOURS: Record<TourId, Tour> = {
   developer: {
     title: 'Developer playground',
     summary: 'Inspector, events, Markdown import and export, custom extensions.',
+    scope: 'document',
     steps: [
       {
         element: '[data-tour="inspector"]',
@@ -293,6 +376,7 @@ export const TOURS: Record<TourId, Tour> = {
   collaboration: {
     title: 'Collaboration',
     summary: 'Real-time editing with Yjs and live cursors.',
+    scope: 'document',
     steps: [
       {
         element: '[data-tour="presence"]',
@@ -323,9 +407,9 @@ export const TOURS: Record<TourId, Tour> = {
       {
         element: '[data-tour="share"]',
         popover: {
-          title: 'Separate documents',
+          title: 'Share the link',
           description:
-            'Add <code>?doc=any-name</code> to the URL to start a separate shared document. Click here to copy this document’s link.',
+            'Copy this document’s link and send it to anyone who can reach this server, for example over Tailscale. The library (✍️) lists every document.',
           side: 'bottom',
           align: 'end',
         },
@@ -334,9 +418,34 @@ export const TOURS: Record<TourId, Tour> = {
   },
 }
 
-const SEEN_KEY = 'write:tour-seen'
+const seenKey = (id: TourId) => (id === 'welcome' ? 'write:tour-seen' : `write:tour-seen:${id}`)
 
-export const hasSeenWelcomeTour = () => readStorage(SEEN_KEY) === '1'
+/** Tours that open automatically on a first visit to their page. */
+export const hasSeenTour = (id: 'welcome' | 'library') => readStorage(seenKey(id)) === '1'
+
+/**
+ * Starts a first-visit tour after `delay`, unless the user starts typing or clicking
+ * first: popping an overlay mid-keystroke would steal focus and swallow input. The tour
+ * stays unseen, so it can open on a later visit (and the ? button always works).
+ */
+export function autoStartTour(id: 'welcome' | 'library', delay: number): () => void {
+  if (hasSeenTour(id)) return () => undefined
+  const timer = window.setTimeout(() => {
+    stop()
+    startTour(id)
+  }, delay)
+  const stop = () => {
+    window.clearTimeout(timer)
+    window.removeEventListener('keydown', stop, true)
+    window.removeEventListener('pointerdown', stop, true)
+  }
+  window.addEventListener('keydown', stop, true)
+  window.addEventListener('pointerdown', stop, true)
+  return stop
+}
+
+export const toursFor = (scope: Tour['scope']) =>
+  (Object.entries(TOURS) as [TourId, Tour][]).filter(([, tour]) => tour.scope === scope)
 
 export function startTour(id: TourId) {
   const tour = TOURS[id]
@@ -353,7 +462,7 @@ export function startTour(id: TourId) {
     doneBtnText: 'Done',
     steps: tour.steps,
     onDestroyed: () => {
-      if (id === 'welcome') writeStorage(SEEN_KEY, '1')
+      if (id === 'welcome' || id === 'library') writeStorage(seenKey(id), '1')
     },
   })
   instance.drive()

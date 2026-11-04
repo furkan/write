@@ -1,5 +1,4 @@
-import { Extension, InputRule, textInputRule } from '@tiptap/core'
-import { saveBackup } from '../backup'
+import { Extension, InputRule, textInputRule, type Editor } from '@tiptap/core'
 import { setLink } from '../blocks'
 
 /**
@@ -18,8 +17,17 @@ declare module '@tiptap/core' {
 const today = () =>
   new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
-export const Shortcuts = Extension.create({
+type ShortcutsOptions = {
+  /** Called for Mod-S (instead of the browser's "Save page" dialog). */
+  onSave: (editor: Editor) => void
+}
+
+export const Shortcuts = Extension.create<ShortcutsOptions>({
   name: 'shortcuts',
+
+  addOptions() {
+    return { onSave: () => undefined }
+  },
 
   addCommands() {
     return {
@@ -37,9 +45,8 @@ export const Shortcuts = Extension.create({
         if (this.editor.isEditable) setLink(this.editor)
         return true
       },
-      // Save a local backup instead of opening the browser's "Save page" dialog.
       'Mod-s': () => {
-        saveBackup(this.editor)
+        this.options.onSave(this.editor)
         return true
       },
     }
