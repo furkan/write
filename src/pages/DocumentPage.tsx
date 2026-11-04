@@ -3,7 +3,7 @@ import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getDocStatus, libraryUrl, restoreDoc, trashUrl } from '../api'
+import { getDocStatus, libraryUrl, restoreOrConfirmOpen, trashUrl } from '../api'
 import { EditorMenus } from '../components/EditorMenus'
 import { Header, type ViewOptions } from '../components/Header'
 import { Sidebar, type EditorEvent } from '../components/Sidebar'
@@ -85,7 +85,7 @@ function RestoreButton({ name, className }: { name: string; className?: string }
   const restore = async () => {
     setBusy(true)
     try {
-      await restoreDoc(name)
+      await restoreOrConfirmOpen(name)
       window.location.reload()
     } catch {
       setBusy(false)

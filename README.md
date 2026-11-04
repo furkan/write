@@ -36,20 +36,20 @@ The library is backed by a small REST API that the same Vite plugin serves:
 | --- | --- | --- |
 | `GET` | `/api/docs` | List documents (title, preview text, word count, timestamps) |
 | `POST` | `/api/docs` | Create a document (optional `title`) |
-| `GET` | `/api/docs/:id/status` | `{ deleted, exists }` |
+| `GET` | `/api/docs/:id/status` | `{ deleted, trashed, exists }` |
 | `PATCH` | `/api/docs/:id` | Rename. This writes the title into the live Yjs document, so open editors update immediately |
 | `POST` | `/api/docs/:id/duplicate` | Copy the document's current state as "Copy of …" |
 | `DELETE` | `/api/docs/:id` | Move to the Trash. Open tabs are disconnected and show a banner with **Restore** |
 | `GET` | `/api/trash` | List the Trash (with `trashedAt` and `purgeAt`) |
 | `POST` | `/api/trash/:id/restore` | Restore from the Trash |
 | `DELETE` | `/api/trash/:id` | Delete forever (only documents in the Trash). The ID is tombstoned, so an open tab can't bring it back |
-| `DELETE` | `/api/trash` | Empty the Trash |
+| `DELETE` | `/api/trash` | Empty the Trash: deletes forever the IDs in the body (`{ "ids": [...] }`), so anything trashed after the caller looked is kept |
 
 Titles live in the shared Yjs document (`meta.title`) and sync live. Each time the server persists a document, it also updates `.collab-data/index.json` with the title, preview text and edit time. Trashed documents keep their file until they are deleted forever; the server checks hourly for ones older than 30 days.
 
 ## Backups
 
-When the server starts, and then once a day while it runs, it copies `.collab-data/` to a timestamped folder in `.collab-backups/` (for example `.collab-backups/2026-11-05T09-30-00Z/`) and keeps the newest 14. Set `WRITE_BACKUP_DIR` to keep them somewhere else, such as another disk. Copies are written to a `.partial` folder first and renamed when complete.
+When the server starts, and every hour after that, it checks the newest snapshot; if it is a day old or there is none, it copies `.collab-data/` to a timestamped folder in `.collab-backups/` (for example `.collab-backups/2026-11-05T09-30-00Z/`) and keeps the newest 14. Set `WRITE_BACKUP_DIR` to keep them somewhere else, such as another disk. Copies are written to a `.partial` folder first and renamed when complete; incomplete ones are removed.
 
 To restore, stop the server, replace `.collab-data/` with a snapshot (or copy single `.ydoc` files back along with its `index.json`), then start it again.
 

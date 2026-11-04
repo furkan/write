@@ -9,7 +9,7 @@ import {
   listDocs,
   listTrash,
   renameDoc,
-  restoreDoc,
+  restoreOrConfirmOpen,
   trashDoc,
   type DocMeta,
   type TrashedDoc,
@@ -119,21 +119,29 @@ export function Library() {
   // Load now, then keep the lists fresh (other people edit, rename, create and delete documents too).
   useEffect(() => {
     let cancelled = false
-    const refresh = () =>
-      Promise.all([listDocs(), listTrash()]).then(
-        ([list, trashed]) => {
+    // The two lists load independently, so a failing Trash request can't blank the documents.
+    const refresh = () => {
+      listDocs().then(
+        (list) => {
           if (cancelled) return
           setDocs(list)
+          setError(false)
+        },
+        () => !cancelled && setError(true),
+      )
+      listTrash().then(
+        (trashed) => {
+          if (cancelled) return
           setTrash(trashed.docs)
           setRetentionDays(trashed.retentionDays)
-          setError(false)
           // Arriving from a document's File → Move to trash: offer to undo it here.
           const doc = justTrashed && trashed.docs.find((d) => d.id === justTrashed)
           justTrashed = null
           if (doc) setToastState({ text: `Moved “${displayTitle(doc)}” to the trash.`, undo: doc })
         },
-        () => !cancelled && setError(true),
+        () => undefined,
       )
+    }
     void refresh()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void refresh()
@@ -223,9 +231,9 @@ export function Library() {
 
   const restore = async (doc: DocMeta, message = `Restored “${displayTitle(doc)}”.`) => {
     try {
-      const restored = await restoreDoc(doc.id)
+      await restoreOrConfirmOpen(doc.id)
       setTrash((list) => list?.filter((d) => d.id !== doc.id) ?? list)
-      setDocs((list) => (list ? [restored, ...list.filter((d) => d.id !== doc.id)] : list))
+      setDocs(await listDocs())
       setToast(message)
     } catch {
       setToast('Restore failed. It may have been deleted forever.')
@@ -256,12 +264,18 @@ export function Library() {
   }
 
   const empty = async () => {
-    const count = trash?.length ?? 0
-    if (!window.confirm(`Delete ${count === 1 ? 'this document' : `all ${count} documents`} in the trash forever? This can’t be undone.`)) return
+    // Exactly the documents on screen: anything trashed since the last refresh stays.
+    const ids = (trash ?? []).map((d) => d.id)
+    if (!window.confirm(`Delete ${ids.length === 1 ? 'this document' : `all ${ids.length} documents`} in the trash forever? This can’t be undone.`)) return
     try {
-      await emptyTrash()
-      setTrash([])
-      setToast('Trash emptied.')
+      const { purged } = await emptyTrash(ids)
+      const fresh = await listTrash()
+      setTrash(fresh.docs)
+      setToast(
+        fresh.docs.length
+          ? `Deleted ${purged} forever. ${fresh.docs.length} newly trashed ${fresh.docs.length === 1 ? 'document was' : 'documents were'} kept.`
+          : 'Trash emptied.',
+      )
     } catch {
       setToast('Could not empty the trash.')
     }

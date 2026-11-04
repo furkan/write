@@ -126,6 +126,10 @@
   border-color: var(--border);
 }
 
+.secondary-button.danger-text {
+  color: var(--danger);
+}
+
 .primary-button:disabled {
   opacity: 0.6;
   cursor: default;

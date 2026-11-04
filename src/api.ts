@@ -60,7 +60,23 @@ export const restoreDoc = (id: string) => trash<DocMeta>(`/${encodeURIComponent(
 /** Deletes a document in the Trash forever. */
 export const deleteForever = (id: string) => trash<void>(`/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
-export const emptyTrash = () => trash<{ purged: number }>('', { method: 'DELETE' })
+/** Deletes the listed Trash documents forever (the ones the user saw, not anything trashed since). */
+export const emptyTrash = (ids: string[]) =>
+  trash<{ purged: number }>('', { method: 'DELETE', body: JSON.stringify({ ids }) })
+
+/**
+ * Restores a document. If it was already restored (say, by someone else), that counts as
+ * success; anything else rethrows.
+ */
+export async function restoreOrConfirmOpen(id: string): Promise<void> {
+  try {
+    await restoreDoc(id)
+  } catch (error) {
+    const status = await getDocStatus(id).catch(() => null)
+    if (status && status.exists && !status.trashed && !status.deleted) return
+    throw error
+  }
+}
 
 /** URL of a document; `template` seeds a brand-new document on first open. */
 export const docUrl = (id: string, template?: string) => {
