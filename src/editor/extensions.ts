@@ -29,6 +29,7 @@ import type { CollabUser, Session } from './collab'
 import { PAGE_SETUP_ORIGIN } from './page-setup'
 import { Callout } from './extensions/callout'
 import { Pagination, type PaginationOptions } from './extensions/pagination/Pagination'
+import { ZoomedResize } from './extensions/ZoomedResize'
 import { tocScrollParent } from './scroller'
 import { Shortcuts } from './extensions/shortcuts'
 import { SlashCommand } from './extensions/slash-command'
@@ -195,6 +196,7 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
     Spoiler,
     Shortcuts.configure({ onSave }),
     Pagination.configure(pagination),
+    ZoomedResize,
 
     // Bigger lifts
     Mathematics.configure({
