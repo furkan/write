@@ -20,7 +20,7 @@ export function RibbonGroup({ label, tour, children }: { label: string; tour?: s
 
 type ButtonProps = {
   label: string
-  /** The tooltip and accessible name, when it says more than the label. */
+  /** The tooltip, when it says more than the label. The label stays the accessible name. */
   title?: string
   shortcut?: string
   icon?: LucideIcon
@@ -40,13 +40,14 @@ type ButtonProps = {
 }
 
 export function RibbonButton({ label, title, shortcut, icon: Icon, glyph, size = 'small', active, disabled, tone, onClick }: ButtonProps) {
-  const name = tooltip(title ?? label, shortcut)
+  // The name is the label (what you see, and what you say to voice control); a longer `title` is
+  // only the tooltip, and so the description.
   return (
     <button
       type="button"
       className={`ribbon-btn ${size}${active ? ' active' : ''}${tone ? ` ${tone}` : ''}`}
-      title={name}
-      aria-label={name}
+      title={tooltip(title ?? label, shortcut)}
+      aria-label={tooltip(label, shortcut)}
       aria-pressed={active}
       disabled={disabled}
       onMouseDown={keepSelection}
