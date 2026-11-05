@@ -1623,3 +1623,48 @@ html:has(.doc-shell) body {
 .connection.unsaved .dot {
   background: var(--warning);
 }
+
+/* ---------- Toast (document page) ---------- */
+
+/* Above the status bar, centred; inverted colours like the library's toast. */
+.doc-toast {
+  position: fixed;
+  bottom: 48px;
+  left: 50%;
+  z-index: 150;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 10px 8px 10px 16px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--bg);
+  background: var(--text);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.doc-toast.error {
+  border-left: 4px solid var(--danger);
+}
+
+.doc-toast-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.doc-toast-close:hover {
+  background: color-mix(in srgb, var(--bg) 18%, transparent);
+}

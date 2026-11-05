@@ -5,6 +5,7 @@ import {
   FileCode,
   FileDown,
   FileJson,
+  FileText,
   FilePlus2,
   FileUp,
   FolderOpen,
@@ -19,6 +20,7 @@ import { createDoc, docUrl, duplicateDoc, libraryUrl, trashDoc } from '../../api
 import { loadBackup } from '../../editor/backup'
 import { getTitle, type Session } from '../../editor/collab'
 import { initialContent } from '../../editor/content'
+import { downloadPdf, usePreparingPdf } from '../../editor/pdf'
 import { mod } from '../../editor/platform'
 import { useMe } from '../../session'
 import { RibbonButton, RibbonGroup } from './controls'
@@ -87,9 +89,9 @@ async function importMarkdown(editor: Editor, file: File) {
 }
 
 /**
- * Word's File tab as a ribbon panel: new and copy, the library, print, share, import and export,
- * local backups and the trash. Viewers keep what doesn't change the document (copy, export, print);
- * actions that would are hidden for them, and disabled in Read-only.
+ * Word's File tab as a ribbon panel: new and copy, the library, print and Download as PDF, share,
+ * import and export, local backups and the trash. Viewers keep what doesn't change the document
+ * (copy, export, print, PDF); actions that would are hidden for them, and disabled in Read-only.
  */
 export function FileTab({ editor, session }: TabProps) {
   const me = useMe()
@@ -97,6 +99,7 @@ export function FileTab({ editor, session }: TabProps) {
   const writer = canWrite(role)
   const isOwner = role === 'owner'
   const baseName = () => fileSafe(getTitle(session) || 'Untitled document')
+  const preparingPdf = usePreparingPdf()
 
   const restoreBackup = () => {
     const saved = loadBackup(me.email, session.name)
@@ -129,9 +132,27 @@ export function FileTab({ editor, session }: TabProps) {
         <RibbonButton size="large" label="All documents" icon={FolderOpen} onClick={() => window.location.assign(libraryUrl())} />
       </RibbonGroup>
 
-      <RibbonGroup label="Print" tour="print">
-        {/* The browser's dialog, as Ctrl/Cmd+P: the sheets follow the page setup (pageRules). */}
-        <RibbonButton size="large" label="Print / PDF" title="Print or save as PDF" shortcut={`${mod}+P`} icon={Printer} onClick={() => window.print()} />
+      <RibbonGroup label="Print and PDF" tour="print">
+        <div className="ribbon-row">
+          {/* The browser's dialog, as Ctrl/Cmd+P: the sheets follow the page setup (pageRules). */}
+          <RibbonButton
+            size="large"
+            label="Print"
+            title="Print with the browser’s dialog"
+            shortcut={`${mod}+P`}
+            icon={Printer}
+            onClick={() => window.print()}
+          />
+          {/* Made on the server: no browser headers, the same from every browser (server/pdf.ts). */}
+          <RibbonButton
+            size="large"
+            label={preparingPdf ? 'Preparing PDF…' : 'Download as PDF'}
+            title="Download a PDF with this document’s page setup"
+            icon={FileText}
+            busy={preparingPdf}
+            onClick={() => void downloadPdf(session)}
+          />
+        </div>
       </RibbonGroup>
 
       <RibbonGroup label="Share">

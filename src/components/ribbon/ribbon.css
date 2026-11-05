@@ -398,6 +398,22 @@
   cursor: default;
 }
 
+/* Working (Preparing PDF…): disabled, but not faded, with a spinning icon. */
+.ribbon-btn[aria-busy='true']:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+.ribbon-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ribbon-spin {
+    animation-duration: 3s;
+  }
+}
+
 /* Focus rings stay inside the scrolling panel. */
 .ribbon-groups :focus-visible {
   outline-offset: -2px;

@@ -22,6 +22,7 @@ import { canWrite as canWriteAs, DocumentChromeContext, type DocumentChrome, typ
 import { Ribbon } from '../components/ribbon/Ribbon'
 import { useMediaQuery } from '../components/ribbon/state'
 import { SessionBanner } from '../components/SessionBanner'
+import { Toast } from '../components/Toast'
 import { ShareDialog } from '../components/ShareDialog'
 import { Sidebar } from '../components/Sidebar'
 import { StatusBar } from '../components/StatusBar'
@@ -758,6 +759,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
             {view.sidebar && <Sidebar editor={editor} toc={toc} />}
           </div>
         </div>
+        <Toast />
         <StatusBar
           editor={editor}
           documentName={session.name}
