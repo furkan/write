@@ -15,6 +15,11 @@
   grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
 }
 
+/* No room for the sidebar beside the page (see SIDEBAR_ROOM): it goes below, as on narrow screens. */
+.layout-print.sidebar-below .workspace {
+  grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
+}
+
 @media (max-width: 1000px) {
   .layout-print .workspace {
     grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);

@@ -26,6 +26,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { common, createLowlight } from 'lowlight'
 import { presenceLabel } from '../identity'
 import type { CollabUser, Session } from './collab'
+import { PAGE_SETUP_ORIGIN } from './page-setup'
 import { Callout } from './extensions/callout'
 import { Pagination, type PaginationOptions } from './extensions/pagination/Pagination'
 import { Shortcuts } from './extensions/shortcuts'
@@ -101,8 +102,8 @@ type Options = {
   onSave: (editor: Editor) => void
   getEditor: () => Editor | null
   onTableOfContents: (data: TableOfContentData) => void
-  /** Initial page layout; it changes later through `setPagination`. */
-  pagination: PaginationOptions
+  /** Initial page layout (the gap between pages keeps its default); it changes later through `setPagination`. */
+  pagination: Omit<PaginationOptions, 'pageGap'>
 }
 
 export function buildExtensions({ session, user, onSave, getEditor, onTableOfContents, pagination }: Options): Extensions {
@@ -117,7 +118,11 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
     }),
 
     // Collaboration
-    Collaboration.configure({ document: session.ydoc }),
+    Collaboration.configure({
+      document: session.ydoc,
+      // Page setup changes (in `meta`) are undo steps too; see page-setup.ts.
+      yUndoOptions: { trackedOrigins: [PAGE_SETUP_ORIGIN] },
+    }),
     CollaborationCaret.configure({ provider: session.provider, user, render: renderCaret }),
 
     // Small additions

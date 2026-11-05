@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import type { UndoManager } from 'yjs'
 import { createStore, useStore } from '../store'
 import type { Session } from './collab'
 import type { PaginationOptions } from './extensions/pagination/Pagination'
@@ -56,14 +57,35 @@ export function getPageSetup(session: Session): PageSetup {
   }
 }
 
+/**
+ * Undo: a page setup change is one step in the editor's own undo history, like in Word, so
+ * Ctrl+Z (or the ribbon's Undo) right after choosing Letter goes back to A4, not to your last
+ * typing. The editor's Yjs undo manager tracks the `meta` map too (see `trackPageSetupUndo`), but
+ * only changes made with this origin: renaming the document isn't undone by Ctrl+Z.
+ */
+export const PAGE_SETUP_ORIGIN = { pageSetup: true }
+
+const undoManagers = new WeakMap<Session, UndoManager>()
+
+/** Adds page setup changes to the editor's undo history (its Yjs undo manager). */
+export function trackPageSetupUndo(session: Session, undoManager: UndoManager) {
+  undoManager.trackedOrigins.add(PAGE_SETUP_ORIGIN)
+  undoManager.addToScope(session.meta)
+  undoManagers.set(session, undoManager)
+}
+
 /** Changes the page setup for everyone. The server drops a viewer's writes, so only offer it to editors. */
 export function setPageSetup(session: Session, change: Partial<PageSetup>) {
+  const undoManager = undoManagers.get(session)
+  // Its own undo step: not merged with typing just before or just after it.
+  undoManager?.stopCapturing()
   session.ydoc.transact(() => {
     for (const key of Object.keys(change) as (keyof PageSetup)[]) {
       const value = change[key]
       if (value) session.meta.set(KEYS[key], value)
     }
-  })
+  }, PAGE_SETUP_ORIGIN)
+  undoManager?.stopCapturing()
 }
 
 /** The page setup, live across collaborators. */
