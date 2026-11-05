@@ -1482,29 +1482,6 @@ html:has(.doc-shell) body {
   flex: 1;
 }
 
-.meter {
-  display: inline-block;
-  width: 48px;
-  height: 4px;
-  overflow: hidden;
-  background: var(--surface-2);
-  border-radius: 2px;
-}
-
-.over-limit {
-  color: var(--danger);
-}
-
-.over-limit .meter > span {
-  background: var(--danger);
-}
-
-.meter > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-}
-
 .badge {
   padding: 0 6px;
   font-weight: 600;

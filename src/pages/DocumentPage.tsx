@@ -762,8 +762,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
         <Toast />
         <StatusBar
           editor={editor}
-          documentName={session.name}
-          email={me.email}
           status={status}
           pending={pending}
           retrying={retrying}
