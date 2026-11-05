@@ -1,13 +1,17 @@
 import type { Editor } from '@tiptap/react'
 import { useRef, useState } from 'react'
-import { createDoc, docUrl, duplicateDoc, libraryUrl, trashDoc } from '../api'
-import { loadBackup, saveBackup } from '../editor/backup'
+import { createDoc, docUrl, duplicateDoc, libraryUrl, trashDoc, type Role } from '../api'
+import { loadBackup } from '../editor/backup'
 import { setTitle, type Session } from '../editor/collab'
 import { initialContent } from '../editor/content'
 import { useDocTitle, type Presence } from '../editor/hooks'
 import { mod } from '../editor/platform'
+import { initialOf } from '../identity'
+import { useMe } from '../session'
 import { startTour, toursFor } from '../tours'
+import { AccountMenu } from './AccountMenu'
 import { Dropdown, MenuItem } from './Dropdown'
+import { ShareDialog } from './ShareDialog'
 import { ThemeToggle } from './ThemeToggle'
 
 export type ViewOptions = {
@@ -21,7 +25,13 @@ type HeaderProps = {
   editor: Editor
   session: Session
   presence: Presence[]
+  /** The caller's role; `null` while unknown (opened offline). */
+  role: Role | null
+  /** With `readOnly` already forced on for viewers and closed documents. */
   view: ViewOptions
+  /** False for viewers (always read-only) and closed documents. */
+  canToggleReadOnly: boolean
+  onBackup: (editor: Editor) => void
   onViewChange: (next: Partial<ViewOptions>) => void
 }
 
@@ -57,9 +67,12 @@ function TitleField({ session, readOnly }: { session: Session; readOnly: boolean
   )
 }
 
-export function Header({ editor, session, presence, view, onViewChange }: HeaderProps) {
+export function Header({ editor, session, presence, role, view, canToggleReadOnly, onBackup, onViewChange }: HeaderProps) {
+  const me = useMe()
   const fileInput = useRef<HTMLInputElement>(null)
-  const [copied, setCopied] = useState(false)
+  const [sharing, setSharing] = useState(false)
+  const isOwner = role === 'owner'
+  const viewer = role === 'viewer'
   const title = useDocTitle(session)
   const baseName = fileSafe(title || 'Untitled document')
 
@@ -99,7 +112,7 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
   }
 
   const restoreBackup = () => {
-    const backup = loadBackup(session.name)
+    const backup = loadBackup(me.email, session.name)
     if (!backup) {
       window.alert('No local backup found yet. Backups are saved automatically as you type.')
       return
@@ -116,16 +129,6 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
     }
   }
 
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      window.prompt('Copy this link', window.location.href)
-    }
-  }
-
   const shown = presence.slice(0, 5)
   const extra = presence.length - shown.length
 
@@ -139,6 +142,11 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
           <span className="visually-hidden">All documents</span>
         </a>
         <TitleField session={session} readOnly={view.readOnly} />
+        {viewer && (
+          <span className="view-only-badge" data-tour="view-only" title="You can read, copy and export this document, but not change it.">
+            View only
+          </span>
+        )}
       </div>
 
       <div className="header-actions">
@@ -148,9 +156,9 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
               key={person.clientId}
               className={`avatar${person.self ? ' self' : ''}`}
               style={{ background: person.color }}
-              title={person.self ? `${person.name} (you)` : person.name}
+              title={`${person.email || person.name}${person.self ? ' (you)' : ''}`}
             >
-              {person.name.replace(/^Anonymous /, '').slice(0, 1).toUpperCase()}
+              {initialOf(person.name)}
             </span>
           ))}
           {extra > 0 && <span className="avatar more">+{extra}</span>}
@@ -178,21 +186,32 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
               <MenuItem
                 onSelect={() => {
                   close()
+                  setSharing(true)
+                }}
+              >
+                {isOwner ? 'Share…' : 'Who has access…'}
+              </MenuItem>
+              <MenuItem
+                onSelect={() => {
+                  close()
                   window.location.assign(libraryUrl())
                 }}
               >
                 All documents
               </MenuItem>
               <hr />
-              <MenuItem
-                disabled={view.readOnly}
-                onSelect={() => {
-                  close()
-                  fileInput.current?.click()
-                }}
-              >
-                Import Markdown…
-              </MenuItem>
+              {/* Viewers can't change the document: actions that would are hidden, not disabled. */}
+              {!viewer && (
+                <MenuItem
+                  disabled={view.readOnly}
+                  onSelect={() => {
+                    close()
+                    fileInput.current?.click()
+                  }}
+                >
+                  Import Markdown…
+                </MenuItem>
+              )}
               <MenuItem
                 onSelect={() => {
                   close()
@@ -217,44 +236,51 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
               >
                 Export JSON
               </MenuItem>
-              <hr />
-              <MenuItem
-                hint={`${mod}+S`}
-                onSelect={() => {
-                  close()
-                  saveBackup(editor, session.name)
-                }}
-              >
-                Save local backup
-              </MenuItem>
-              <MenuItem
-                disabled={view.readOnly}
-                onSelect={() => {
-                  close()
-                  restoreBackup()
-                }}
-              >
-                Restore local backup…
-              </MenuItem>
-              <MenuItem
-                disabled={view.readOnly}
-                onSelect={() => {
-                  close()
-                  resetDemo()
-                }}
-              >
-                Reset to demo content…
-              </MenuItem>
-              <hr />
-              <MenuItem
-                disabled={view.readOnly}
-                onSelect={() => {
-                  close()
-                  void moveToTrash()
-                }}
-              >
-                <span className="danger-text">Move to trash</span>
-              </MenuItem>
+              {!viewer && (
+                <>
+                  <hr />
+                  <MenuItem
+                    hint={`${mod}+S`}
+                    onSelect={() => {
+                      close()
+                      onBackup(editor)
+                    }}
+                  >
+                    Save local backup
+                  </MenuItem>
+                  <MenuItem
+                    disabled={view.readOnly}
+                    onSelect={() => {
+                      close()
+                      restoreBackup()
+                    }}
+                  >
+                    Restore local backup…
+                  </MenuItem>
+                  <MenuItem
+                    disabled={view.readOnly}
+                    onSelect={() => {
+                      close()
+                      resetDemo()
+                    }}
+                  >
+                    Reset to demo content…
+                  </MenuItem>
+                </>
+              )}
+              {isOwner && (
+                <>
+                  <hr />
+                  <MenuItem
+                    onSelect={() => {
+                      close()
+                      void moveToTrash()
+                    }}
+                  >
+                    <span className="danger-text">Move to trash</span>
+                  </MenuItem>
+                </>
+              )}
             </>
           )}
         </Dropdown>
@@ -273,8 +299,12 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
         <Dropdown label="View" title="View" tour="view-menu" align="end">
           {() => (
             <>
-              <MenuItem active={view.readOnly} onSelect={() => onViewChange({ readOnly: !view.readOnly })}>
-                {view.readOnly ? '✓ ' : ''}Read-only
+              <MenuItem
+                active={view.readOnly}
+                disabled={!canToggleReadOnly}
+                onSelect={() => onViewChange({ readOnly: !view.readOnly })}
+              >
+                {view.readOnly ? '✓ ' : ''}Read-only{viewer ? ' (view only)' : ''}
               </MenuItem>
               <MenuItem active={view.invisibles} onSelect={() => onViewChange({ invisibles: !view.invisibles })}>
                 {view.invisibles ? '✓ ' : ''}Invisible characters
@@ -289,11 +319,19 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
           )}
         </Dropdown>
 
-        <button type="button" className="header-button" data-tour="share" onClick={copyLink} title="Copy link to this document">
-          {copied ? 'Copied ✓' : 'Share'}
+        <button
+          type="button"
+          className="header-button"
+          data-tour="share"
+          onClick={() => setSharing(true)}
+          title={isOwner ? 'Share this document' : 'See who has access'}
+        >
+          Share
         </button>
+        {sharing && <ShareDialog docId={session.name} onClose={() => setSharing(false)} />}
 
         <ThemeToggle />
+        <AccountMenu />
 
         <Dropdown label="?" title="Guided tours" tour="help" align="end" className="help">
           {(close) =>

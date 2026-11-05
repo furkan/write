@@ -1,17 +1,19 @@
 import { useEditorState, type Editor } from '@tiptap/react'
 import { useEffect, useState } from 'react'
 import { BACKUP_EVENT, loadBackup, type Backup } from '../editor/backup'
-import type { CollabUser } from '../editor/collab'
 import { CHARACTER_LIMIT } from '../editor/extensions'
 import type { ConnectionStatus } from '../editor/hooks'
 
 type StatusBarProps = {
   editor: Editor
   documentName: string
-  user: CollabUser
-  onRename: () => void
+  /** The signed-in User, whose local backup is shown. */
+  email: string
   status: ConnectionStatus
+  /** The Read-only view preference (owners and editors). */
   readOnly: boolean
+  /** Viewers see "View only" and take no backups. */
+  viewer: boolean
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -20,7 +22,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   disconnected: 'Offline: changes will sync when you reconnect',
 }
 
-export function StatusBar({ editor, documentName, user, onRename, status, readOnly }: StatusBarProps) {
+export function StatusBar({ editor, documentName, email, status, readOnly, viewer }: StatusBarProps) {
   const info = useEditorState({
     editor,
     selector: ({ editor: e }) => {
@@ -35,7 +37,7 @@ export function StatusBar({ editor, documentName, user, onRename, status, readOn
     },
   })
 
-  const [savedAt, setSavedAt] = useState<number | null>(() => loadBackup(documentName)?.savedAt ?? null)
+  const [savedAt, setSavedAt] = useState<number | null>(() => loadBackup(email, documentName)?.savedAt ?? null)
 
   useEffect(() => {
     const onSaved = (event: Event) => setSavedAt((event as CustomEvent<Backup>).detail.savedAt)
@@ -59,19 +61,23 @@ export function StatusBar({ editor, documentName, user, onRename, status, readOn
       <span className="status-item muted" title="Updated on every selection change">
         {info.node} @ {info.from === info.to ? info.from : `${info.from}–${info.to}`}
       </span>
-      {readOnly && <span className="status-item badge">Read-only</span>}
+      {viewer ? (
+        <span className="status-item badge" title="Your share lets you read, copy and export this document">
+          View only
+        </span>
+      ) : (
+        readOnly && <span className="status-item badge">Read-only</span>
+      )}
       <span className="status-spacer" />
-      <span className="status-item muted">
-        {savedAt ? `Backup ${new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'No backup yet'}
-      </span>
+      {!viewer && (
+        <span className="status-item muted">
+          {savedAt ? `Backup ${new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'No backup yet'}
+        </span>
+      )}
       <span className={`status-item connection ${status}`} data-tour="connection" role="status">
         <span className="dot" aria-hidden />
         {STATUS_LABEL[status]}
       </span>
-      <button type="button" className="status-item user-chip" data-tour="user" onClick={onRename} title="Change your name">
-        <span className="dot" style={{ background: user.color }} aria-hidden />
-        {user.name}
-      </button>
     </footer>
   )
 }

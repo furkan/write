@@ -2,35 +2,16 @@ import { HocuspocusProvider } from '@hocuspocus/provider'
 import { generateJSON, getSchema, type Extensions } from '@tiptap/core'
 import { prosemirrorJSONToYXmlFragment } from '@tiptap/y-tiptap'
 import * as Y from 'yjs'
-import { readStorage, writeStorage } from './storage'
+import { colorFor, localPart } from '../identity'
 
-export type CollabUser = { name: string; color: string }
+/**
+ * What collaborators see of you: the Caret label (your email's local part), a colour derived
+ * from the email, and the email itself for the caret's tooltip. Presence is client-reported;
+ * the share list is the authoritative "who has access".
+ */
+export type CollabUser = { name: string; color: string; email: string }
 
-export const USER_COLORS = ['#e11d48', '#ea580c', '#ca8a04', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#c026d3']
-const ANIMALS = ['Otter', 'Falcon', 'Lynx', 'Heron', 'Badger', 'Gecko', 'Marten', 'Puffin', 'Ibex', 'Koala']
-
-const USER_KEY = 'write:user'
-
-function randomUser(): CollabUser {
-  const pick = <T,>(list: T[]) => list[Math.floor(Math.random() * list.length)]
-  return { name: `Anonymous ${pick(ANIMALS)}`, color: pick(USER_COLORS) }
-}
-
-export function loadUser(): CollabUser {
-  try {
-    const saved = JSON.parse(readStorage(USER_KEY) ?? 'null') as Partial<CollabUser> | null
-    if (saved?.name && saved.color) return { name: saved.name, color: saved.color }
-  } catch {
-    // fall through to a fresh identity
-  }
-  const user = randomUser()
-  writeStorage(USER_KEY, JSON.stringify(user))
-  return user
-}
-
-export function saveUser(user: CollabUser) {
-  writeStorage(USER_KEY, JSON.stringify(user))
-}
+export const collabUser = (email: string): CollabUser => ({ name: localPart(email), color: colorFor(email), email })
 
 /**
  * One open shared document: its Y.Doc, the WebSocket provider and a `meta` map

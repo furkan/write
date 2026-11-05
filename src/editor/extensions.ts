@@ -24,6 +24,7 @@ import { Markdown } from '@tiptap/markdown'
 import type { Editor, Extensions } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { common, createLowlight } from 'lowlight'
+import { localPart } from '../identity'
 import type { CollabUser, Session } from './collab'
 import { Callout } from './extensions/callout'
 import { Shortcuts } from './extensions/shortcuts'
@@ -73,6 +74,26 @@ function editMath(editor: Editor, kind: 'inline' | 'block', latex: string, pos: 
   else editor.chain().updateBlockMath({ latex: next, pos }).focus().run()
 }
 
+/**
+ * A collaborator's caret: the Caret label (their email's local part) with the full email as a
+ * tooltip. Presence is client-reported, so everything here is treated as untrusted text.
+ */
+function renderCaret(user: Record<string, unknown>): HTMLElement {
+  const email = typeof user.email === 'string' ? user.email : ''
+  const name = email ? localPart(email) : typeof user.name === 'string' ? user.name : ''
+  const color = typeof user.color === 'string' ? user.color : 'transparent'
+  const caret = document.createElement('span')
+  caret.classList.add('collaboration-carets__caret')
+  caret.style.borderColor = color
+  const label = document.createElement('div')
+  label.classList.add('collaboration-carets__label')
+  label.style.backgroundColor = color
+  label.textContent = name.slice(0, 64)
+  if (email) label.title = email
+  caret.append(label)
+  return caret
+}
+
 type Options = {
   session: Session
   user: CollabUser
@@ -94,7 +115,7 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
 
     // Collaboration
     Collaboration.configure({ document: session.ydoc }),
-    CollaborationCaret.configure({ provider: session.provider, user }),
+    CollaborationCaret.configure({ provider: session.provider, user, render: renderCaret }),
 
     // Small additions
     Placeholder.configure({

@@ -1,8 +1,10 @@
 import type { HocuspocusProvider } from '@hocuspocus/provider'
 import { useEffect, useState } from 'react'
+import { localPart } from '../identity'
 import { getTitle, type Session } from './collab'
 
-export type Presence = { clientId: number; name: string; color: string; self: boolean }
+/** `email` is client-reported (empty if a client sent none); `name` is its Caret label. */
+export type Presence = { clientId: number; name: string; email: string; color: string; self: boolean }
 
 /** Everyone currently connected to the shared document (from Yjs awareness). */
 export function usePresence(provider: HocuspocusProvider): Presence[] {
@@ -14,9 +16,12 @@ export function usePresence(provider: HocuspocusProvider): Presence[] {
     const update = () => {
       const next: Presence[] = []
       awareness.getStates().forEach((state, clientId) => {
-        const user = state.user as { name?: string; color?: string } | undefined
-        if (user?.name) {
-          next.push({ clientId, name: user.name, color: user.color ?? '#888', self: clientId === awareness.clientID })
+        const user = state.user as { name?: unknown; color?: unknown; email?: unknown } | undefined
+        const email = typeof user?.email === 'string' ? user.email : ''
+        const name = email ? localPart(email) : typeof user?.name === 'string' ? user.name : ''
+        if (name) {
+          const color = typeof user?.color === 'string' && /^#[0-9a-f]{6}$/i.test(user.color) ? user.color : '#888888'
+          next.push({ clientId, name, email, color, self: clientId === awareness.clientID })
         }
       })
       next.sort((a, b) => Number(b.self) - Number(a.self))
