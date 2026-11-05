@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createDoc,
   deleteForever,
@@ -8,16 +8,21 @@ import {
   emptyTrash,
   listDocs,
   listTrash,
+  removeFromMyList,
   renameDoc,
   restoreOrConfirmOpen,
   trashDoc,
   type DocMeta,
   type TrashedDoc,
 } from '../api'
+import { AccountMenu } from '../components/AccountMenu'
 import { Dropdown, MenuItem } from '../components/Dropdown'
+import { SessionBanner } from '../components/SessionBanner'
+import { ShareDialog } from '../components/ShareDialog'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { readStorage, writeStorage } from '../editor/storage'
 import { TEMPLATES, type Template } from '../editor/templates'
+import { useMe } from '../session'
 import { autoStartTour, startTour, toursFor } from '../tours'
 import './library.css'
 
@@ -49,9 +54,11 @@ function timeUntil(timestamp: number, now = Date.now()) {
   return relativeFormat.format(Math.ceil(hours / 24), 'day')
 }
 
+/** Search covers the title and text, and for Shared with me also the owner's email. */
 const matchesQuery = (doc: DocMeta, query: string) => {
   const q = query.trim().toLowerCase()
-  return !q || `${displayTitle(doc)} ${doc.preview}`.toLowerCase().includes(q)
+  const owner = doc.role === 'owner' ? '' : doc.owner
+  return !q || `${displayTitle(doc)} ${doc.preview} ${owner}`.toLowerCase().includes(q)
 }
 
 /** Reads and removes `?trashed=<id>` (set by a document's "Move to trash"). */
@@ -102,6 +109,7 @@ function usePersisted<T extends string>(key: string, allowed: readonly T[], fall
 }
 
 export function Library() {
+  const me = useMe()
   const [docs, setDocs] = useState<DocMeta[] | null>(null)
   const [trash, setTrash] = useState<TrashedDoc[] | null>(null)
   const [retentionDays, setRetentionDays] = useState(30)
@@ -112,9 +120,14 @@ export function Library() {
   const [view, setView] = usePersisted<ViewMode>('write:library-view', ['grid', 'list'], 'grid')
   const [busy, setBusy] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
+  const [sharing, setSharing] = useState<string | null>(null)
   const [toast, setToastState] = useState<Toast | null>(null)
   const setToast = (text: string, undo?: DocMeta) => setToastState({ text, undo })
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // Bumped to reload the lists now, e.g. after signing in again.
+  const [reload, setReload] = useState(0)
+  const reloadNow = useCallback(() => setReload((n) => n + 1), [])
 
   // Load now, then keep the lists fresh (other people edit, rename, create and delete documents too).
   useEffect(() => {
@@ -152,7 +165,7 @@ export function Library() {
       window.clearInterval(timer)
       window.removeEventListener('focus', refresh)
     }
-  }, [])
+  }, [reload])
 
   useEffect(() => {
     document.title = section === 'trash' ? 'Trash – Write' : 'Documents – Write'
@@ -188,14 +201,16 @@ export function Library() {
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  const visible = useMemo(() => {
-    if (!docs) return []
-    return docs.filter((doc) => matchesQuery(doc, query)).sort((a, b) => {
+  // One search and one sort for both sections.
+  const [mine, shared] = useMemo(() => {
+    const matching = (docs ?? []).filter((doc) => matchesQuery(doc, query)).sort((a, b) => {
       if (sort === 'title') return displayTitle(a).localeCompare(displayTitle(b), undefined, { sensitivity: 'base' })
       if (sort === 'created') return b.createdAt - a.createdAt
       return b.updatedAt - a.updatedAt
     })
+    return [matching.filter((doc) => doc.role === 'owner'), matching.filter((doc) => doc.role !== 'owner')]
   }, [docs, query, sort])
+  const hasShared = (docs ?? []).some((doc) => doc.role !== 'owner')
 
   const startFromTemplate = async (template: Template) => {
     setBusy(template.id)
@@ -226,6 +241,18 @@ export function Library() {
       setToast(`Created “${displayTitle(copy)}”.`)
     } catch {
       setToast('Copy failed.')
+    }
+  }
+
+  // Only the owner can share it with them again, so ask first.
+  const removeFromList = async (doc: DocMeta) => {
+    if (!window.confirm(`Remove “${displayTitle(doc)}” from your list? You’ll lose access until ${doc.owner} shares it with you again.`)) return
+    try {
+      await removeFromMyList(doc.id, me.email)
+      setDocs((list) => list?.filter((d) => d.id !== doc.id) ?? list)
+      setToast(`Removed “${displayTitle(doc)}” from your list.`)
+    } catch {
+      setToast('Could not remove the document from your list.')
     }
   }
 
@@ -281,6 +308,27 @@ export function Library() {
     }
   }
 
+  const renderDocs = (list: DocMeta[], tourFirst: boolean) => (
+    <ul className={`docs ${view}`}>
+      {list.map((doc, index) => (
+        <DocItem
+          key={doc.id}
+          doc={doc}
+          view={view}
+          isFirst={tourFirst && index === 0}
+          renaming={renaming === doc.id}
+          onStartRename={() => setRenaming(doc.id)}
+          onRename={(title) => void rename(doc, title)}
+          onCancelRename={() => setRenaming(null)}
+          onDuplicate={() => void duplicate(doc)}
+          onShare={() => setSharing(doc.id)}
+          onDelete={() => void moveToTrash(doc)}
+          onRemoveFromList={() => void removeFromList(doc)}
+        />
+      ))}
+    </ul>
+  )
+
   const trashCount = trash?.length ?? 0
   const visibleTrash = (trash ?? []).filter((doc) => matchesQuery(doc, query))
 
@@ -315,6 +363,7 @@ export function Library() {
         </label>
         <div className="header-actions">
           <ThemeToggle />
+          <AccountMenu />
           <Dropdown label="?" title="Guided tours" tour="help" align="end" className="help">
             {(close) =>
               toursFor('library').map(([id, tour]) => (
@@ -335,6 +384,7 @@ export function Library() {
           </Dropdown>
         </div>
       </header>
+      <SessionBanner onSignedIn={reloadNow} />
 
       {section === 'docs' && (
         <section className="templates-band" aria-labelledby="templates-title">
@@ -448,7 +498,7 @@ export function Library() {
       ) : (
         <main className="library-inner docs-section">
           <div className="docs-toolbar">
-            <h2 className="section-title">{query ? `Results for “${query}”` : 'Recent documents'}</h2>
+            <h2 className="section-title">{query ? `Results for “${query}”` : 'Documents'}</h2>
             <div className="docs-controls">
               <label className="sort">
                 <span className="visually-hidden">Sort by</span>
@@ -490,36 +540,52 @@ export function Library() {
             <div className="loading inline" role="status">
               <span className="spinner" aria-hidden /> Loading documents…
             </div>
-          ) : visible.length === 0 ? (
+          ) : query && mine.length === 0 && shared.length === 0 ? (
             <div className="empty">
-              {query ? (
-                <p>No documents match “{query}”.</p>
-              ) : (
-                <>
-                  <p className="empty-title">No documents yet</p>
-                  <p className="muted">Pick a template above to create your first one.</p>
-                </>
-              )}
+              <p>No documents match “{query}”.</p>
             </div>
           ) : (
-            <ul className={`docs ${view}`} data-tour="doc-list">
-              {visible.map((doc, index) => (
-                <DocItem
-                  key={doc.id}
-                  doc={doc}
-                  view={view}
-                  isFirst={index === 0}
-                  renaming={renaming === doc.id}
-                  onStartRename={() => setRenaming(doc.id)}
-                  onRename={(title) => void rename(doc, title)}
-                  onCancelRename={() => setRenaming(null)}
-                  onDuplicate={() => void duplicate(doc)}
-                  onDelete={() => void moveToTrash(doc)}
-                />
-              ))}
-            </ul>
+            <div className="doc-groups" data-tour="doc-list">
+              {(!query || mine.length > 0) && (
+                <section className="doc-group" aria-labelledby="mine-title">
+                  <h3 id="mine-title" className="doc-group-title">
+                    My documents {mine.length > 0 && <span className="count">{mine.length}</span>}
+                  </h3>
+                  {mine.length === 0 ? (
+                    <div className="empty">
+                      <p className="empty-title">No documents yet</p>
+                      <p className="muted">Pick a template above to create your first one.</p>
+                    </div>
+                  ) : (
+                    renderDocs(mine, true)
+                  )}
+                </section>
+              )}
+              {(!query || shared.length > 0) && (
+                <section className="doc-group" aria-labelledby="shared-title" data-tour="shared">
+                  <h3 id="shared-title" className="doc-group-title">
+                    Shared with me {shared.length > 0 && <span className="count">{shared.length}</span>}
+                  </h3>
+                  {hasShared ? (
+                    renderDocs(shared, mine.length === 0)
+                  ) : (
+                    <p className="muted small shared-empty">
+                      Nothing yet. When someone shares a document with {me.email}, it appears here.
+                    </p>
+                  )}
+                </section>
+              )}
+            </div>
           )}
         </main>
+      )}
+
+      {sharing && (
+        <ShareDialog
+          docId={sharing}
+          onClose={() => setSharing(null)}
+          onChange={(changed) => setDocs((list) => list?.map((d) => (d.id === changed.id ? { ...d, shares: changed.shares } : d)) ?? list)}
+        />
       )}
 
       {toast && (
@@ -553,13 +619,18 @@ type DocItemProps = {
   onRename: (title: string) => void
   onCancelRename: () => void
   onDuplicate: () => void
+  onShare: () => void
   onDelete: () => void
+  onRemoveFromList: () => void
 }
 
-function DocItem({ doc, view, isFirst, renaming, onStartRename, onRename, onCancelRename, onDuplicate, onDelete }: DocItemProps) {
+function DocItem(props: DocItemProps) {
+  const { doc, view, isFirst, renaming, onStartRename, onRename, onCancelRename } = props
   const title = displayTitle(doc)
   const href = docUrl(doc.id)
   const edited = `Edited ${relativeTime(doc.updatedAt)}`
+  const isOwner = doc.role === 'owner'
+  const shareCount = Object.keys(doc.shares ?? {}).length
 
   const titleNode = renaming ? (
     <input
@@ -581,45 +652,43 @@ function DocItem({ doc, view, isFirst, renaming, onStartRename, onRename, onCanc
     </a>
   )
 
+  // Shared with me: whose it is and what you may do. My documents: how many people it's shared with.
+  const sharing = isOwner ? (
+    shareCount > 0 && (
+      <span className="doc-shared muted small" title={`Shared with ${shareCount} ${shareCount === 1 ? 'person' : 'people'}`}>
+        <PeopleIcon /> {shareCount}
+      </span>
+    )
+  ) : (
+    <span className="doc-owner muted small" title={`Owner: ${doc.owner}`}>
+      {doc.owner}
+      {doc.role === 'viewer' ? ' · view only' : ''}
+    </span>
+  )
+
+  const item = (label: string, run: () => void, danger = false) => (
+    <MenuItem onSelect={run}>{danger ? <span className="danger-text">{label}</span> : label}</MenuItem>
+  )
+
+  // What the ⋮ menu offers follows your role on the document.
   const menu = (
     <Dropdown label="⋮" title={`Actions for ${title}`} align="end" className="doc-menu" tour={isFirst ? 'doc-actions' : undefined}>
-      {(close) => (
-        <>
-          <MenuItem
-            onSelect={() => {
-              close()
-              onStartRename()
-            }}
-          >
-            Rename
-          </MenuItem>
-          <MenuItem
-            onSelect={() => {
-              close()
-              onDuplicate()
-            }}
-          >
-            Make a copy
-          </MenuItem>
-          <MenuItem
-            onSelect={() => {
-              close()
-              window.open(href, '_blank', 'noopener')
-            }}
-          >
-            Open in new tab
-          </MenuItem>
-          <hr />
-          <MenuItem
-            onSelect={() => {
-              close()
-              onDelete()
-            }}
-          >
-            <span className="danger-text">Move to trash</span>
-          </MenuItem>
-        </>
-      )}
+      {(close) => {
+        const then = (run: () => void) => () => {
+          close()
+          run()
+        }
+        return (
+          <>
+            {doc.role !== 'viewer' && item('Rename', then(onStartRename))}
+            {item(isOwner ? 'Share…' : 'Who has access…', then(props.onShare))}
+            {item('Make a copy', then(props.onDuplicate))}
+            {item('Open in new tab', then(() => window.open(href, '_blank', 'noopener')))}
+            <hr />
+            {isOwner ? item('Move to trash', then(props.onDelete), true) : item('Remove from my list', then(props.onRemoveFromList), true)}
+          </>
+        )
+      }}
     </Dropdown>
   )
 
@@ -631,7 +700,7 @@ function DocItem({ doc, view, isFirst, renaming, onStartRename, onRename, onCanc
         </span>
         <div className="doc-row-main">
           {titleNode}
-          <span className="doc-snippet muted small">{doc.preview || 'Empty document'}</span>
+          {isOwner ? <span className="doc-snippet muted small">{doc.preview || 'Empty document'}</span> : sharing}
         </div>
         <span className="doc-words muted small">{doc.words.toLocaleString()} words</span>
         <time className="doc-time muted small" dateTime={new Date(doc.updatedAt).toISOString()}>
@@ -651,13 +720,26 @@ function DocItem({ doc, view, isFirst, renaming, onStartRename, onRename, onCanc
       <div className="doc-card-footer">
         <div className="doc-card-text">
           {titleNode}
-          <time className="muted small" dateTime={new Date(doc.updatedAt).toISOString()}>
-            {edited}
-          </time>
+          {!isOwner && sharing}
+          <span className="doc-meta">
+            <time className="muted small" dateTime={new Date(doc.updatedAt).toISOString()}>
+              {edited}
+            </time>
+            {isOwner && sharing}
+          </span>
         </div>
         {menu}
       </div>
     </li>
+  )
+}
+
+function PeopleIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="9" cy="8" r="4" />
+      <path d="M2 21v-1a6 6 0 0 1 12 0v1M16 4a4 4 0 0 1 0 8M22 21v-1a6 6 0 0 0-4-5.6" />
+    </svg>
   )
 }
 

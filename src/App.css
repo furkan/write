@@ -162,6 +162,234 @@
 
 .loading.deleted {
   flex-direction: column;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.closed-text {
+  max-width: 32rem;
+  margin: 0;
+}
+
+/* Session expired: the editor keeps working, so this is a notice rather than an error. */
+.session-banner {
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  text-align: center;
+  color: var(--text);
+  background: color-mix(in srgb, var(--warning) 16%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+}
+
+.session-banner .banner-button {
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+}
+
+.view-only-badge {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: 999px;
+}
+
+/* ---------- Account menu ---------- */
+
+.account-avatar {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  border-radius: 50%;
+}
+
+.header-actions > .account > button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  max-width: 280px;
+  padding: 6px 10px 2px;
+}
+
+.account-email {
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Share dialog ---------- */
+
+.share-dialog {
+  width: min(520px, calc(100vw - 24px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.share-dialog::backdrop {
+  background: rgba(10, 5, 20, 0.45);
+}
+
+.share-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+}
+
+.share-title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 1.1rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.share-subtitle {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.share-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share-form input,
+.share-form select,
+.share-person select {
+  height: 36px;
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.share-person select {
+  height: 30px;
+  padding: 0 6px;
+  font-size: 0.85rem;
+}
+
+.share-form input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.share-form input:focus,
+.share-form select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.share-form input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.share-error,
+.share-notice,
+.share-note {
+  margin: 0;
+}
+
+.share-error {
+  font-size: 0.85rem;
+  color: var(--danger);
+}
+
+.share-notice {
+  font-size: 0.85rem;
+  color: var(--success);
+}
+
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 40vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.share-person {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 40px;
+  padding: 2px 0;
+}
+
+.share-person-email {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.share-person-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  align-items: center;
+}
+
+.share-role {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.share-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 8px;
 }
 
 .deleted-title {
@@ -223,6 +451,26 @@
 .header-actions > .dropdown > button:hover,
 .header-button:hover {
   background: var(--surface-2);
+}
+
+/* Phones: keep the document header's buttons (presence, File, View, Share, theme, account, help) on one row. */
+@media (max-width: 480px) {
+  .header {
+    padding: 8px 12px;
+  }
+
+  .header .header-actions {
+    gap: 5px;
+  }
+
+  .header .header-actions > .dropdown:not(.theme-toggle, .account, .help) > button,
+  .header .header-button {
+    padding: 0 9px;
+  }
+
+  .presence {
+    margin-right: 0;
+  }
 }
 
 .help > button {
@@ -1057,6 +1305,9 @@
   white-space: nowrap;
   border-radius: 3px 3px 3px 0;
   user-select: none;
+  /* Hovering the label shows the collaborator's full email. */
+  pointer-events: auto;
+  cursor: default;
 }
 
 /* Read-only */
@@ -1446,18 +1697,6 @@
 
 .connection.disconnected .dot {
   background: var(--danger);
-}
-
-.user-chip {
-  padding: 2px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.user-chip:hover {
-  border-color: var(--accent);
 }
 
 @media (max-width: 640px) {
