@@ -181,9 +181,19 @@ function tallDecorations(doc: PMNode, positions: number[]): Decoration[] {
   })
 }
 
+/**
+ * How much the editor is drawn larger or smaller than its layout size: a CSS `zoom` or `transform`
+ * on it or an ancestor (the app's zoom). Client rects are scaled by it, while the page geometry is
+ * in layout pixels, so measurements are divided by it.
+ */
+function layoutScale(view: EditorView): number {
+  const width = view.dom.offsetWidth
+  return width ? view.dom.getBoundingClientRect().width / width || 1 : 1
+}
+
 /** Unbreakable boxes taller than a page's content area that aren't marked yet: their positions. */
 function findTall(view: EditorView, options: PaginationOptions): number[] {
-  const limit = contentHeight(options)
+  const limit = contentHeight(options) * layoutScale(view)
   const found: number[] = []
   for (const el of view.dom.querySelectorAll<HTMLElement>(UNBREAKABLE)) {
     if (el.classList.contains(TALL_CLASS) || el.getBoundingClientRect().height <= limit) continue
@@ -203,8 +213,8 @@ function neededPages(view: EditorView, options: PaginationOptions, pageCount: nu
   const dom = view.dom
   const last = dom.lastElementChild
   if (!last || last.classList.contains('pagination-pages')) return 1
-  const top = dom.getBoundingClientRect().top + dom.clientTop
-  const bottom = last.getBoundingClientRect().bottom - top
+  const top = dom.getBoundingClientRect().top
+  const bottom = (last.getBoundingClientRect().bottom - top) / layoutScale(view)
   const content = contentHeight(options)
   const pitch = options.pageHeight + options.pageGap
   const endOfLastPage = (pageCount - 1) * pitch + options.marginTop + content
