@@ -35,19 +35,45 @@ const subscribe = (listener: () => void) => {
 
 export const useSessionExpired = () => useSyncExternalStore(subscribe, () => expired)
 
+// ---------- Signed in as someone else ----------
+
+/**
+ * Set when the server now sees a different User than the one this tab loaded as (Switch user in
+ * another tab, or "Sign in again" with another account). The tab then stops syncing: anything
+ * it sends would be attributed to, and checked against, the other User.
+ */
+let otherUser: string | null = null
+const otherListeners = new Set<() => void>()
+
+export function setOtherUser(email: string | null) {
+  if (otherUser === email) return
+  otherUser = email
+  otherListeners.forEach((listener) => listener())
+}
+
+const subscribeOther = (listener: () => void) => {
+  otherListeners.add(listener)
+  return () => void otherListeners.delete(listener)
+}
+
+export const useOtherUser = () => useSyncExternalStore(subscribeOther, () => otherUser)
+
 /** Other tabs of this app, told when a sign-in in a new tab worked. */
 const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('write:session')
 
 export const announceSignedIn = () => channel?.postMessage('signed-in')
 
 /**
- * While the session is expired, calls `check` when this tab regains focus, when another tab
- * says it signed in, and every 15 s, so the banner clears soon after "Sign in again" worked.
+ * While the session is expired (or belongs to someone else), calls `check` when this tab regains
+ * focus, when another tab says it signed in, and every 15 s, so the banner clears soon after
+ * "Sign in again" worked.
  */
 export function useWhileExpired(check: () => void) {
   const isExpired = useSessionExpired()
+  const other = useOtherUser()
+  const waiting = isExpired || other !== null
   useEffect(() => {
-    if (!isExpired) return
+    if (!waiting) return
     const onMessage = (event: MessageEvent) => event.data === 'signed-in' && check()
     const timer = window.setInterval(check, 15_000)
     window.addEventListener('focus', check)
@@ -57,7 +83,7 @@ export function useWhileExpired(check: () => void) {
       window.removeEventListener('focus', check)
       channel?.removeEventListener('message', onMessage)
     }
-  }, [isExpired, check])
+  }, [waiting, check])
   return isExpired
 }
 
@@ -79,14 +105,15 @@ const DEV_USER_COOKIE = 'write-dev-user'
 
 /**
  * Dev mode only (the server ignores the cookie in Access mode): become `email`, or the server's
- * default dev identity when `email` is empty. Reloads, so every connection uses the new identity.
+ * default dev identity when `email` is empty. Reloads by default, so every connection uses the
+ * new identity; `reload: false` only sets the cookie (to switch a tab back to its own user).
  */
-export function switchDevUser(email: string) {
+export function switchDevUser(email: string, { reload = true } = {}) {
   const attributes = '; path=/; samesite=lax'
   document.cookie = email
     ? `${DEV_USER_COOKIE}=${encodeURIComponent(email)}${attributes}; max-age=31536000`
     : `${DEV_USER_COOKIE}=${attributes}; max-age=0`
-  window.location.reload()
+  if (reload) window.location.reload()
 }
 
 /** Dev mode: asks which User to become; empty means the server's default dev identity. */

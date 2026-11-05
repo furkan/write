@@ -1,6 +1,6 @@
 import type { HocuspocusProvider } from '@hocuspocus/provider'
 import { useEffect, useState } from 'react'
-import { localPart } from '../identity'
+import { presenceLabel } from '../identity'
 import { getTitle, type Session } from './collab'
 
 /** `email` is client-reported (empty if a client sent none); `name` is its Caret label. */
@@ -18,7 +18,7 @@ export function usePresence(provider: HocuspocusProvider): Presence[] {
       awareness.getStates().forEach((state, clientId) => {
         const user = state.user as { name?: unknown; color?: unknown; email?: unknown } | undefined
         const email = typeof user?.email === 'string' ? user.email : ''
-        const name = email ? localPart(email) : typeof user?.name === 'string' ? user.name : ''
+        const name = presenceLabel(user)
         if (name) {
           const color = typeof user?.color === 'string' && /^#[0-9a-f]{6}$/i.test(user.color) ? user.color : '#888888'
           next.push({ clientId, name, email, color, self: clientId === awareness.clientID })
@@ -51,6 +51,31 @@ export function useConnectionStatus(provider: HocuspocusProvider): ConnectionSta
   }, [provider])
 
   return status
+}
+
+/**
+ * True while some of this tab's changes have not been confirmed by the server for `delay` ms.
+ * Briefly true while typing is normal; staying true on a connected socket means the server
+ * refused them (a read-only connection answers updates with "not synced").
+ */
+export function usePendingChanges(provider: HocuspocusProvider, delay = 1500): boolean {
+  const [pending, setPending] = useState(false)
+
+  useEffect(() => {
+    let timer: number | undefined
+    const update = ({ number }: { number: number }) => {
+      window.clearTimeout(timer)
+      if (number === 0) setPending(false)
+      else timer = window.setTimeout(() => setPending(provider.unsyncedChanges > 0), delay)
+    }
+    provider.on('unsyncedChanges', update)
+    return () => {
+      window.clearTimeout(timer)
+      provider.off('unsyncedChanges', update)
+    }
+  }, [provider, delay])
+
+  return pending
 }
 
 /** The shared document title, live across collaborators. */

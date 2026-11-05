@@ -73,6 +73,8 @@ export function Header({ editor, session, presence, role, view, canToggleReadOnl
   const [sharing, setSharing] = useState(false)
   const isOwner = role === 'owner'
   const viewer = role === 'viewer'
+  // Viewers, and anyone whose role isn't known yet, don't get the actions that change the document.
+  const canWrite = role === 'owner' || role === 'editor'
   const title = useDocTitle(session)
   const baseName = fileSafe(title || 'Untitled document')
 
@@ -112,7 +114,7 @@ export function Header({ editor, session, presence, role, view, canToggleReadOnl
   }
 
   const restoreBackup = () => {
-    const backup = loadBackup(me.email, session.name)
+    const backup = loadBackup(me.email, session.name, isOwner)
     if (!backup) {
       window.alert('No local backup found yet. Backups are saved automatically as you type.')
       return
@@ -201,7 +203,7 @@ export function Header({ editor, session, presence, role, view, canToggleReadOnl
               </MenuItem>
               <hr />
               {/* Viewers can't change the document: actions that would are hidden, not disabled. */}
-              {!viewer && (
+              {canWrite && (
                 <MenuItem
                   disabled={view.readOnly}
                   onSelect={() => {
@@ -236,7 +238,7 @@ export function Header({ editor, session, presence, role, view, canToggleReadOnl
               >
                 Export JSON
               </MenuItem>
-              {!viewer && (
+              {canWrite && (
                 <>
                   <hr />
                   <MenuItem

@@ -8,6 +8,7 @@ import {
   emptyTrash,
   listDocs,
   listTrash,
+  probeSession,
   removeFromMyList,
   renameDoc,
   restoreOrConfirmOpen,
@@ -23,7 +24,7 @@ import { ThemeToggle } from '../components/ThemeToggle'
 import { readStorage, writeStorage } from '../editor/storage'
 import { TEMPLATES, type Template } from '../editor/templates'
 import { useMe } from '../session'
-import { autoStartTour, startTour, toursFor } from '../tours'
+import { autoStartTour, setTourContext, startTour, toursFor } from '../tours'
 import './library.css'
 
 type SortKey = 'updated' | 'created' | 'title'
@@ -133,7 +134,10 @@ export function Library() {
   useEffect(() => {
     let cancelled = false
     // The two lists load independently, so a failing Trash request can't blank the documents.
-    const refresh = () => {
+    const refresh = async () => {
+      // Signed in as someone else since this page loaded (another tab switched user): show the
+      // banner rather than that person's documents under this person's name.
+      if ((await probeSession(me.email)) === 'other-user' || cancelled) return
       listDocs().then(
         (list) => {
           if (cancelled) return
@@ -165,7 +169,7 @@ export function Library() {
       window.clearInterval(timer)
       window.removeEventListener('focus', refresh)
     }
-  }, [reload])
+  }, [reload, me.email])
 
   useEffect(() => {
     document.title = section === 'trash' ? 'Trash – Write' : 'Documents – Write'
@@ -187,6 +191,8 @@ export function Library() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  useEffect(() => setTourContext({ role: null, mode: me.mode }), [me.mode])
 
   const loaded = docs !== null
   useEffect(() => {

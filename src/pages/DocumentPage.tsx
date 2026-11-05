@@ -2,43 +2,48 @@ import 'katex/dist/katex.min.css'
 import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { getDocStatus, libraryUrl, probeSession, restoreOrConfirmOpen, trashUrl, type DocStatus, type Role } from '../api'
+import { ClosedPage } from '../components/ClosedPage'
 import { EditorMenus } from '../components/EditorMenus'
-import { SessionBanner } from '../components/SessionBanner'
 import { Header, type ViewOptions } from '../components/Header'
+import { SessionBanner } from '../components/SessionBanner'
 import { Sidebar, type EditorEvent } from '../components/Sidebar'
 import { StatusBar } from '../components/StatusBar'
 import { Toolbar } from '../components/Toolbar'
 import { saveBackup } from '../editor/backup'
-import { collabUser, getSession, getTitle, isDocEmpty, seedDoc, setTitle, type Session } from '../editor/collab'
+import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
-import { useConnectionStatus, useDocTitle, usePresence } from '../editor/hooks'
+import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence } from '../editor/hooks'
 import { findTemplate, type Template } from '../editor/templates'
 import { accountAction, setSessionExpired, useMe } from '../session'
-import { autoStartTour, startTour } from '../tours'
+import { autoStartTour, setTourContext, startTour } from '../tours'
 
 /** How long to wait for the collaboration server before opening the editor offline. */
 const SYNC_TIMEOUT_MS = 4000
+/** How long a template waits to learn whether we own the document before opening without it. */
+const OWNER_WAIT_MS = 10_000
 
 /**
  * Waits for the first sync with the collaboration server, so the editor never
  * writes its own empty document into the shared one before seeing the real content.
  */
-function useInitialSync(session: Session): { ready: boolean; empty: boolean } {
+function useInitialSync(session: Session): { ready: boolean; empty: boolean; synced: boolean } {
   const { provider } = session
   const [state, setState] = useState(() =>
-    provider.isSynced ? { ready: true, empty: isDocEmpty(session) } : { ready: false, empty: false },
+    provider.isSynced
+      ? { ready: true, empty: isDocEmpty(session), synced: true }
+      : { ready: false, empty: false, synced: false },
   )
 
   useEffect(() => {
     if (state.ready) return
     const onSynced = ({ state: synced }: { state: boolean }) => {
-      if (synced) setState({ ready: true, empty: isDocEmpty(session) })
+      if (synced) setState({ ready: true, empty: isDocEmpty(session), synced: true })
     }
     // Offline: open the editor anyway; edits merge once the server is reachable.
     // Never seed in this case, or the demo content would be duplicated on reconnect.
-    const timer = window.setTimeout(() => setState({ ready: true, empty: false }), SYNC_TIMEOUT_MS)
+    const timer = window.setTimeout(() => setState({ ready: true, empty: false, synced: false }), SYNC_TIMEOUT_MS)
     provider.on('synced', onSynced)
     return () => {
       window.clearTimeout(timer)
@@ -66,8 +71,8 @@ const closedState = (status: DocStatus): Closed | null =>
         ? 'none'
         : null
 
-/** `role` is `null` when the server couldn't be asked (offline): the editor opens anyway, unrestricted. */
-type Opened = { state: Closed | 'open'; role: Role | null }
+/** `access` is `null` when `/status` couldn't be read at open; the socket's scope then decides. */
+type Opened = { state: Closed | 'open'; access: Role | null }
 
 /** Whether the document is open (and with which role), in the Trash, or deleted forever. */
 function useOpened(name: string): Opened | undefined {
@@ -77,15 +82,71 @@ function useOpened(name: string): Opened | undefined {
     getDocStatus(name)
       .then((status) => {
         const closed = closedState(status)
-        if (!cancelled) setOpened(closed ? { state: closed, role: null } : { state: 'open', role: status.access as Role })
+        if (!cancelled) setOpened(closed ? { state: closed, access: null } : { state: 'open', access: status.access as Role })
       })
-      // Server unreachable: try to open the document anyway (it works offline).
-      .catch(() => !cancelled && setOpened({ state: 'open', role: null }))
+      // Server unreachable: try to open the document anyway (it works offline, read-only until
+      // the socket says what we may do).
+      .catch(() => !cancelled && setOpened({ state: 'open', access: null }))
     return () => {
       cancelled = true
     }
   }, [name])
   return opened
+}
+
+type RoleState = {
+  /** `null` while unknown: nothing has said yet whether we may write, so treat as read-only. */
+  role: Role | null
+  /** Whether we know if we're the owner (for template seeding and owner-only actions). */
+  ownerKnown: boolean
+}
+
+/**
+ * The caller's role, from the socket first: the server's `authenticated` message carries the
+ * scope it enforces (`readonly` for viewers), on every (re)connect, so a promotion or demotion
+ * applies the moment the socket reconnects. Owner versus editor comes from `/status`; ownership
+ * never changes, so it is asked until known. Before the socket has authenticated, `/status` at
+ * open is the best guess.
+ */
+function useRole(session: Session, initialAccess: Role | null): RoleState {
+  const { provider } = session
+  // The provider keeps the last scope across disconnects, which is what we want: a dropped
+  // connection doesn't change what we may do.
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      provider.on('authenticated', onChange)
+      return () => void provider.off('authenticated', onChange)
+    },
+    [provider],
+  )
+  const scope = useSyncExternalStore(subscribe, () => provider.authorizedScope)
+  const [owner, setOwner] = useState<boolean | null>(initialAccess === null ? null : initialAccess === 'owner')
+
+  useEffect(() => {
+    if (owner !== null || scope !== 'read-write') return
+    let cancelled = false
+    let timer: number | undefined
+    const ask = () =>
+      getDocStatus(session.name).then(
+        (status) => {
+          if (cancelled) return
+          if (status.access === 'none') return // closed: the Workspace's own check handles it
+          setOwner(status.access === 'owner')
+        },
+        () => {
+          if (!cancelled) timer = window.setTimeout(ask, 3000)
+        },
+      )
+    void ask()
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [owner, scope, session.name])
+
+  const role: Role | null =
+    scope === 'readonly' ? 'viewer' : scope === 'read-write' ? (owner ? 'owner' : 'editor') : initialAccess
+  return { role, ownerKnown: owner !== null }
 }
 
 /** Restores the document from the Trash and reloads the page to reconnect. */
@@ -108,49 +169,48 @@ function RestoreButton({ name, className }: { name: string; className?: string }
   )
 }
 
+const backLink = (
+  <a className="primary-button" href={libraryUrl()}>
+    Back to all documents
+  </a>
+)
+
 type DocumentPageProps = { name: string; templateId: string | null }
 
 export function DocumentPage({ name, templateId }: DocumentPageProps) {
   const opened = useOpened(name)
 
   if (opened === undefined) return <Loading text="Opening document…" />
-  if (opened.state === 'trashed') {
-    return (
-      <div className="loading deleted" role="alert">
-        <p className="deleted-title">This document is in the trash.</p>
-        <p className="muted">Restore it to keep editing.</p>
-        <div className="closed-actions">
-          <RestoreButton name={name} className="primary-button" />
-          <a className="secondary-button" href={trashUrl()}>
-            Open the trash
-          </a>
-        </div>
-      </div>
-    )
+  switch (opened.state) {
+    case 'trashed':
+      return (
+        <ClosedPage
+          title="This document is in the trash."
+          actions={
+            <>
+              <RestoreButton name={name} className="primary-button" />
+              <a className="secondary-button" href={trashUrl()}>
+                Open the trash
+              </a>
+            </>
+          }
+        >
+          Restore it to keep editing.
+        </ClosedPage>
+      )
+    case 'trashed-by-owner':
+      return (
+        <ClosedPage title="The owner moved this document to the trash." actions={backLink}>
+          You’ll have access again if they restore it.
+        </ClosedPage>
+      )
+    case 'none':
+      return <NoAccess />
+    case 'deleted':
+      return <ClosedPage title="This document was deleted." actions={backLink} />
+    default:
+      return <SyncedDocument name={name} templateId={templateId} access={opened.access} />
   }
-  if (opened.state === 'trashed-by-owner') {
-    return (
-      <div className="loading deleted" role="alert">
-        <p className="deleted-title">The owner moved this document to the trash.</p>
-        <p className="muted closed-text">You’ll have access again if they restore it.</p>
-        <a className="primary-button" href={libraryUrl()}>
-          Back to all documents
-        </a>
-      </div>
-    )
-  }
-  if (opened.state === 'none') return <NoAccess />
-  if (opened.state === 'deleted') {
-    return (
-      <div className="loading deleted" role="alert">
-        <p className="deleted-title">This document was deleted.</p>
-        <a className="primary-button" href={libraryUrl()}>
-          Back to all documents
-        </a>
-      </div>
-    )
-  }
-  return <SyncedDocument name={name} templateId={templateId} role={opened.role} />
 }
 
 /** No access: the same page whether the document never existed, is someone else's or was purged. */
@@ -158,20 +218,19 @@ function NoAccess() {
   const me = useMe()
   const action = accountAction(me)
   return (
-    <div className="loading deleted" role="alert">
-      <p className="deleted-title">This document doesn’t exist or hasn’t been shared with you.</p>
-      <p className="muted closed-text">
-        Signed in as <strong data-testid="signed-in-as">{me.email}</strong>.
-      </p>
-      <div className="closed-actions">
-        <a className="primary-button" href={libraryUrl()}>
-          Back to all documents
-        </a>
-        <button type="button" className="secondary-button" onClick={action.run}>
-          {action.label}
-        </button>
-      </div>
-    </div>
+    <ClosedPage
+      title="This document doesn’t exist or hasn’t been shared with you."
+      actions={
+        <>
+          {backLink}
+          <button type="button" className="secondary-button" onClick={action.run}>
+            {action.label}
+          </button>
+        </>
+      }
+    >
+      Signed in as <strong data-testid="signed-in-as">{me.email}</strong>.
+    </ClosedPage>
   )
 }
 
@@ -184,38 +243,58 @@ function Loading({ text }: { text: string }) {
   )
 }
 
-function SyncedDocument({ name, templateId, role }: DocumentPageProps & { role: Role | null }) {
-  const [session] = useState(() => getSession(name))
-  const { ready, empty } = useInitialSync(session)
+function SyncedDocument({ name, templateId, access }: DocumentPageProps & { access: Role | null }) {
+  const me = useMe()
+  const [session] = useState(() =>
+    getSession(name, async () => {
+      // Before anything syncs on a (re)opened socket: are we still who this tab loaded as?
+      if ((await probeSession(me.email)) === 'other-user') throw new Error('signed in as someone else')
+    }),
+  )
+  const { ready, empty, synced } = useInitialSync(session)
+  const { role, ownerKnown } = useRole(session, access)
 
-  // The template only applies to the first open; drop it from the URL afterwards.
+  // Only the owner seeds a template, and only into a brand-new, empty document: anyone else's
+  // seed would be local edits (a viewer's are dropped by the server). If we can't tell yet
+  // whether we're the owner, wait for it rather than drop the template.
+  const template = templateId && empty ? findTemplate(templateId) : undefined
+  const waitingForOwner = ready && !!template && !ownerKnown
+  // If the server can't say for a while, open without the template; `?template=` stays in the
+  // URL, so a reload tries again.
+  const [gaveUp, setGaveUp] = useState(false)
   useEffect(() => {
-    if (!ready || !templateId) return
+    if (!waitingForOwner) return
+    const timer = window.setTimeout(() => setGaveUp(true), OWNER_WAIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [waitingForOwner])
+  const decided = ready && (!waitingForOwner || gaveUp)
+
+  // The template only applies to the first open; drop it from the URL once it has been applied,
+  // or once we know it won't be (the document isn't empty, or we aren't its owner). Not when
+  // we opened offline or gave up: a reload should try again.
+  const settled = synced && (!template || ownerKnown)
+  useEffect(() => {
+    if (!settled || !templateId) return
     const url = new URL(window.location.href)
     url.searchParams.delete('template')
     window.history.replaceState(null, '', url)
-  }, [ready, templateId])
+  }, [settled, templateId])
 
-  if (!ready) return <Loading text="Connecting to the shared document…" />
-
-  // Only the owner seeds a template: anyone else's seed would be local edits (a viewer's are
-  // dropped by the server), and only a brand-new, empty document gets one.
-  const template = empty && role === 'owner' ? findTemplate(templateId) : undefined
-  return <Workspace session={session} template={template} initialRole={role} />
+  if (!decided) return <Loading text="Connecting to the shared document…" />
+  return <Workspace session={session} template={role === 'owner' ? template : undefined} role={role} />
 }
 
 const MAX_EVENTS = 50
 
-type WorkspaceProps = { session: Session; template: Template | undefined; initialRole: Role | null }
+type WorkspaceProps = { session: Session; template: Template | undefined; role: Role | null }
 
-function Workspace({ session, template, initialRole }: WorkspaceProps) {
+function Workspace({ session, template, role }: WorkspaceProps) {
   const me = useMe()
   const [user] = useState(() => collabUser(me.email))
-  // The caller's role, kept current: access changes close the socket, and on reconnect the
-  // server may have made us a viewer or an editor. `null` while it is unknown (offline).
-  const [role, setRole] = useState<Role | null>(initialRole)
+  // Only owners and editors write. Viewers, and anyone whose role isn't known yet, read.
+  const canWrite = role === 'owner' || role === 'editor'
   const viewer = role === 'viewer'
-  const viewerRef = useRef(viewer)
+  const canWriteRef = useRef(canWrite)
   const [toc, setToc] = useState<TableOfContentData>([])
   const [events, setEvents] = useState<EditorEvent[]>([])
   const [view, setView] = useState<ViewOptions>({
@@ -230,9 +309,9 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
   const backupTimer = useRef<number | undefined>(undefined)
 
   useEffect(() => {
-    viewerRef.current = viewer
-    if (viewer) window.clearTimeout(backupTimer.current)
-  }, [viewer])
+    canWriteRef.current = canWrite
+    if (!canWrite) window.clearTimeout(backupTimer.current)
+  }, [canWrite])
 
   // Editor callbacks can fire while React is rendering (immediatelyRender), so
   // defer state updates to a microtask.
@@ -246,9 +325,9 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
 
   const getEditor = useCallback(() => editorRef.current, [])
 
-  // Viewers take no local backups: they can't change the document.
+  // Only people who can change the document take local backups.
   const backup = useCallback(
-    (e: Editor) => !viewerRef.current && saveBackup(e, me.email, session.name),
+    (e: Editor) => canWriteRef.current && saveBackup(e, me.email, session.name),
     [me.email, session.name],
   )
 
@@ -274,7 +353,7 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
   const editor = useEditor({
     extensions,
     immediatelyRender: true,
-    editable: initialRole !== 'viewer',
+    editable: canWrite,
     editorProps: {
       attributes: { 'aria-label': 'Document', spellcheck: 'true' },
     },
@@ -283,7 +362,7 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
       const origin = isChangeOrigin(transaction) ? 'remote' : 'local'
       logEvent('update', `${origin} · ${transaction.steps.length} step(s) · size ${e.state.doc.content.size}`)
       // Back up your own edits only, so a collaborator wiping the doc can't overwrite your backup.
-      if (origin === 'remote' || viewerRef.current) return
+      if (origin === 'remote' || !canWriteRef.current) return
       window.clearTimeout(backupTimer.current)
       backupTimer.current = window.setTimeout(() => backup(e), 1000)
     },
@@ -307,7 +386,11 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
     editor.commands.showInvisibleCharacters(view.invisibles)
   }, [editor, view.invisibles])
 
-  // Tutorial overlays: auto-start once, and `?` replays the welcome tour.
+  // Tutorial overlays: auto-start once, and `?` replays the welcome tour. They describe what
+  // this user can do here.
+  useEffect(() => {
+    setTourContext({ role, mode: me.mode })
+  }, [role, me.mode])
   useEffect(() => {
     const cancelAutoStart = autoStartTour('welcome', 700)
     const onKey = (event: KeyboardEvent) => {
@@ -325,60 +408,61 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
     }
   }, [])
 
-  const presence = usePresence(session.provider)
-  const status = useConnectionStatus(session.provider)
+  const { provider } = session
+  const presence = usePresence(provider)
+  const status = useConnectionStatus(provider)
+  const pending = usePendingChanges(provider)
+
+  // Demoted to viewer: lock the editor in the same tick the socket says so, before the next
+  // keystroke, rather than after React re-renders.
+  useEffect(() => {
+    const onAuthenticated = ({ scope }: { scope: string }) => {
+      setSessionExpired(false)
+      if (scope === 'readonly') editorRef.current?.setEditable(false)
+    }
+    provider.on('authenticated', onAuthenticated)
+    return () => {
+      provider.off('authenticated', onAuthenticated)
+    }
+  }, [provider])
 
   // When the socket closes or is refused, find out why instead of showing "Offline" forever:
   // first whether the session expired (Access redirects `/api/me`; the banner then offers to
-  // sign in again while the editor stays editable), then whether the document was moved to
-  // the trash, deleted, or unshared, or our role changed.
+  // sign in again while the editor stays editable) or now belongs to someone else, then
+  // whether the document was moved to the trash, deleted, or unshared.
   const [closed, setClosed] = useState<Closed | null>(null)
   const closedWhileOpen = closed !== null
   useEffect(() => {
-    const { provider } = session
     let cancelled = false
     let lastCheck = 0
-    const readStatus = () =>
-      getDocStatus(session.name)
-        .then((s) => {
-          if (cancelled) return
-          const next = closedState(s)
-          if (next) setClosed(next)
-          else setRole(s.access as Role)
-        })
-        .catch(() => undefined)
     // The provider retries refused connections in a loop; check at most every 3 s.
     const onRefused = () => {
       if (Date.now() - lastCheck < 3000) return
       lastCheck = Date.now()
-      void probeSession().then((result) => {
-        if (!cancelled && result === 'ok') void readStatus()
-      })
-    }
-    // A socket the server accepted proves the session works, and may carry a new role.
-    const onAuthenticated = () => {
-      setSessionExpired(false)
-      void readStatus()
+      void probeSession(me.email).then(async (result) => {
+        if (cancelled || result !== 'ok') return
+        const next = closedState(await getDocStatus(session.name))
+        if (!cancelled && next) setClosed(next)
+      }).catch(() => undefined)
     }
     provider.on('close', onRefused)
     provider.on('authenticationFailed', onRefused)
-    provider.on('authenticated', onAuthenticated)
     return () => {
       cancelled = true
       provider.off('close', onRefused)
       provider.off('authenticationFailed', onRefused)
-      provider.off('authenticated', onAuthenticated)
     }
-  }, [session])
+  }, [provider, session.name, me.email])
 
   useEffect(() => {
     if (!closedWhileOpen) return
-    session.provider.destroy()
+    provider.destroy()
     editor.setEditable(false)
-  }, [closedWhileOpen, editor, session.provider])
+  }, [closedWhileOpen, editor, provider])
 
-  // Viewers are always read-only; for owners and editors, Read-only is a view preference.
-  const readOnly = view.readOnly || closedWhileOpen || viewer
+  // Viewers (and an unknown role) are always read-only; for owners and editors, Read-only is a
+  // view preference.
+  const readOnly = view.readOnly || closedWhileOpen || !canWrite
   useEffect(() => {
     editor.setEditable(!readOnly)
   }, [editor, readOnly])
@@ -388,14 +472,11 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
     document.title = `${title || 'Untitled document'} – Write`
   }, [title])
 
-  // After "Sign in again" worked in another tab, reconnect now rather than at the next retry.
-  // A socket that is open but was refused for this document would never retry: replace it.
-  const reconnect = useCallback(() => {
-    const { provider } = session
-    const socket = provider.configuration.websocketProvider
-    if (socket.status === 'connected' && !provider.isAuthenticated) socket.webSocket?.close()
-    else void socket.connect()
-  }, [session])
+  // Edits the server refused: typed just before a demotion took effect. They stay on screen
+  // here but are not in the shared document, so say so.
+  const lostEdits = viewer && pending && status === 'connected' && !closedWhileOpen
+
+  const reconnect = useCallback(() => resume(session), [session])
 
   const classes = ['app', view.focusMode && 'focus-mode', readOnly && 'read-only', !view.sidebar && 'no-sidebar']
     .filter(Boolean)
@@ -409,7 +490,7 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
         presence={presence}
         role={role}
         view={{ ...view, readOnly }}
-        canToggleReadOnly={!viewer && !closedWhileOpen}
+        canToggleReadOnly={canWrite && !closedWhileOpen}
         onBackup={backup}
         onViewChange={(next) => setView((prev) => ({ ...prev, ...next }))}
       />
@@ -431,6 +512,12 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
           <a href={libraryUrl()}>Back to all documents</a>
         </div>
       )}
+      {lostEdits && (
+        <div className="deleted-banner lost-edits" role="alert">
+          You can only view this document now, so your latest changes weren’t saved. They’re still on this screen until
+          you reload: copy them, or use File → Export, if you need them.
+        </div>
+      )}
       {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
       <div className="workspace">
         <main className="main">
@@ -447,8 +534,9 @@ function Workspace({ session, template, initialRole }: WorkspaceProps) {
         documentName={session.name}
         email={me.email}
         status={status}
-        readOnly={view.readOnly && !viewer}
-        viewer={viewer}
+        pending={pending}
+        readOnly={view.readOnly && canWrite}
+        role={role}
       />
     </div>
   )

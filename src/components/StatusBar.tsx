@@ -1,5 +1,6 @@
 import { useEditorState, type Editor } from '@tiptap/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { Role } from '../api'
 import { BACKUP_EVENT, loadBackup, type Backup } from '../editor/backup'
 import { CHARACTER_LIMIT } from '../editor/extensions'
 import type { ConnectionStatus } from '../editor/hooks'
@@ -10,10 +11,12 @@ type StatusBarProps = {
   /** The signed-in User, whose local backup is shown. */
   email: string
   status: ConnectionStatus
+  /** Changes the server hasn't confirmed for a while (see `usePendingChanges`). */
+  pending: boolean
   /** The Read-only view preference (owners and editors). */
   readOnly: boolean
-  /** Viewers see "View only" and take no backups. */
-  viewer: boolean
+  /** Viewers see "View only"; only owners and editors take backups. `null` while unknown. */
+  role: Role | null
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -22,7 +25,9 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   disconnected: 'Offline: changes will sync when you reconnect',
 }
 
-export function StatusBar({ editor, documentName, email, status, readOnly, viewer }: StatusBarProps) {
+export function StatusBar({ editor, documentName, email, status, pending, readOnly, role }: StatusBarProps) {
+  const viewer = role === 'viewer'
+  const canWrite = role === 'owner' || role === 'editor'
   const info = useEditorState({
     editor,
     selector: ({ editor: e }) => {
@@ -37,7 +42,10 @@ export function StatusBar({ editor, documentName, email, status, readOnly, viewe
     },
   })
 
-  const [savedAt, setSavedAt] = useState<number | null>(() => loadBackup(email, documentName)?.savedAt ?? null)
+  const isOwner = role === 'owner'
+  const stored = useMemo(() => loadBackup(email, documentName, isOwner)?.savedAt ?? null, [email, documentName, isOwner])
+  const [newest, setSavedAt] = useState<number | null>(null)
+  const savedAt = newest ?? stored
 
   useEffect(() => {
     const onSaved = (event: Event) => setSavedAt((event as CustomEvent<Backup>).detail.savedAt)
@@ -45,6 +53,8 @@ export function StatusBar({ editor, documentName, email, status, readOnly, viewe
     return () => window.removeEventListener(BACKUP_EVENT, onSaved)
   }, [])
 
+  // "Synced" only when the server has also confirmed our changes, not just when connected.
+  const unsaved = status === 'connected' && pending
   const percent = Math.min(100, Math.round((info.characters / CHARACTER_LIMIT) * 100))
 
   return (
@@ -69,14 +79,14 @@ export function StatusBar({ editor, documentName, email, status, readOnly, viewe
         readOnly && <span className="status-item badge">Read-only</span>
       )}
       <span className="status-spacer" />
-      {!viewer && (
+      {canWrite && (
         <span className="status-item muted">
           {savedAt ? `Backup ${new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'No backup yet'}
         </span>
       )}
-      <span className={`status-item connection ${status}`} data-tour="connection" role="status">
+      <span className={`status-item connection ${status}${unsaved ? ' unsaved' : ''}`} data-tour="connection" role="status">
         <span className="dot" aria-hidden />
-        {STATUS_LABEL[status]}
+        {unsaved ? (viewer ? 'Not saved: view only' : 'Saving…') : STATUS_LABEL[status]}
       </span>
     </footer>
   )

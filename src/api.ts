@@ -1,6 +1,6 @@
 /** Client for the document library API served by `server/collab.ts`. */
 
-import { setSessionExpired } from './session'
+import { setOtherUser, setSessionExpired } from './session'
 
 export type ShareRole = 'editor' | 'viewer'
 /** The caller's role on a document; `owner` is never granted by a share. */
@@ -73,14 +73,19 @@ export const getMe = () => request<Me>('', undefined, '/api/me')
 /**
  * Asks the server who we are, to tell a Session expired apart from a network drop:
  * `expired` for a 401 or an Access redirect, `unreachable` for anything else that failed.
+ * With `expected` (the User this tab loaded as), a different answer is `other-user`, and is
+ * recorded so the page can say so instead of carrying on as the wrong person.
  */
-export async function probeSession(): Promise<'ok' | 'expired' | 'unreachable'> {
+export async function probeSession(expected?: string): Promise<'ok' | 'expired' | 'unreachable' | 'other-user'> {
+  let me: Me
   try {
-    await getMe()
-    return 'ok'
+    me = await getMe()
   } catch (error) {
     return isSessionError(error) ? 'expired' : 'unreachable'
   }
+  if (expected === undefined) return 'ok'
+  setOtherUser(me.email === expected ? null : me.email)
+  return me.email === expected ? 'ok' : 'other-user'
 }
 
 /** My documents plus Shared with me: every open document the caller owns or has a share on. */

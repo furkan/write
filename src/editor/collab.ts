@@ -32,19 +32,44 @@ let current: Session | null = null
 /**
  * Returns the session for `name`, creating it on first use. Memoised so React
  * StrictMode's double-invoked initialisers don't open two connections.
+ *
+ * `checkUser` runs each time the socket (re)opens, before anything syncs. If it rejects (the
+ * browser is now signed in as someone else), the provider gets no token, so the server never
+ * authenticates the document and nothing this tab sends is applied, and the socket is closed
+ * until `resume`.
  */
-export function getSession(name: string): Session {
+export function getSession(name: string, checkUser: () => Promise<void>): Session {
   if (current?.name === name) return current
   current?.provider.destroy()
   const ydoc = new Y.Doc()
-  current = {
+  const provider: HocuspocusProvider = new HocuspocusProvider({
+    url: collabUrl,
     name,
-    ydoc,
-    provider: new HocuspocusProvider({ url: collabUrl, name, document: ydoc }),
-    meta: ydoc.getMap('meta'),
-    fragment: ydoc.getXmlFragment('default'),
-  }
+    document: ydoc,
+    // The server takes the identity from the request headers; the token is only our hook.
+    token: async () => {
+      try {
+        await checkUser()
+      } catch (error) {
+        queueMicrotask(() => provider.configuration.websocketProvider.disconnect())
+        throw error
+      }
+      return ''
+    },
+  })
+  current = { name, ydoc, provider, meta: ydoc.getMap('meta'), fragment: ydoc.getXmlFragment('default') }
   return current
+}
+
+/**
+ * Reconnects now rather than at the next retry, e.g. after signing in again. A socket that is
+ * open but was refused for this document would never retry it, so it is replaced.
+ */
+export function resume(session: Session) {
+  const { provider } = session
+  const socket = provider.configuration.websocketProvider
+  if (socket.status === 'connected' && !provider.isAuthenticated) socket.webSocket?.close()
+  else void socket.connect()
 }
 
 /** True when the shared document has no editor content yet. */

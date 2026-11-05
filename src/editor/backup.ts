@@ -9,6 +9,8 @@ import { readStorage, writeStorage } from './storage'
  */
 
 const keyFor = (email: string, documentName: string) => `write:backup:${email}:${documentName}`
+/** Before per-user access, backups were keyed by document only. */
+const legacyKeyFor = (documentName: string) => `write:backup:${documentName}`
 
 export type Backup = { savedAt: number; content: JSONContent }
 
@@ -21,11 +23,20 @@ export function saveBackup(editor: Editor, email: string, documentName: string):
   return ok
 }
 
-export function loadBackup(email: string, documentName: string): Backup | null {
+function readBackup(key: string): Backup | null {
   try {
-    const backup = JSON.parse(readStorage(keyFor(email, documentName)) ?? 'null') as Backup | null
+    const backup = JSON.parse(readStorage(key) ?? 'null') as Backup | null
     return backup?.content ? backup : null
   } catch {
     return null
   }
+}
+
+/**
+ * Your backup of a document. `isOwner` also looks under the pre-ownership key: those backups
+ * were made in this browser before documents had owners, and the migration gave every such
+ * document to the Legacy owner, so only the owner gets them (never a collaborator).
+ */
+export function loadBackup(email: string, documentName: string, isOwner = false): Backup | null {
+  return readBackup(keyFor(email, documentName)) ?? (isOwner ? readBackup(legacyKeyFor(documentName)) : null)
 }
