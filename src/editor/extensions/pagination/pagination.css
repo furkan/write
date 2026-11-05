@@ -220,6 +220,32 @@
   flex: 0 1 attr(colwidth px, auto);
 }
 
+/*
+ * A row or task item taller than a page can't move to the next page whole; the extension gives it
+ * this class so its lines break across pages instead. A tall row's cells stack.
+ */
+.tiptap.paginated tr.pagination-tall,
+.tiptap.paginated tr.pagination-tall > :is(td, th) {
+  display: block;
+}
+
+.tiptap.paginated tr.pagination-tall > :is(td, th) + :is(td, th) {
+  margin-top: -1px;
+  margin-left: 0;
+}
+
+.tiptap.paginated ul[data-type='taskList'] li.pagination-tall {
+  display: block;
+  position: relative;
+  padding-left: 1.5em;
+}
+
+.tiptap.paginated ul[data-type='taskList'] li.pagination-tall > label {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
 /* Focus mode dims the editor's children, but the pages aren't content. */
 .focus-mode .tiptap > .pagination-pages {
   opacity: 1;

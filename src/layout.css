@@ -100,6 +100,11 @@
     min-height: 0;
   }
 
+  /* Web layout: the sheet's margins (from @page) are the only margins. */
+  .editor .tiptap:not(.paginated) {
+    padding: 0;
+  }
+
   /* No placeholders, focus dimming or selection on paper. */
   .tiptap .is-empty::before {
     content: none !important;

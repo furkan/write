@@ -45,12 +45,15 @@
  * - Styles live in pagination.css and CSS variables instead of a <style> tag and inline styles
  *   that stayed on the editor after pagination was turned off.
  * - The editor is a flow root, so it contains the floats; no `min-height` bookkeeping.
- * - A guard stops the page count from growing forever when something can't be split and is
- *   taller than a page (upstream would keep adding pages).
+ * - Something that can't be split (a table row, a task item) and is taller than a page would be
+ *   pushed below the last page again and again, adding pages forever. Such boxes are found and
+ *   given the `pagination-tall` class (a node decoration), which lets their lines break across
+ *   pages. A guard still stops the page count from growing without end for anything else.
  */
 
 import { Extension } from '@tiptap/core'
-import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
+import type { Node as PMNode } from '@tiptap/pm/model'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import './pagination.css'
 
@@ -82,7 +85,12 @@ type PaginationState = {
   decorations: DecorationSet
 }
 
-type PaginationMeta = { options?: PaginationOptions; pageCount?: number }
+type PaginationMeta = {
+  options?: PaginationOptions
+  pageCount?: number
+  /** Start positions of unbreakable nodes found to be taller than a page. */
+  tall?: number[]
+}
 
 export const paginationKey = new PluginKey<PaginationState>('pagination')
 
@@ -92,6 +100,10 @@ export const paginationKey = new PluginKey<PaginationState>('pagination')
  * pushed below the last page.
  */
 const MAX_GROWTH_PASSES = 6
+
+/** Boxes that move to the next page whole (see pagination.css), unless they are taller than a page. */
+const UNBREAKABLE = 'tr, ul[data-type="taskList"] > li'
+const TALL_CLASS = 'pagination-tall'
 
 const DEFAULTS: PaginationOptions = {
   enabled: true,
@@ -150,7 +162,7 @@ function renderPages(pageCount: number): HTMLElement {
   return root
 }
 
-function buildDecorations(state: EditorState, options: PaginationOptions, pageCount: number): DecorationSet {
+function buildDecorations(doc: PMNode, options: PaginationOptions, pageCount: number, tall: Decoration[]): DecorationSet {
   if (!options.enabled) return DecorationSet.empty
   const widget = Decoration.widget(0, () => renderPages(pageCount), {
     side: -1,
@@ -159,7 +171,26 @@ function buildDecorations(state: EditorState, options: PaginationOptions, pageCo
     ignoreSelection: true,
     stopEvent: () => true,
   })
-  return DecorationSet.create(state.doc, [widget])
+  return DecorationSet.create(doc, [widget, ...tall])
+}
+
+function tallDecorations(doc: PMNode, positions: number[]): Decoration[] {
+  return positions.flatMap((pos) => {
+    const node = doc.nodeAt(pos)
+    return node ? [Decoration.node(pos, pos + node.nodeSize, { class: TALL_CLASS }, { tall: true })] : []
+  })
+}
+
+/** Unbreakable boxes taller than a page's content area that aren't marked yet: their positions. */
+function findTall(view: EditorView, options: PaginationOptions): number[] {
+  const limit = contentHeight(options)
+  const found: number[] = []
+  for (const el of view.dom.querySelectorAll<HTMLElement>(UNBREAKABLE)) {
+    if (el.classList.contains(TALL_CLASS) || el.getBoundingClientRect().height <= limit) continue
+    const pos = view.posAtDOM(el, 0) - 1
+    if (pos >= 0 && view.nodeDOM(pos) === el) found.push(pos)
+  }
+  return found
 }
 
 /**
@@ -189,16 +220,22 @@ function paginationPlugin(initial: PaginationOptions): Plugin<PaginationState> {
   return new Plugin<PaginationState>({
     key: paginationKey,
     state: {
-      init: (_, state) => ({ options: initial, pageCount: 1, decorations: buildDecorations(state, initial, 1) }),
+      init: (_, state) => ({ options: initial, pageCount: 1, decorations: buildDecorations(state.doc, initial, 1, []) }),
       apply: (tr, prev, _old, state) => {
         const meta = tr.getMeta(paginationKey) as PaginationMeta | undefined
         const options = meta?.options ?? prev.options
         const pageCount = meta?.pageCount ?? prev.pageCount
-        if (pageCount !== prev.pageCount || !sameOptions(options, prev.options)) {
-          return { options, pageCount, decorations: buildDecorations(state, options, pageCount) }
+        let decorations = tr.docChanged ? prev.decorations.map(tr.mapping, tr.doc) : prev.decorations
+        if (!sameOptions(options, prev.options)) {
+          // New geometry: what was too tall may fit now. Measuring finds what still doesn't.
+          decorations = buildDecorations(state.doc, options, pageCount, [])
+        } else if (pageCount !== prev.pageCount) {
+          const tall = decorations.find(undefined, undefined, (spec) => spec.tall === true)
+          decorations = buildDecorations(state.doc, options, pageCount, tall)
         }
-        if (!tr.docChanged) return prev
-        return { ...prev, decorations: prev.decorations.map(tr.mapping, tr.doc) }
+        if (meta?.tall && options.enabled) decorations = decorations.add(state.doc, tallDecorations(state.doc, meta.tall))
+        if (decorations === prev.decorations && options === prev.options) return prev
+        return { options, pageCount, decorations }
       },
     },
     props: {
@@ -211,14 +248,30 @@ function paginationPlugin(initial: PaginationOptions): Plugin<PaginationState> {
     view: (view) => {
       let frame = 0
       let growthPasses = 0
+      // Set when the guard trips; cleared once the content fits or the geometry changes.
+      let stuck = false
 
       const measure = () => {
         frame = 0
         const current = paginationKey.getState(view.state)
         if (!current?.options.enabled || view.isDestroyed) return
         const needed = neededPages(view, current.options, current.pageCount)
+        if (needed <= current.pageCount) stuck = false
         if (needed === current.pageCount) return
-        if (needed > current.pageCount && ++growthPasses > MAX_GROWTH_PASSES) return
+        if (needed > current.pageCount) {
+          // Content runs past the last page. If an unbreakable box is taller than a page, it was
+          // pushed there and always will be: let it break first, then measure again.
+          const tall = findTall(view, current.options)
+          if (tall.length) {
+            view.dispatch(view.state.tr.setMeta(paginationKey, { tall } satisfies PaginationMeta))
+            return
+          }
+          if (stuck) return
+          if (++growthPasses > MAX_GROWTH_PASSES) {
+            stuck = true
+            return
+          }
+        }
         view.dispatch(view.state.tr.setMeta(paginationKey, { pageCount: needed } satisfies PaginationMeta))
       }
       const schedule = () => {
@@ -236,10 +289,11 @@ function paginationPlugin(initial: PaginationOptions): Plugin<PaginationState> {
         update: (_view, prevState) => {
           const prev = paginationKey.getState(prevState)
           const next = paginationKey.getState(view.state)
-          if (!next?.options.enabled) return
+          if (!next?.options.enabled || prev === next) return
           const optionsChanged = !prev || !sameOptions(prev.options, next.options)
+          if (optionsChanged) stuck = false
           if (view.state.doc !== prevState.doc || optionsChanged) growthPasses = 0
-          if (view.state.doc !== prevState.doc || optionsChanged || prev?.pageCount !== next.pageCount) schedule()
+          schedule()
         },
         destroy: () => {
           cancelAnimationFrame(frame)
