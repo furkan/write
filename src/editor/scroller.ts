@@ -7,6 +7,9 @@
 let element: HTMLElement | null = null
 const listeners = new Set<EventListener>()
 
+/** The document's scroller, once the document page has mounted it. */
+export const getDocumentScroller = () => element
+
 /** Called by the document page when its scroller mounts (and with `null` when it unmounts). */
 export function setDocumentScroller(next: HTMLElement | null) {
   for (const listener of listeners) element?.removeEventListener('scroll', listener)
