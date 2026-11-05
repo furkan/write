@@ -2,21 +2,36 @@ import 'katex/dist/katex.min.css'
 import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type RefObject,
+} from 'react'
 import { getDocStatus, libraryUrl, probeSession, restoreOrConfirmOpen, trashUrl, type DocStatus, type Role } from '../api'
 import { ClosedPage } from '../components/ClosedPage'
 import { EditorMenus } from '../components/EditorMenus'
-import { Header, type ViewOptions } from '../components/Header'
-import { SessionBanner } from '../components/SessionBanner'
+import { BarActions, DocumentTitle } from '../components/ribbon/BarItems'
+import { canWrite as canWriteAs, DocumentChromeContext, type DocumentChrome, type ViewOptions } from '../components/ribbon/documentContext'
 import { Ribbon } from '../components/ribbon/Ribbon'
+import { SessionBanner } from '../components/SessionBanner'
+import { ShareDialog } from '../components/ShareDialog'
 import { Sidebar } from '../components/Sidebar'
 import { StatusBar } from '../components/StatusBar'
 import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
+import { paginationKey } from '../editor/extensions/pagination/Pagination'
 import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRetrying } from '../editor/hooks'
 import { pageGeometry, pageRule, useLayoutMode, useNarrowScreen, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
+import { setDocumentScroller } from '../editor/scroller'
+import { fitZoom, useZoomSetting, type ZoomFit } from '../editor/zoom'
 import { accountAction, setSessionExpired, useMe } from '../session'
 import { autoStartTour, setTourContext, startTour } from '../tours'
 import '../layout.css'
@@ -303,13 +318,143 @@ function usePrintPageRule(rule: string) {
   }, [rule])
 }
 
+/** Resolves once the page count has held still for a few frames (fonts loaded, pages measured). */
+async function pagesSettled(editor: Editor) {
+  await document.fonts?.ready
+  let last = -1
+  let stable = 0
+  for (let frame = 0; frame < 120 && stable < 3; frame++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const count = paginationKey.getState(editor.state)?.pageCount ?? 0
+    stable = count === last ? stable + 1 : 0
+    last = count
+  }
+}
+
+/**
+ * Print or save as PDF through the browser's dialog, always as pages at 100%: in Web layout, on a
+ * narrow screen or zoomed, the page shows Print layout at 100% while printing (`printing`), and
+ * goes back afterwards. Ctrl/Cmd+P takes the same path. (The browser's own Print menu item can't
+ * be intercepted; it still prints at 100%, and in Web layout with the page numbers of `@page`.)
+ */
+function usePrint(editor: Editor, printing: boolean, setPrinting: (printing: boolean) => void): () => void {
+  const print = useCallback(() => setPrinting(true), [setPrinting])
+
+  useEffect(() => {
+    if (!printing) return
+    let cancelled = false
+    const done = () => setPrinting(false)
+    window.addEventListener('afterprint', done)
+    void pagesSettled(editor).then(() => {
+      if (cancelled) return
+      window.print()
+      // Where print() doesn't wait for the dialog and afterprint doesn't come, the next click does.
+      window.addEventListener('pointerdown', done, { once: true })
+    })
+    return () => {
+      cancelled = true
+      window.removeEventListener('afterprint', done)
+      window.removeEventListener('pointerdown', done)
+    }
+  }, [printing, editor, setPrinting])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'p') {
+        event.preventDefault()
+        print()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [print])
+
+  return print
+}
+
+/** Space the page keeps on screen: the editor's padding around it (see layout.css). */
+const PAGE_PADDING = { x: 48, top: 16, bottom: 16 }
+
+/**
+ * Registers the document scroller (see editor/scroller.ts) and publishes its height as
+ * `--doc-view-height`, for the sticky sidebar's own scrolling (see App.css).
+ */
+function useDocumentScroller(view: HTMLElement | null) {
+  useLayoutEffect(() => {
+    if (!view) return
+    setDocumentScroller(view)
+    const observer = new ResizeObserver(() => view.style.setProperty('--doc-view-height', `${view.clientHeight}px`))
+    observer.observe(view)
+    return () => {
+      observer.disconnect()
+      setDocumentScroller(null)
+    }
+  }, [view])
+}
+
+/**
+ * The percentage a fit (Page width, One page) gives, following the window and the sidebar. The
+ * room is the main column's width (which doesn't depend on the zoom while fitting: see the
+ * `--layout-page-width` below) and the document scroller's height.
+ */
+function useFitZoom(
+  fit: ZoomFit | null,
+  pageWidth: number,
+  pageHeight: number,
+  main: RefObject<HTMLElement | null>,
+  view: HTMLElement | null,
+): number | null {
+  const [fitted, setFitted] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const column = main.current
+    if (!fit || !column || !view) return
+    const measure = () => {
+      const width = column.clientWidth - PAGE_PADDING.x
+      const height = view.clientHeight - PAGE_PADDING.top - PAGE_PADDING.bottom
+      setFitted(fitZoom({ fit, pageWidth, pageHeight, width, height }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(column)
+    observer.observe(view)
+    return () => observer.disconnect()
+  }, [fit, pageWidth, pageHeight, main, view])
+  return fit ? fitted : null
+}
+
+/**
+ * Zooming keeps the same place in the document in the middle of the scroller, as Word does,
+ * instead of the same scroll offset. The scroll position is remembered before each change, since
+ * the browser's own scroll anchoring may already have moved it by the time this runs.
+ */
+function useZoomAnchor(zoom: number, editor: Editor, view: HTMLElement | null) {
+  const before = useRef({ zoom, scrollTop: 0 })
+  useEffect(() => {
+    if (!view) return
+    const remember = () => (before.current.scrollTop = view.scrollTop)
+    remember()
+    view.addEventListener('scroll', remember, { passive: true })
+    return () => view.removeEventListener('scroll', remember)
+  }, [view])
+  useLayoutEffect(() => {
+    const previous = before.current
+    if (!view || previous.zoom === zoom) return
+    const middle = view.clientHeight / 2
+    // The editor's top in the scroller's content, which zooming doesn't move.
+    const top = editor.view.dom.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop
+    const offset = (previous.scrollTop + middle - top) / previous.zoom
+    before.current = { zoom, scrollTop: previous.scrollTop }
+    if (offset > 0) view.scrollTo({ top: top + offset * zoom - middle, behavior: 'instant' })
+  }, [zoom, editor, view])
+}
+
 type WorkspaceProps = { session: Session; template: Template | undefined; role: Role | null }
 
 function Workspace({ session, template, role }: WorkspaceProps) {
   const me = useMe()
   const [user] = useState(() => collabUser(me.email))
   // Only owners and editors write. Viewers, and anyone whose role isn't known yet, read.
-  const canWrite = role === 'owner' || role === 'editor'
+  const canWrite = canWriteAs(role)
   const viewer = role === 'viewer'
   const canWriteRef = useRef(canWrite)
   const [toc, setToc] = useState<TableOfContentData>([])
@@ -320,15 +465,20 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     sidebar: true,
   })
 
+  const editorRef = useRef<Editor | null>(null)
+  const getEditor = useCallback(() => editorRef.current, [])
+  // Set while printing (see usePrint): pages at 100%, whatever the view.
+  const [printing, setPrinting] = useState(false)
+
   // Print layout shows pages; Web layout, or a screen too narrow for a page, one continuous page.
+  // Printing always shows pages.
   const pageSetup = usePageSetup(session)
   const layoutMode = useLayoutMode()
   const narrow = useNarrowScreen()
-  const paged = layoutMode === 'print' && !narrow
+  const paged = (layoutMode === 'print' && !narrow) || printing
   const pagination = useMemo(() => ({ enabled: paged, pageGap: PAGE_GAP, ...pageGeometry(pageSetup) }), [paged, pageSetup])
   usePrintPageRule(pageRule(pageSetup, paged))
 
-  const editorRef = useRef<Editor | null>(null)
   const backupTimer = useRef<number | undefined>(undefined)
 
   useEffect(() => {
@@ -340,8 +490,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   useEffect(() => {
     if (role === 'owner') adoptLegacyBackup(me.email, session.name)
   }, [role, me.email, session.name])
-
-  const getEditor = useCallback(() => editorRef.current, [])
 
   // Only people who can change the document take local backups.
   const backup = useCallback(
@@ -507,8 +655,46 @@ function Workspace({ session, template, role }: WorkspaceProps) {
 
   const reconnect = useCallback(() => resume(session), [session])
 
+  const print = usePrint(editor, printing, setPrinting)
+  const [sharing, setSharing] = useState(false)
+
+  const mainRef = useRef<HTMLElement>(null)
+  // The document's scroller, as state: the menus and the zoom need it once it exists.
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
+  useDocumentScroller(scroller)
+
+  // Zoom: a percentage, or a fit in Print layout. Printing is always at 100%.
+  const zoomSetting = useZoomSetting()
+  const fit = paged && !printing ? zoomSetting.fit : null
+  const fitted = useFitZoom(fit, pagination.pageWidth, pagination.pageHeight, mainRef, scroller)
+  const zoom = printing ? 100 : fit ? (fitted ?? 100) : zoomSetting.percent
+  useZoomAnchor(zoom, editor, scroller)
+
+  const canToggleReadOnly = canWrite && !closedWhileOpen
+  const chrome = useMemo<DocumentChrome>(
+    () => ({
+      role,
+      view: { ...view, readOnly },
+      canToggleReadOnly,
+      setView: (next) => setView((prev) => ({ ...prev, ...next })),
+      backup: () => backup(editor),
+      share: () => setSharing(true),
+      print,
+      zoom,
+    }),
+    [role, view, readOnly, canToggleReadOnly, backup, editor, print, zoom],
+  )
+
+  const style = {
+    '--zoom': zoom / 100,
+    // The page's width on screen, which the main column makes room for. Not while fitting: the
+    // page then fits the column by definition, and the column must not follow the page.
+    '--layout-page-width': fit ? '0px' : `${(pagination.pageWidth * zoom) / 100}px`,
+  } as CSSProperties
+
   const classes = [
     'app',
+    'doc-shell',
     view.focusMode && 'focus-mode',
     readOnly && 'read-only',
     !view.sidebar && 'no-sidebar',
@@ -518,62 +704,65 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     .join(' ')
 
   return (
-    <div className={classes} style={{ '--layout-page-width': `${pagination.pageWidth}px` } as CSSProperties}>
-      <Header
-        editor={editor}
-        session={session}
-        presence={presence}
-        role={role}
-        view={{ ...view, readOnly }}
-        canToggleReadOnly={canWrite && !closedWhileOpen}
-        onBackup={backup}
-        onViewChange={(next) => setView((prev) => ({ ...prev, ...next }))}
-      />
-      <Ribbon editor={editor} session={session} readOnly={readOnly} />
-      {closed && (
-        <div className="deleted-banner" role="alert">
-          {closed === 'trashed'
-            ? 'This document was moved to the trash.'
-            : closed === 'trashed-by-owner'
-              ? 'The owner moved this document to the trash.'
-              : closed === 'deleted'
-                ? 'This document was deleted.'
-                : 'You no longer have access to this document.'}{' '}
-          Your view is read-only and changes are no longer saved.{' '}
-          {closed === 'trashed' && (
-            <>
-              <RestoreButton name={session.name} className="link-button banner-button" /> ·{' '}
-            </>
-          )}
-          <a href={libraryUrl()}>Back to all documents</a>
-        </div>
-      )}
-      {lostEdits && (
-        <div className="deleted-banner lost-edits" role="alert">
-          You can only view this document now, so your latest changes weren’t saved. They’re still on this screen until
-          you reload: copy them, or use File → Export, if you need them.
-        </div>
-      )}
-      {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
-      <div className="workspace">
-        <main className="main">
-          <div className="editor-shell" data-tour="editor">
-            <EditorContent editor={editor} className="editor" />
-            <EditorMenus editor={editor} />
+    <DocumentChromeContext value={chrome}>
+      <div className={classes} style={style}>
+        <Ribbon
+          editor={editor}
+          session={session}
+          readOnly={readOnly}
+          start={<DocumentTitle session={session} />}
+          end={<BarActions presence={presence} />}
+        />
+        {sharing && <ShareDialog docId={session.name} onClose={() => setSharing(false)} />}
+        {closed && (
+          <div className="deleted-banner" role="alert">
+            {closed === 'trashed'
+              ? 'This document was moved to the trash.'
+              : closed === 'trashed-by-owner'
+                ? 'The owner moved this document to the trash.'
+                : closed === 'deleted'
+                  ? 'This document was deleted.'
+                  : 'You no longer have access to this document.'}{' '}
+            Your view is read-only and changes are no longer saved.{' '}
+            {closed === 'trashed' && (
+              <>
+                <RestoreButton name={session.name} className="link-button banner-button" /> ·{' '}
+              </>
+            )}
+            <a href={libraryUrl()}>Back to all documents</a>
           </div>
-        </main>
-        {view.sidebar && <Sidebar editor={editor} toc={toc} />}
+        )}
+        {lostEdits && (
+          <div className="deleted-banner lost-edits" role="alert">
+            You can only view this document now, so your latest changes weren’t saved. They’re still on this screen until
+            you reload: copy them, or export them from the File tab, if you need them.
+          </div>
+        )}
+        {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
+        {/* The only part of the page that scrolls: the ribbon above and the status bar below stay put. */}
+        <div className="doc-scroll" ref={setScroller}>
+          <div className="workspace">
+            <main className="main" ref={mainRef}>
+              <div className="editor-shell" data-tour="editor">
+                <EditorContent editor={editor} className="editor" />
+                <EditorMenus editor={editor} scrollTarget={scroller} />
+              </div>
+            </main>
+            {view.sidebar && <Sidebar editor={editor} toc={toc} />}
+          </div>
+        </div>
+        <StatusBar
+          editor={editor}
+          documentName={session.name}
+          email={me.email}
+          status={status}
+          pending={pending}
+          retrying={retrying}
+          readOnly={view.readOnly && canWrite}
+          role={role}
+          zoom={zoom}
+        />
       </div>
-      <StatusBar
-        editor={editor}
-        documentName={session.name}
-        email={me.email}
-        status={status}
-        pending={pending}
-        retrying={retrying}
-        readOnly={view.readOnly && canWrite}
-        role={role}
-      />
-    </div>
+    </DocumentChromeContext>
   )
 }

@@ -5,7 +5,7 @@
   gap: 12px;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  min-height: 100dvh;
   color: var(--muted);
 }
 
@@ -27,25 +27,36 @@
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+/*
+ * The document page is an app shell: the ribbon at the top and the status bar at the bottom stay
+ * put, and only the document area (.doc-scroll) scrolls. The page itself never scrolls or
+ * bounces, so there is nothing to pull past the ribbon (no pull-to-refresh) or the status bar.
+ */
+html:has(.doc-shell),
+html:has(.doc-shell) body {
+  height: 100%;
+  overflow: hidden;
 }
 
-.brand {
+.app.doc-shell {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.doc-shell > :not(.doc-scroll) {
+  flex: none;
+}
+
+.doc-scroll {
   display: flex;
-  flex: 1 1 200px;
-  gap: 6px;
-  align-items: center;
-  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .logo {
@@ -215,7 +226,7 @@
   border-radius: 50%;
 }
 
-.header-actions > .account > button {
+:is(.header-actions, .ribbon-actions) > .account > button {
   display: grid;
   place-items: center;
   width: 32px;
@@ -239,7 +250,7 @@
 
 .share-dialog {
   width: min(520px, calc(100vw - 24px));
-  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   padding: 0;
   color: var(--text);
   background: var(--bg);
@@ -418,19 +429,6 @@
   letter-spacing: -0.01em;
 }
 
-.doc-name {
-  overflow: hidden;
-  max-width: 40vw;
-  padding: 1px 8px;
-  font: 0.8rem var(--mono);
-  color: var(--muted);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-}
-
 .header-actions {
   display: flex;
   flex-wrap: wrap;
@@ -438,8 +436,7 @@
   align-items: center;
 }
 
-.header-actions > .dropdown > button,
-.header-button {
+.header-actions > .dropdown > button {
   height: 32px;
   padding: 0 12px;
   font-size: 0.9rem;
@@ -449,29 +446,8 @@
   cursor: pointer;
 }
 
-.header-actions > .dropdown > button:hover,
-.header-button:hover {
+.header-actions > .dropdown > button:hover {
   background: var(--surface-2);
-}
-
-/* Phones: keep the document header's buttons (presence, File, View, Share, theme, account, help) on one row. */
-@media (max-width: 480px) {
-  .header {
-    padding: 8px 12px;
-  }
-
-  .header .header-actions {
-    gap: 5px;
-  }
-
-  .header .header-actions > .dropdown:not(.theme-toggle, .account, .help) > button,
-  .header .header-button {
-    padding: 0 9px;
-  }
-
-  .presence {
-    margin-right: 0;
-  }
 }
 
 .help > button {
@@ -726,6 +702,11 @@
   padding: 16px 8px 16px 40px;
   outline: none;
   word-wrap: break-word;
+  /*
+   * The viewer's zoom (src/editor/zoom.ts). In Print layout the page grows or shrinks; in one
+   * continuous page the width stays the column's, so the text reflows at its new size.
+   */
+  zoom: var(--zoom, 1);
 }
 
 @media (max-width: 640px) {
@@ -753,9 +734,9 @@
   font-size: 2rem;
 }
 
-/* Keep headings clear of the sticky ribbon when jumping from the table of contents. */
+/* A little room above a heading jumped to from the table of contents. */
 .tiptap :is(h1, h2, h3, h4, h5, h6) {
-  scroll-margin-top: calc(var(--ribbon-height, 140px) + 16px);
+  scroll-margin-top: 16px;
 }
 
 .tiptap h2 {
@@ -1394,9 +1375,9 @@
 @media (min-width: 1001px) {
   .sidebar {
     position: sticky;
-    top: var(--ribbon-height, 0px);
+    top: 0;
     align-self: start;
-    max-height: calc(100vh - var(--ribbon-height, 0px));
+    max-height: var(--doc-view-height, 100%);
     overflow-y: auto;
   }
 }
@@ -1469,8 +1450,7 @@
 /* ---------- Status bar ---------- */
 
 .status-bar {
-  position: sticky;
-  bottom: 0;
+  position: relative;
   z-index: 20;
   display: flex;
   flex-wrap: wrap;

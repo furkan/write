@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { getThemeChoice, setThemeChoice, THEME_EVENT, type ThemeChoice } from '../theme'
+import type { ReactNode } from 'react'
+import { setThemeChoice, useThemeChoice, type ThemeChoice } from '../theme'
 import { Dropdown, MenuItem } from './Dropdown'
 
 const svg = (children: ReactNode) => (
@@ -32,24 +32,56 @@ const SystemIcon = svg(
   </>,
 )
 
-const OPTIONS: { value: ThemeChoice; label: string; icon: ReactNode }[] = [
+const THEME_OPTIONS: { value: ThemeChoice; label: string; icon: ReactNode }[] = [
   { value: 'system', label: 'System', icon: SystemIcon },
   { value: 'light', label: 'Light', icon: SunIcon },
   { value: 'dark', label: 'Dark', icon: MoonIcon },
 ]
 
-/** Header menu for picking the colour theme; the choice is remembered per browser. */
+/** System, Light and Dark as menu choices, the current one checked. */
+export function ThemeMenuItems({ onDone }: { onDone: () => void }) {
+  const choice = useThemeChoice()
+  return THEME_OPTIONS.map((option) => (
+    <MenuItem
+      key={option.value}
+      checked={option.value === choice}
+      onSelect={() => {
+        setThemeChoice(option.value)
+        onDone()
+      }}
+    >
+      <span className="menu-icon">{option.icon}</span> {option.label}
+      {option.value === choice ? ' ✓' : ''}
+    </MenuItem>
+  ))
+}
+
+/** System, Light and Dark as toggle buttons, for a popover that isn't a menu. */
+export function ThemeButtons() {
+  const choice = useThemeChoice()
+  return (
+    <div className="theme-buttons" role="group" aria-label="Theme">
+      {THEME_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={`menu-item${choice === option.value ? ' active' : ''}`}
+          aria-pressed={choice === option.value}
+          onClick={() => setThemeChoice(option.value)}
+        >
+          <span>
+            <span className="menu-icon">{option.icon}</span> {option.label}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Menu button for picking the colour theme; the choice is remembered per browser. */
 export function ThemeToggle() {
-  const [choice, setChoice] = useState<ThemeChoice>(getThemeChoice)
-
-  // Keep several toggles (and tabs of the same page) in step.
-  useEffect(() => {
-    const onChange = (event: Event) => setChoice((event as CustomEvent<ThemeChoice>).detail)
-    window.addEventListener(THEME_EVENT, onChange)
-    return () => window.removeEventListener(THEME_EVENT, onChange)
-  }, [])
-
-  const current = OPTIONS.find((o) => o.value === choice) ?? OPTIONS[0]
+  const choice = useThemeChoice()
+  const current = THEME_OPTIONS.find((o) => o.value === choice) ?? THEME_OPTIONS[0]
 
   return (
     <Dropdown
@@ -59,21 +91,7 @@ export function ThemeToggle() {
       align="end"
       className="theme-toggle"
     >
-      {(close) =>
-        OPTIONS.map((option) => (
-          <MenuItem
-            key={option.value}
-            active={option.value === choice}
-            onSelect={() => {
-              setThemeChoice(option.value)
-              close()
-            }}
-          >
-            <span className="menu-icon">{option.icon}</span> {option.label}
-            {option.value === choice ? ' ✓' : ''}
-          </MenuItem>
-        ))
-      }
+      {(close) => <ThemeMenuItems onDone={close} />}
     </Dropdown>
   )
 }

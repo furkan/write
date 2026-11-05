@@ -20,6 +20,8 @@ export function RibbonGroup({ label, tour, children }: { label: string; tour?: s
 
 type ButtonProps = {
   label: string
+  /** The tooltip and accessible name, when it says more than the label. */
+  title?: string
   shortcut?: string
   icon?: LucideIcon
   /** A custom glyph instead of an icon (B, I, U…). */
@@ -32,17 +34,19 @@ type ButtonProps = {
   /** For toggles: whether it is on. Leave undefined for plain commands. */
   active?: boolean
   disabled?: boolean
+  /** `danger` for destructive actions (Move to trash). */
+  tone?: 'danger'
   onClick: () => void
 }
 
-export function RibbonButton({ label, shortcut, icon: Icon, glyph, size = 'small', active, disabled, onClick }: ButtonProps) {
-  const title = tooltip(label, shortcut)
+export function RibbonButton({ label, title, shortcut, icon: Icon, glyph, size = 'small', active, disabled, tone, onClick }: ButtonProps) {
+  const name = tooltip(title ?? label, shortcut)
   return (
     <button
       type="button"
-      className={`ribbon-btn ${size}${active ? ' active' : ''}`}
-      title={title}
-      aria-label={title}
+      className={`ribbon-btn ${size}${active ? ' active' : ''}${tone ? ` ${tone}` : ''}`}
+      title={name}
+      aria-label={name}
       aria-pressed={active}
       disabled={disabled}
       onMouseDown={keepSelection}

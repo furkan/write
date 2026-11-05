@@ -102,9 +102,13 @@ export function pageRule(setup: PageSetup, paged: boolean): string {
   const [width, height] = PAPER_SIZES[setup.size].css
   const size = setup.orientation === 'landscape' ? `${height} ${width}` : `${width} ${height}`
   // Paged: the editor already draws the margins and page numbers, so the sheet has none.
-  // Continuous: the printer splits the document into pages with the document's margins.
-  const margin = paged ? '0' : MARGIN_PRESETS[setup.margins].margins.map((m) => `${m / IN}in`).join(' ')
-  return `@page { size: ${size}; margin: ${margin}; }`
+  if (paged) return `@page { size: ${size}; margin: 0; }`
+  // Continuous (only when printing from the browser's own menu: Write's Print shows pages first):
+  // the printer splits the document into pages with the document's margins, and numbers them in
+  // the bottom margin like the paged footer does.
+  const margin = MARGIN_PRESETS[setup.margins].margins.map((m) => `${m / IN}in`).join(' ')
+  const number = '@bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt system-ui, sans-serif; color: #6b6375; }'
+  return `@page { size: ${size}; margin: ${margin}; ${number} }`
 }
 
 /*
@@ -134,3 +138,10 @@ const subscribeNarrow = (onChange: () => void) => {
 }
 
 export const useNarrowScreen = () => useSyncExternalStore(subscribeNarrow, () => window.matchMedia(NARROW_QUERY).matches)
+
+/** Whether the document shows as pages: Print layout, on a screen wide enough for a page. */
+export function usePagedView(): boolean {
+  const mode = useLayoutMode()
+  const narrow = useNarrowScreen()
+  return mode === 'print' && !narrow
+}

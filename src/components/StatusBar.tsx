@@ -6,6 +6,7 @@ import { BACKUP_EVENT, loadBackup, type Backup } from '../editor/backup'
 import { CHARACTER_LIMIT } from '../editor/extensions'
 import type { ConnectionStatus } from '../editor/hooks'
 import { setLayoutMode, useLayoutMode, useNarrowScreen, type LayoutMode } from '../editor/page-setup'
+import { ZoomSlider } from './ZoomControls'
 
 type StatusBarProps = {
   editor: Editor
@@ -21,6 +22,8 @@ type StatusBarProps = {
   readOnly: boolean
   /** Viewers see "View only"; only owners and editors take backups. `null` while unknown. */
   role: Role | null
+  /** The zoom shown now, in percent. */
+  zoom: number
 }
 
 const LAYOUTS: { mode: LayoutMode; label: string; icon: LucideIcon }[] = [
@@ -64,7 +67,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   disconnected: 'Offline: changes will sync when you reconnect',
 }
 
-export function StatusBar({ editor, documentName, email, status, pending, retrying, readOnly, role }: StatusBarProps) {
+export function StatusBar({ editor, documentName, email, status, pending, retrying, readOnly, role, zoom }: StatusBarProps) {
   const viewer = role === 'viewer'
   const canWrite = role === 'owner' || role === 'editor'
   const info = useEditorState({
@@ -113,11 +116,11 @@ export function StatusBar({ editor, documentName, email, status, pending, retryi
         </span>
         {info.words.toLocaleString()} words · {info.characters.toLocaleString()} / {CHARACTER_LIMIT.toLocaleString()}
       </span>
-      <span className="status-item muted" title="Updated on every selection change">
+      <span className="status-item muted status-position" title="Updated on every selection change">
         {info.node} @ {info.from === info.to ? info.from : `${info.from}–${info.to}`}
       </span>
       {viewer ? (
-        <span className="status-item badge" title="Your share lets you read, copy and export this document">
+        <span className="status-item badge" data-tour="view-only" title="Your share lets you read, copy and export this document">
           View only
         </span>
       ) : (
@@ -125,7 +128,7 @@ export function StatusBar({ editor, documentName, email, status, pending, retryi
       )}
       <span className="status-spacer" />
       {canWrite && (
-        <span className="status-item muted">
+        <span className="status-item muted status-detail">
           {savedAt ? `Backup ${new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'No backup yet'}
         </span>
       )}
@@ -139,6 +142,7 @@ export function StatusBar({ editor, documentName, email, status, pending, retryi
         {label}
       </span>
       <LayoutToggles />
+      <ZoomSlider zoom={zoom} />
     </footer>
   )
 }

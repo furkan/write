@@ -59,6 +59,98 @@
   cursor: default;
 }
 
+/* Status bar: Word's zoom slider, with the percentage opening the presets. */
+.zoom-control {
+  gap: 2px;
+}
+
+.zoom-control .status-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* A thin track with a round thumb, like Word's. */
+.zoom-range {
+  width: 104px;
+  height: 18px;
+  margin: 0 2px;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+
+.zoom-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  border-radius: 1px;
+}
+
+.zoom-range::-moz-range-track {
+  height: 2px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  border-radius: 1px;
+}
+
+.zoom-range::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--accent);
+  appearance: none;
+}
+
+.zoom-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.zoom-range:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Narrower windows: the status bar keeps what matters (counts, sync, layout, zoom) on as few rows as it can. */
+@media (max-width: 900px) {
+  .status-bar .status-position {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .status-bar .status-detail {
+    display: none;
+  }
+
+  .zoom-range {
+    width: 72px;
+  }
+}
+
+.status-bar .zoom-percent > button {
+  min-width: 46px;
+  height: 22px;
+  padding: 0 4px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.status-bar .zoom-percent > button:hover {
+  background: var(--surface-2);
+}
+
 /* ---------- Printing: only the document, on sheets that match its page setup ---------- */
 
 @media print {
@@ -95,8 +187,19 @@
     background: #ffffff;
   }
 
-  /* Everything but the document: header, banners, ribbon, sidebar, status bar, menus, tours. */
-  .app > :not(.workspace),
+  /* The app shell goes back to normal flow, so every page prints, not one screenful. */
+  html:has(.doc-shell),
+  html:has(.doc-shell) body,
+  .app.doc-shell,
+  .doc-scroll {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Everything but the document: banners, ribbon, sidebar, status bar, menus, tours. */
+  .app > :not(.doc-scroll),
+  .doc-scroll > :not(.workspace),
   .workspace > :not(.main),
   .main > :not(.editor-shell),
   .editor-shell > :not(.editor),
@@ -122,6 +225,8 @@
 
   .editor .tiptap {
     min-height: 0;
+    /* Paper is always at 100%, whatever the zoom on screen. */
+    zoom: 1 !important;
   }
 
   /* Web layout: the sheet's margins (from @page) are the only margins. */
