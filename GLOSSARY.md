@@ -78,7 +78,7 @@ _Avoid_: staging, local server
 
 **Session expired**:
 The state when Access no longer accepts the browser's cookie: fetches get an Access redirect and the collaboration socket can't authenticate. The user signs in again in a new tab, and the open tab keeps and later merges its edits.
-_Avoid_: logged out, disconnected (a plain network drop is not a session expiry)
+_Avoid_: logged out, disconnected (a plain network drop is not a session expiry, and neither is Access's signing keys being unavailable for a while)
 
 **Caret label**:
 The name shown on a user's cursor and in presence: the part of their email before `@`, not editable, with a color derived from the email. The full email appears in the share dialog, account menu and caret tooltip.
