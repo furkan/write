@@ -1,0 +1,238 @@
+/*
+ * Paged layout: see Pagination.ts for how the floats make pages. The extension sets the
+ * `paginated` class and the --page-* variables on the editor element.
+ */
+
+.editor .tiptap.paginated {
+  /* Contains the floats, so the editor is exactly as tall as its pages. */
+  display: flow-root;
+  box-sizing: border-box;
+  width: var(--page-width);
+  min-height: 0;
+  margin: 0 auto;
+  padding: var(--page-margin-top) var(--page-margin-right) 0 var(--page-margin-left);
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--paper-edge),
+    var(--page-shadow);
+}
+
+.editor .tiptap.paginated > .pagination-pages + * {
+  margin-top: 0;
+}
+
+.pagination-pages {
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Zero-width float as tall as a page's content area: the next break goes under it. */
+.pagination-spacer {
+  float: left;
+  clear: both;
+  width: 0;
+  height: 0;
+  margin-top: var(--page-content-height);
+}
+
+/* Full width, margins included: this page's bottom margin, the gap, the next page's top margin. */
+.pagination-break {
+  position: relative;
+  /* Above positioned content (callouts, table cells) whose backgrounds reach into the margins. */
+  z-index: 1;
+  float: left;
+  clear: both;
+  width: var(--page-width);
+  margin-right: calc(-1 * var(--page-margin-right));
+  margin-left: calc(-1 * var(--page-margin-left));
+}
+
+.pagination-footer,
+.pagination-header {
+  background: var(--paper);
+}
+
+.pagination-header {
+  height: var(--page-margin-top);
+}
+
+.pagination-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--page-margin-bottom);
+  font: 0.75rem/1 var(--sans);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wider than the page, to cover the page's side shadow between pages. */
+.pagination-gap {
+  position: relative;
+  height: var(--page-gap);
+  margin: 0 -24px;
+  background: var(--canvas);
+}
+
+/* The bottom edge (with its shadow) of the page above and the top edge of the page below. */
+.pagination-gap::before,
+.pagination-gap::after {
+  position: absolute;
+  right: 24px;
+  left: 24px;
+  height: 1px;
+  content: '';
+  background: var(--paper-edge);
+}
+
+.pagination-gap::before {
+  top: 0;
+  box-shadow: var(--page-shadow);
+}
+
+.pagination-gap::after {
+  bottom: 0;
+}
+
+.pagination-break:last-child > :not(.pagination-footer) {
+  display: none;
+}
+
+/*
+ * An empty line fits beside a break (it needs no width), so it would sit behind it. As a full
+ * width box of its own it can't, so it moves to the next page like any other line.
+ */
+.tiptap.paginated :is(p, h1, h2, h3, h4, h5, h6):has(> br.ProseMirror-trailingBreak:only-child) {
+  display: flow-root;
+  min-width: 100%;
+}
+
+/*
+ * Content that would otherwise be one unbreakable box (a block formatting context): such a box
+ * moves whole to the next page, and one taller than a page would never fit. These let lines and
+ * table rows move to the next page one by one instead.
+ */
+
+.tiptap.paginated pre {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tiptap.paginated pre code {
+  white-space: inherit;
+}
+
+.tiptap.paginated [data-type='block-math'] {
+  overflow: visible;
+}
+
+/* Images and videos can't be split: never taller than a page. */
+.tiptap.paginated img,
+.tiptap.paginated div[data-youtube-video] iframe {
+  max-height: var(--page-content-height);
+  object-fit: contain;
+}
+
+/*
+ * Callouts and toggles: blocks whose lines break across pages, with the icon positioned in the
+ * padding. (Not floated: a float can't sit higher than an earlier float, and every page break is
+ * one.) If the first line moves to the next page, the icon stays behind the break.
+ */
+.tiptap.paginated .callout {
+  display: block;
+  position: relative;
+  padding-left: 52px;
+}
+
+.tiptap.paginated .callout-icon {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+}
+
+.tiptap.paginated [data-type='details'] {
+  display: block;
+  position: relative;
+  padding-left: calc(12px + 22px + 0.4em);
+}
+
+.tiptap.paginated [data-type='details'] > button {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+}
+
+/* Task items stay one box each (with the checkbox), full width so they can't squeeze beside a break. */
+.tiptap.paginated ul[data-type='taskList'] li {
+  min-width: 100%;
+}
+
+/* Tables: each row is its own box, so rows move to the next page one at a time. */
+.tiptap.paginated .tableWrapper,
+.tiptap.paginated table {
+  overflow: visible;
+}
+
+.tiptap.paginated table,
+.tiptap.paginated tbody {
+  display: block;
+}
+
+.tiptap.paginated table > colgroup {
+  display: none;
+}
+
+.tiptap.paginated tr {
+  display: flex;
+  /* A box that is its own formatting context fits beside a float when it can shrink enough,
+     even to nothing. Full width, it can't, so it moves below the break instead. */
+  min-width: 100%;
+}
+
+.tiptap.paginated tr + tr {
+  margin-top: -1px;
+}
+
+.tiptap.paginated :is(td, th) {
+  display: block;
+  flex: 1 1 0;
+}
+
+.tiptap.paginated :is(td, th) + :is(td, th) {
+  margin-left: -1px;
+}
+
+.tiptap.paginated :is(td, th)[colspan='2'] {
+  flex-grow: 2;
+}
+
+.tiptap.paginated :is(td, th)[colspan='3'] {
+  flex-grow: 3;
+}
+
+.tiptap.paginated :is(td, th)[colspan='4'] {
+  flex-grow: 4;
+}
+
+/* A resized column keeps its width where the browser can read it from the cell (typed attr()). */
+.tiptap.paginated :is(td, th)[colwidth]:not([colspan]) {
+  flex: 0 1 attr(colwidth px, auto);
+}
+
+/* Focus mode dims the editor's children, but the pages aren't content. */
+.focus-mode .tiptap > .pagination-pages {
+  opacity: 1;
+}
+
+@media print {
+  .editor .tiptap.paginated {
+    --page-gap: 0px !important;
+    margin: 0;
+    box-shadow: none;
+  }
+
+  .pagination-gap {
+    display: none;
+  }
+}
