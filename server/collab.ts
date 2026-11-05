@@ -385,6 +385,11 @@ function logAuthFailure(identity: Extract<Identity, { ok: false }>, fields: Reco
   audit('auth_fail', { status: identity.status, reason: identity.reason, ...identity.detail, ...fields })
 }
 
+/** WebSocket close code for "access changed, reconnect" (Hocuspocus's own "Reset Connection"). */
+const RESET_CONNECTION = 4205
+/** WebSocket close code for "can't check who you are right now, reconnect later" (RFC 6455's 1013). */
+const TRY_AGAIN_LATER = 1013
+
 /** Starts listening, turning "port in use" into an error that says what to do. */
 function listen(server: Server<CollabContext>, port: number) {
   return new Promise<void>((resolve, reject) => {
@@ -429,6 +434,8 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
   await mkdir(config.dataDir, { recursive: true })
   await loadIndex(config)
   const authenticator = createAuthenticator(config.auth)
+  // Hooks get the upgrade request but not its socket: remember which socket each request opened.
+  const sockets = new WeakMap<Request, { close: (code: number, reason: string) => void }>()
   const server = new Server<CollabContext>({
     port: config.collabPort,
     address: '127.0.0.1',
@@ -442,7 +449,7 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
     // an auth message (an empty token when none is set), so no token is needed on the client: the
     // identity comes from the upgrade request's headers, which Vite's proxy passes through. This
     // check runs here, not in the proxy, because anything on this machine can reach 127.0.0.1.
-    async onAuthenticate({ requestHeaders, documentName, connectionConfig }) {
+    async onAuthenticate({ request, requestHeaders, documentName, connectionConfig }) {
       const header = fetchHeaders(requestHeaders)
       const identity = await identifyRequest(authenticator, header, {
         checkOrigin: true,
@@ -450,6 +457,10 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
       })
       if (!identity.ok) {
         logAuthFailure(identity, { via: 'collab', doc: documentName, ip: clientIp(header) })
+        // The identity can't be checked right now (Access's signing keys are unavailable). A
+        // refused document is never retried on a socket that stays open, so close the socket:
+        // the client reconnects, and is checked again, once the keys are back.
+        if (identity.status === 503) sockets.get(request)?.close(TRY_AGAIN_LATER, 'Try Again Later')
         throw new CollabRejection(identity.status === 403 ? 'permission-denied' : 'unauthenticated')
       }
       // No access looks the same whether the document never existed (only `POST /api/docs`
@@ -500,6 +511,12 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
       }),
     ],
   })
+  const { hocuspocus } = server
+  const handleConnection = hocuspocus.handleConnection.bind(hocuspocus)
+  hocuspocus.handleConnection = (websocket, request, context) => {
+    sockets.set(request, websocket)
+    return handleConnection(websocket, request, context)
+  }
   await listen(server, config.collabPort)
   const maintenance = startMaintenance(server)
   console.log(describeConfig(config))
@@ -582,8 +599,6 @@ async function currentState(server: Server, id: string) {
   return loaded ? Y.encodeStateAsUpdate(loaded) : readState(id)
 }
 
-/** WebSocket close code for "access changed, reconnect" (Hocuspocus's own "Reset Connection"). */
-const RESET_CONNECTION = 4205
 
 /**
  * Drops every open connection to a document, after any change to who may open it (share,

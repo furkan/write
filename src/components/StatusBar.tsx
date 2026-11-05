@@ -13,6 +13,8 @@ type StatusBarProps = {
   status: ConnectionStatus
   /** Changes the server hasn't confirmed for a while (see `usePendingChanges`). */
   pending: boolean
+  /** The server can't check who we are right now; the tab retries (see `useRetrying`). */
+  retrying: boolean
   /** The Read-only view preference (owners and editors). */
   readOnly: boolean
   /** Viewers see "View only"; only owners and editors take backups. `null` while unknown. */
@@ -25,7 +27,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   disconnected: 'Offline: changes will sync when you reconnect',
 }
 
-export function StatusBar({ editor, documentName, email, status, pending, readOnly, role }: StatusBarProps) {
+export function StatusBar({ editor, documentName, email, status, pending, retrying, readOnly, role }: StatusBarProps) {
   const viewer = role === 'viewer'
   const canWrite = role === 'owner' || role === 'editor'
   const info = useEditorState({
@@ -53,7 +55,14 @@ export function StatusBar({ editor, documentName, email, status, pending, readOn
   }, [])
 
   // "Synced" only when the server has also confirmed our changes, not just when connected.
-  const unsaved = status === 'connected' && pending
+  const unsaved = !retrying && status === 'connected' && pending
+  const label = retrying
+    ? 'Can’t confirm your sign-in right now: retrying…'
+    : unsaved
+      ? viewer
+        ? 'Not saved: view only'
+        : 'Saving…'
+      : STATUS_LABEL[status]
   const percent = Math.min(100, Math.round((info.characters / CHARACTER_LIMIT) * 100))
 
   return (
@@ -83,9 +92,14 @@ export function StatusBar({ editor, documentName, email, status, pending, readOn
           {savedAt ? `Backup ${new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'No backup yet'}
         </span>
       )}
-      <span className={`status-item connection ${status}${unsaved ? ' unsaved' : ''}`} data-tour="connection" role="status">
+      <span
+        className={`status-item connection ${retrying ? 'connecting' : status}${unsaved ? ' unsaved' : ''}`}
+        data-tour="connection"
+        role="status"
+        title={retrying ? 'Cloudflare Access can’t check who you are at the moment. Keep typing: your changes sync once it can.' : undefined}
+      >
         <span className="dot" aria-hidden />
-        {unsaved ? (viewer ? 'Not saved: view only' : 'Saving…') : STATUS_LABEL[status]}
+        {label}
       </span>
     </footer>
   )

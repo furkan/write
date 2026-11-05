@@ -177,6 +177,8 @@ export type AccessKeys = {
   sign: (claims?: JWTPayload, options?: { key?: CryptoKey; kid?: string }) => Promise<string>
   /** A key the JWKS doesn't list. */
   otherKey: CryptoKey
+  /** `false` makes the key set answer 502, like Cloudflare's certs endpoint during an outage. */
+  setAvailable: (available: boolean) => void
   stop: () => void
 }
 
@@ -185,10 +187,11 @@ export async function startAccessKeys(): Promise<AccessKeys> {
   const { publicKey, privateKey } = await generateKeyPair('RS256', { extractable: true })
   const other = await generateKeyPair('RS256')
   const jwk = { ...(await exportJWK(publicKey)), kid: 'test-key-1', alg: 'RS256', use: 'sig' }
+  let available = true
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: () => Response.json({ keys: [jwk] }),
+    fetch: () => (available ? Response.json({ keys: [jwk] }) : new Response('bad gateway', { status: 502 })),
   })
   const now = () => Math.floor(Date.now() / 1000)
   return {
@@ -206,6 +209,7 @@ export async function startAccessKeys(): Promise<AccessKeys> {
       })
         .setProtectedHeader({ alg: 'RS256', kid })
         .sign(key),
+    setAvailable: (next) => void (available = next),
     stop: () => void server.stop(true),
   }
 }

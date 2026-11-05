@@ -14,7 +14,7 @@ import { Toolbar } from '../components/Toolbar'
 import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
-import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence } from '../editor/hooks'
+import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRetrying } from '../editor/hooks'
 import { findTemplate, type Template } from '../editor/templates'
 import { accountAction, setSessionExpired, useMe } from '../session'
 import { autoStartTour, setTourContext, startTour } from '../tours'
@@ -419,6 +419,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   const presence = usePresence(provider)
   const status = useConnectionStatus(provider)
   const pending = usePendingChanges(provider)
+  const retrying = useRetrying(session)
 
   // Demoted to viewer: lock the editor in the same tick the socket says so, before the next
   // keystroke, rather than after React re-renders.
@@ -542,6 +543,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
         email={me.email}
         status={status}
         pending={pending}
+        retrying={retrying}
         readOnly={view.readOnly && canWrite}
         role={role}
       />

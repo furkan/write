@@ -1,6 +1,7 @@
 import type { HocuspocusProvider } from '@hocuspocus/provider'
 import { useEffect, useState } from 'react'
 import { presenceLabel } from '../identity'
+import { useStore } from '../store'
 import { getTitle, type Session } from './collab'
 
 /** `email` is client-reported (empty if a client sent none); `name` is its Caret label. */
@@ -36,6 +37,9 @@ export function usePresence(provider: HocuspocusProvider): Presence[] {
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
+
+/** True while the server can't check who we are and the tab waits to retry (see `Session.retrying`). */
+export const useRetrying = (session: Session) => useStore(session.retrying)
 
 export function useConnectionStatus(provider: HocuspocusProvider): ConnectionStatus {
   const [status, setStatus] = useState<ConnectionStatus>(

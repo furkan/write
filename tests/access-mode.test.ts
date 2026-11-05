@@ -3,19 +3,22 @@
  * Cloudflare Access (`WRITE_ACCESS_CERTS_URL`) and tokens signed by the test.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { readdir, readFile, rm } from 'node:fs/promises'
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   api,
   AUD,
   buildClient,
+  connectDocument,
   exitCodeWithin,
   openDocument,
   PREVIEW_PORTS,
+  readText,
   spawnServer,
   startAccessKeys,
   startServer,
   TEAM_DOMAIN,
+  typeParagraph,
   writeV1Fixture,
   type AccessKeys,
   type RunningServer,
@@ -276,4 +279,53 @@ describe('Access mode without its settings', () => {
     // Nothing was served in the meantime.
     expect(server.output()).not.toContain('Local:')
   }, 20_000)
+})
+
+describe('Access mode while the signing keys are unavailable', () => {
+  let keys: AccessKeys
+  let server: RunningServer
+  beforeAll(async () => {
+    keys = await startAccessKeys()
+    // Down from the start, so the server has no cached keys: like a cache that expired (after
+    // 10 minutes) during a Cloudflare blip.
+    keys.setAvailable(false)
+    server = await startServer({
+      command: 'preview',
+      ...PREVIEW_PORTS,
+      outDir,
+      env: { WRITE_ACCESS_TEAM_DOMAIN: TEAM_DOMAIN, WRITE_ACCESS_AUD: AUD, WRITE_ACCESS_CERTS_URL: keys.certsUrl },
+      seed: async (dir) => {
+        const now = Date.now()
+        const entry = { title: 'A', preview: '', words: 0, createdAt: now, updatedAt: now, owner: 'alice@example.com', shares: {} }
+        await writeFile(join(dir, 'index.json'), JSON.stringify({ version: 2, docs: { 'doc-a': entry }, deleted: {} }))
+      },
+    })
+  }, 30_000)
+  afterAll(async () => {
+    await server?.stop()
+    keys?.stop()
+  })
+
+  test('a refused collaboration connection is closed, retries, and syncs once the keys are back', async () => {
+    const headers = { 'cf-access-jwt-assertion': await keys.sign(), origin: server.url }
+    const ws = `ws://127.0.0.1:${server.port}/collab`
+    expect((await api(server, '/api/me', { headers })).status).toBe(503)
+    const live = await connectDocument(ws, 'doc-a', headers)
+    try {
+      // Not left open with the document refused (the provider would never ask again): closed, so
+      // the client reconnects and is checked again.
+      await live.waitFor(/^close$/)
+      expect(live.events).not.toContain('synced')
+      keys.setAvailable(true)
+      await live.waitFor(/^synced$/, { ms: 10_000 })
+      typeParagraph(live.doc, 'typed once the keys were back')
+      await Bun.sleep(1000)
+      expect(await readText(ws, 'doc-a', headers)).toContain('typed once the keys were back')
+      expect(server.output()).toContain('"reason":"signing keys unavailable"')
+      // Closing before refusing doesn't make Hocuspocus log anything.
+      expect(server.output()).not.toContain('Error')
+    } finally {
+      live.destroy()
+    }
+  }, 30_000)
 })
