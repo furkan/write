@@ -215,15 +215,6 @@ export const TOURS: Record<TourId, Tour> = {
         },
       },
       {
-        element: '[data-tour="inspector"]',
-        popover: {
-          title: 'Inspector',
-          description:
-            'The document as JSON, HTML, Markdown and plain text, updated on every keystroke. Open <b>Events</b> to watch the editor’s event stream.',
-          side: 'left',
-        },
-      },
-      {
         element: '[data-tour="status"]',
         popover: {
           title: 'Status bar',
@@ -417,32 +408,14 @@ export const TOURS: Record<TourId, Tour> = {
 
   developer: {
     title: 'Developer playground',
-    summary: 'Inspector, events, Markdown import and export, custom extensions.',
+    summary: 'Markdown import and export, view options, custom extensions.',
     scope: 'document',
     steps: [
-      {
-        element: '[data-tour="inspector"]',
-        popover: {
-          title: 'Document output',
-          description:
-            '<code>getJSON()</code>, <code>getHTML()</code>, <code>getMarkdown()</code> and <code>getText()</code>, updated live. Notice the <code>data-uid</code> attributes, which <b>UniqueID</b> adds to every block.',
-          side: 'left',
-        },
-      },
-      {
-        element: '[data-tour="inspector"]',
-        popover: {
-          title: 'Editor events',
-          description:
-            'The <b>Events</b> tab logs <code>create</code>, <code>update</code>, <code>selectionUpdate</code>, <code>focus</code> and <code>blur</code>. <code>onUpdate</code> also drives a debounced local backup.',
-          side: 'left',
-        },
-      },
       {
         element: '[data-tour="file-menu"]',
         popover: {
           title: 'Import and export',
-          description: `Import a <code>.md</code> file, export Markdown, HTML or JSON, save a local backup (${k(`${mod}+S`)}) and restore it.`,
+          description: `Import a <code>.md</code> file, export <code>getMarkdown()</code>, <code>getHTML()</code> or <code>getJSON()</code> (notice the <code>data-uid</code> attributes <b>UniqueID</b> adds to every block), save a local backup (${k(`${mod}+S`)}, driven by <code>onUpdate</code>) and restore it.`,
           side: 'bottom',
         },
       },

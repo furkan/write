@@ -8,7 +8,7 @@ import { ClosedPage } from '../components/ClosedPage'
 import { EditorMenus } from '../components/EditorMenus'
 import { Header, type ViewOptions } from '../components/Header'
 import { SessionBanner } from '../components/SessionBanner'
-import { Sidebar, type EditorEvent } from '../components/Sidebar'
+import { Sidebar } from '../components/Sidebar'
 import { StatusBar } from '../components/StatusBar'
 import { Toolbar } from '../components/Toolbar'
 import { adoptLegacyBackup, saveBackup } from '../editor/backup'
@@ -284,8 +284,6 @@ function SyncedDocument({ name, templateId, access }: DocumentPageProps & { acce
   return <Workspace session={session} template={role === 'owner' ? template : undefined} role={role} />
 }
 
-const MAX_EVENTS = 50
-
 type WorkspaceProps = { session: Session; template: Template | undefined; role: Role | null }
 
 function Workspace({ session, template, role }: WorkspaceProps) {
@@ -296,7 +294,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   const viewer = role === 'viewer'
   const canWriteRef = useRef(canWrite)
   const [toc, setToc] = useState<TableOfContentData>([])
-  const [events, setEvents] = useState<EditorEvent[]>([])
   const [view, setView] = useState<ViewOptions>({
     readOnly: false,
     invisibles: false,
@@ -305,7 +302,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   })
 
   const editorRef = useRef<Editor | null>(null)
-  const eventId = useRef(0)
   const backupTimer = useRef<number | undefined>(undefined)
 
   useEffect(() => {
@@ -317,16 +313,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   useEffect(() => {
     if (role === 'owner') adoptLegacyBackup(me.email, session.name)
   }, [role, me.email, session.name])
-
-  // Editor callbacks can fire while React is rendering (immediatelyRender), so
-  // defer state updates to a microtask.
-  const logEvent = useCallback((type: string, detail = '') => {
-    queueMicrotask(() => {
-      eventId.current += 1
-      const event = { id: eventId.current, type, detail, at: Date.now() }
-      setEvents((prev) => [event, ...prev].slice(0, MAX_EVENTS))
-    })
-  }, [])
 
   const getEditor = useCallback(() => editorRef.current, [])
 
@@ -362,23 +348,14 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     editorProps: {
       attributes: { 'aria-label': 'Document', spellcheck: 'true' },
     },
-    onCreate: () => logEvent('create', 'editor ready'),
     onUpdate: ({ editor: e, transaction }) => {
-      const origin = isChangeOrigin(transaction) ? 'remote' : 'local'
-      logEvent('update', `${origin} · ${transaction.steps.length} step(s) · size ${e.state.doc.content.size}`)
       // Back up your own changes only, so a collaborator wiping the doc can't overwrite your
       // backup: not what arrives through Yjs (a collaborator's edit, the content loading), and
       // not transactions that change nothing (opening a document dispatches one).
-      if (origin === 'remote' || !transaction.docChanged || !canWriteRef.current) return
+      if (isChangeOrigin(transaction) || !transaction.docChanged || !canWriteRef.current) return
       window.clearTimeout(backupTimer.current)
       backupTimer.current = window.setTimeout(() => backup(e), 1000)
     },
-    onSelectionUpdate: ({ editor: e }) => {
-      const { from, to } = e.state.selection
-      logEvent('selectionUpdate', from === to ? `cursor at ${from}` : `selected ${from}–${to}`)
-    },
-    onFocus: () => logEvent('focus'),
-    onBlur: () => logEvent('blur'),
   })
 
   useEffect(() => {
@@ -546,7 +523,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
             <EditorMenus editor={editor} />
           </div>
         </main>
-        {view.sidebar && <Sidebar editor={editor} toc={toc} events={events} onClearEvents={() => setEvents([])} />}
+        {view.sidebar && <Sidebar editor={editor} toc={toc} />}
       </div>
       <StatusBar
         editor={editor}

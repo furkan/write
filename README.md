@@ -33,7 +33,7 @@ Open the URL Vite prints. The server listens on every interface, so other device
 | StarterKit | Bold, italic, underline, strike, code, links (autolink), headings, lists, blockquote, horizontal rule, hard break, drop and gap cursors, trailing node, Markdown-style shortcuts |
 | Small additions | Placeholder, character and word count (soft 50k limit shown in the status bar), Focus, text align, multi-colour highlight, text colour, font family and size (`TextStyleKit`), sub/superscript, Typography, task lists, resizable images, tables, details (toggle sections), YouTube, emoji, invisible characters, UniqueID |
 | UI | Bubble menu, floating "+" menu, slash commands, `@` mentions, `:` emoji picker, drag handle, syntax-highlighted code blocks (lowlight), file drop and paste for images, table of contents |
-| Content and API | Live JSON, HTML, Markdown and text inspector, an editor event log, Markdown import and export, read-only mode, a local backup driven by `onUpdate` |
+| Content and API | Markdown import and export, HTML and JSON export, read-only mode, a local backup driven by `onUpdate` |
 | Custom extensions | `Callout` (node with a React node view and an input rule), `Spoiler` (mark with input and paste rules and Markdown support), `Shortcuts` (commands, keyboard shortcuts, `!today` and `!shrug`), `SlashCommand` |
 | Bigger lifts | Collaboration (Yjs and Hocuspocus) with live carets and presence, math (KaTeX) |
 
@@ -214,7 +214,7 @@ src/editor/extensions.ts  Every extension and its configuration
 src/editor/extensions/    Custom extensions (Callout, Spoiler, Shortcuts, SlashCommand)
 src/editor/blocks.tsx     Block insert actions shared by the slash menu, "+" menu and toolbar
 src/editor/suggestion/    Popup list used by the slash, mention and emoji menus
-src/components/           Toolbar, menus, sidebar (TOC and inspector), header, status bar, share dialog, account menu
+src/components/           Toolbar, menus, sidebar (table of contents), header, status bar, share dialog, account menu
 src/tours.ts              Tutorial overlays (driver.js)
 ```
 
