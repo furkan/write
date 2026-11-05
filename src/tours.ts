@@ -1,5 +1,6 @@
 import { driver, type DriveStep } from 'driver.js'
 import 'driver.js/dist/driver.css'
+import { closeFlyout, revealHomeTab } from './components/ribbon/state'
 import { mod } from './editor/platform'
 import { readStorage, writeStorage } from './editor/storage'
 
@@ -185,9 +186,9 @@ export const TOURS: Record<TourId, Tour> = {
       {
         element: '[data-tour="toolbar"]',
         popover: {
-          title: 'Toolbar',
+          title: 'Ribbon',
           description:
-            'Block types, fonts, marks, colours, alignment, lists and an <b>Insert</b> menu. Hover any button to see its keyboard shortcut. More buttons appear here while you are in a table or code block.',
+            '<b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow on the right collapses the ribbon to its tabs.',
           side: 'bottom',
         },
       },
@@ -275,16 +276,16 @@ export const TOURS: Record<TourId, Tour> = {
         element: '[data-tour="marks"]',
         popover: {
           title: 'Text marks',
-          description: `Bold ${k(`${mod}+B`)}, italic ${k(`${mod}+I`)}, underline ${k(`${mod}+U`)}, strike ${k(`${mod}+Shift+S`)}, code ${k(`${mod}+E`)}, subscript ${k(`${mod}+,`)}, superscript ${k(`${mod}+.`)}, link ${k(`${mod}+K`)}, and a custom <b>spoiler</b> mark ${k(`${mod}+Alt+S`)}.`,
+          description: `Bold ${k(`${mod}+B`)}, italic ${k(`${mod}+I`)}, underline ${k(`${mod}+U`)}, strike ${k(`${mod}+Shift+S`)}, code ${k(`${mod}+E`)}, subscript ${k(`${mod}+,`)}, superscript ${k(`${mod}+.`)}, and a custom <b>spoiler</b> mark ${k(`${mod}+Alt+S`)}. Links (${k(`${mod}+K`)}) are on the <b>Insert</b> tab.`,
           side: 'bottom',
         },
       },
       {
-        element: '[data-tour="text-style"]',
+        element: '[data-tour="font"]',
         popover: {
-          title: 'Headings, fonts and sizes',
+          title: 'Font and size',
           description:
-            'H1–H6, font family and font size come from <code>TextStyleKit</code>. You can also type <code>#</code>, <code>##</code> or <code>###</code> and a space at the start of a line.',
+            'Font family and size come from <code>TextStyleKit</code>. Type a size and press <kbd>Enter</kbd>, pick one from the list, or use the bigger and smaller <b>A</b> buttons. The eraser clears all formatting.',
           side: 'bottom',
         },
       },
@@ -292,7 +293,15 @@ export const TOURS: Record<TourId, Tour> = {
         element: '[data-tour="colors"]',
         popover: {
           title: 'Colour and highlight',
-          description: `Text colour and multi-colour highlights. ${k(`${mod}+Shift+H`)} toggles the highlight, and typing <code>==text==</code> highlights too. ⌫ clears all formatting.`,
+          description: `Click the <b>A</b> or the highlighter to apply the colour under it again, or the arrow next to it to pick another. ${k(`${mod}+Shift+H`)} toggles the highlight, and typing <code>==text==</code> highlights too.`,
+          side: 'bottom',
+        },
+      },
+      {
+        element: '[data-tour="text-style"]',
+        popover: {
+          title: 'Styles',
+          description: `Normal text and Heading 1–6, each shown in its own style. ${k(`${mod}+Alt+0…6`)} applies them, and so does typing <code>#</code>, <code>##</code> or <code>###</code> and a space at the start of a line.`,
           side: 'bottom',
         },
       },
@@ -338,8 +347,8 @@ export const TOURS: Record<TourId, Tour> = {
       {
         element: '[data-tour="lists"]',
         popover: {
-          title: 'Lists, quotes and code',
-          description: `Bullet, numbered and nested <b>task lists</b>. Use ${k('Tab')} and ${k('Shift+Tab')} (or → ←) to indent and outdent.`,
+          title: 'Lists',
+          description: `Bullet, numbered and nested <b>task lists</b>. Use ${k('Tab')} and ${k('Shift+Tab')}, or the indent buttons, to indent and outdent. Quote and code block sit under them.`,
           side: 'bottom',
         },
       },
@@ -348,9 +357,8 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Insert anything',
           description:
-            'Tables, images, YouTube videos, toggle sections, callouts, math and today’s date. The same list opens when you type <kbd>/</kbd> in the document.',
+            'The <b>Insert</b> tab has tables, pictures, YouTube videos, links, equations, emoji, callouts, toggle sections, dividers and today’s date. Typing <kbd>/</kbd> in the document opens the same blocks.',
           side: 'bottom',
-          align: 'end',
         },
       },
       {
@@ -358,7 +366,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Tables',
           description:
-            'Put your cursor in a table and a <b>Table</b> row appears under the toolbar: add or delete rows and columns, merge or split cells, and toggle the header row. Drag a column border to resize it.',
+            'Put your cursor in a table and a <b>Table</b> tab appears in the ribbon: add or delete rows and columns, merge or split cells, and toggle the header row. Drag a column border to resize it.',
           side: 'top',
           align: 'start',
         },
@@ -368,7 +376,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Code with syntax highlighting',
           description:
-            'Code blocks are highlighted by <code>lowlight</code>. With the cursor in one, a language picker appears under the toolbar.',
+            'Code blocks are highlighted by <code>lowlight</code>. With the cursor in one, the ribbon’s <b>Code</b> tab picks its language.',
           side: 'top',
           align: 'start',
         },
@@ -520,6 +528,14 @@ export const toursFor = (scope: Tour['scope']) =>
   (Object.entries(TOURS) as [TourId, Tour][]).filter(([, tour]) => tour.scope === scope)
 
 export function startTour(id: TourId) {
+  if (TOURS[id].scope === 'document') {
+    // The ribbon's groups are on its Home tab: show it, then look for them once it has rendered.
+    revealHomeTab()
+    requestAnimationFrame(() => runTour(id))
+  } else runTour(id)
+}
+
+function runTour(id: TourId) {
   const tour = TOURS[id]
   // Skip steps whose element isn't on the page right now (e.g. an empty library or a
   // hidden sidebar), instead of showing a floating card about something that isn't there.
@@ -539,8 +555,11 @@ export function startTour(id: TourId) {
     prevBtnText: '← Back',
     doneBtnText: 'Done',
     steps,
-    onDestroyed: () => {
+    // Not `onDestroyed`: driver.js skips it when the tour ends mid-animation (a quick Done).
+    onDestroyStarted: () => {
+      closeFlyout()
       if (id === 'welcome' || id === 'library') writeStorage(seenKey(id), '1')
+      instance.destroy()
     },
   })
   instance.drive()

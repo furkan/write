@@ -8,9 +8,9 @@ import { ClosedPage } from '../components/ClosedPage'
 import { EditorMenus } from '../components/EditorMenus'
 import { Header, type ViewOptions } from '../components/Header'
 import { SessionBanner } from '../components/SessionBanner'
+import { Ribbon } from '../components/ribbon/Ribbon'
 import { Sidebar } from '../components/Sidebar'
 import { StatusBar } from '../components/StatusBar'
-import { Toolbar } from '../components/Toolbar'
 import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
@@ -490,6 +490,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
         onBackup={backup}
         onViewChange={(next) => setView((prev) => ({ ...prev, ...next }))}
       />
+      <Ribbon editor={editor} readOnly={readOnly} />
       {closed && (
         <div className="deleted-banner" role="alert">
           {closed === 'trashed'
@@ -517,7 +518,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
       {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
       <div className="workspace">
         <main className="main">
-          <Toolbar editor={editor} readOnly={readOnly} />
           <div className="editor-shell" data-tour="editor">
             <EditorContent editor={editor} className="editor" />
             <EditorMenus editor={editor} />

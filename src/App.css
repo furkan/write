@@ -538,64 +538,22 @@
   }
 }
 
+/*
+ * Phones: the workspace is the screen's width, so anything poking past it (a collaborator's caret
+ * label at the end of a line) would scroll the whole page sideways. Clip it instead.
+ */
+@media (max-width: 700px) {
+  .workspace {
+    overflow-x: clip;
+  }
+}
+
 .main {
   min-width: 0;
 }
 
-/* ---------- Toolbar ---------- */
+/* ---------- Menu buttons ---------- */
 
-.toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  padding: 10px 0 8px;
-  background: var(--bg);
-}
-
-.toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.toolbar-row + .toolbar-row {
-  margin-top: 6px;
-}
-
-.toolbar-row.contextual {
-  background: var(--accent-bg);
-  border-color: transparent;
-}
-
-.contextual-label {
-  padding: 0 8px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  align-items: center;
-  padding-right: 6px;
-  margin-right: 2px;
-  border-right: 1px solid var(--border);
-}
-
-.group:last-child {
-  border-right: none;
-}
-
-.toolbar button,
 .bubble-menu button,
 .floating-menu button,
 .dropdown > button {
@@ -612,33 +570,20 @@
   cursor: pointer;
 }
 
-.toolbar button:hover:not(:disabled),
 .bubble-menu button:hover:not(:disabled),
 .floating-menu button:hover:not(:disabled),
 .dropdown > button:hover:not(:disabled) {
   background: var(--surface-2);
 }
 
-.toolbar button.active,
 .bubble-menu button.active {
   color: var(--accent);
   background: var(--accent-bg);
 }
 
-.toolbar button:disabled,
-.toolbar select:disabled,
 .dropdown > button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.toolbar select {
-  height: 32px;
-  padding: 0 6px;
-  font-size: 0.85rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
 }
 
 .swatch-label {
@@ -813,9 +758,9 @@
   font-size: 2rem;
 }
 
-/* Keep headings clear of the sticky toolbar when jumping from the table of contents. */
+/* Keep headings clear of the sticky ribbon when jumping from the table of contents. */
 .tiptap :is(h1, h2, h3, h4, h5, h6) {
-  scroll-margin-top: 140px;
+  scroll-margin-top: calc(var(--ribbon-height, 140px) + 16px);
 }
 
 .tiptap h2 {
@@ -1454,9 +1399,9 @@
 @media (min-width: 1001px) {
   .sidebar {
     position: sticky;
-    top: 0;
+    top: var(--ribbon-height, 0px);
     align-self: start;
-    max-height: 100vh;
+    max-height: calc(100vh - var(--ribbon-height, 0px));
     overflow-y: auto;
   }
 }
