@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 type DropdownProps = {
   label: ReactNode
@@ -13,13 +14,32 @@ type DropdownProps = {
    * (text, plain buttons), announced as an expandable group rather than a menu.
    */
   kind?: 'menu' | 'disclosure'
+  /**
+   * Position the menu against the viewport (Floating UI) instead of its parent, so a scrolling
+   * container such as the ribbon panel can't clip it.
+   */
+  fixed?: boolean
 }
 
 /** A small accessible popover menu that closes on outside click or Escape. */
-export function Dropdown({ label, title, children, align = 'start', className, tour, disabled, kind = 'menu' }: DropdownProps) {
+export function Dropdown({ label, title, children, align = 'start', className, tour, disabled, kind = 'menu', fixed }: DropdownProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const menuId = useId()
+
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    const menu = menuRef.current
+    if (!open || !fixed || !root || !menu) return
+    return autoUpdate(root, menu, () => {
+      void computePosition(root, menu, {
+        strategy: 'fixed',
+        placement: align === 'end' ? 'bottom-end' : 'bottom-start',
+        middleware: [offset(4), flip({ padding: 8 }), shift({ padding: 8 })],
+      }).then(({ x, y }) => Object.assign(menu.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' }))
+    })
+  }, [open, fixed, align])
 
   useEffect(() => {
     if (!open) return
@@ -54,7 +74,8 @@ export function Dropdown({ label, title, children, align = 'start', className, t
       </button>
       {open && (
         <div
-          className={`dropdown-menu align-${align}`}
+          ref={menuRef}
+          className={`dropdown-menu align-${align}${fixed ? ' fixed' : ''}`}
           role={kind === 'menu' ? 'menu' : 'group'}
           aria-label={kind === 'menu' ? undefined : title}
           id={menuId}

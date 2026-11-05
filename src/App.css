@@ -687,6 +687,15 @@
   right: 0;
 }
 
+/* Positioned by Floating UI (see Dropdown's `fixed`); hidden until it has been placed. */
+.dropdown-menu.fixed {
+  position: fixed;
+  top: 0;
+  right: auto;
+  left: 0;
+  visibility: hidden;
+}
+
 .dropdown-menu hr {
   margin: 6px 0;
   border: none;
