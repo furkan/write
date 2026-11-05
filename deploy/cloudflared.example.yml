@@ -1,0 +1,35 @@
+# cloudflared config for the Write pilot (a locally managed tunnel). Install it as
+# /etc/cloudflared/config.yml and run `sudo cloudflared service install` (README step 5).
+# Replace <...>: the tunnel's UUID from `cloudflared tunnel create write-pilot`, the Access
+# hostname, and WRITE_PORT from /etc/write-pilot/pilot.env.
+
+tunnel: <tunnel-uuid>
+credentials-file: /etc/cloudflared/<tunnel-uuid>.json
+
+ingress:
+  # The Access application's hostname. Cloudflare Access sits in front of it at the edge and
+  # adds the Cf-Access-Jwt-Assertion header, which Write verifies on every request and socket.
+  - hostname: <write.example.com>
+    service: http://127.0.0.1:<WRITE_PORT>
+    originRequest:
+      # Defense in depth: cloudflared also checks the Access JWT, so a request that somehow
+      # reaches the tunnel without one never gets to Write. teamName is the <team> part of
+      # WRITE_ACCESS_TEAM_DOMAIN (<team>.cloudflareaccess.com); audTag is WRITE_ACCESS_AUD.
+      access:
+        required: true
+        teamName: <team>
+        audTag:
+          - <AUD tag>
+      # Keep httpHostHeader unset. cloudflared then passes the browser's Host
+      # (<write.example.com>) through unchanged, which is what Write expects:
+      # - Vite accepts it because WRITE_ALLOWED_HOSTS lists it.
+      # - The Origin check passes because the browser's Origin, https://<write.example.com>,
+      #   matches that Host, so WRITE_ALLOWED_ORIGINS stays unset.
+      # Setting httpHostHeader to 127.0.0.1:<WRITE_PORT> would make every edit and every
+      # collaboration socket fail the Origin check (403 / permission-denied).
+
+  # WebSockets (the /collab collaboration socket) need nothing here: cloudflared proxies the
+  # upgrade like any request, and Vite forwards it to the collaboration server.
+
+  # Everything else, including requests for other hostnames routed to this tunnel.
+  - service: http_status:404
