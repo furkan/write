@@ -1,6 +1,7 @@
 import { driver, type DriveStep } from 'driver.js'
 import 'driver.js/dist/driver.css'
-import { closeFlyout, revealHomeTab } from './components/ribbon/state'
+import { flushSync } from 'react-dom'
+import { closeFlyout, revealTab, type RibbonTab } from './components/ribbon/state'
 import { mod } from './editor/platform'
 import { readStorage, writeStorage } from './editor/storage'
 
@@ -21,8 +22,14 @@ let context: TourContext = { role: null, mode: 'access' }
 /** Called by each page with the signed-in user's auth mode and their role on the document. */
 export const setTourContext = (next: TourContext) => void (context = next)
 
-/** A step, shown only when `when` (if any) says it applies to the current user. */
-type TourStep = DriveStep & { when?: (ctx: TourContext) => boolean }
+/**
+ * A step, shown only when `when` (if any) says it applies to the current user. `tab`: the ribbon
+ * tab whose group the step points at; it is selected when the step shows.
+ */
+type TourStep = Omit<DriveStep, 'element'> & { element?: string; when?: (ctx: TourContext) => boolean; tab?: RibbonTab }
+
+/** On a narrow screen the bar's actions fold into the "⋯" menu, so a step about one points there. */
+const orMore = (name: string) => `[data-tour="${name}"], [data-tour="more"]`
 
 /** `scope` says which page a tour belongs to (its elements only exist there). */
 type Tour = { title: string; summary: string; scope: 'library' | 'document'; steps: TourStep[] }
@@ -147,7 +154,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Title',
           description:
-            'Click to rename the document. The title syncs live to collaborators and to the library. The ✍️ logo takes you back to all documents.',
+            'Click to rename the document. The title syncs live to collaborators and to the library. The ✍️ logo next to it takes you back to all documents.',
           side: 'bottom',
           align: 'start',
         },
@@ -188,12 +195,21 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Ribbon',
           description:
-            '<b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow on the right collapses the ribbon to its tabs.',
+            'The ribbon is the whole top bar. <b>File</b> has new documents, copies, printing, import and export; <b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup; <b>View</b> has the layouts, what to show, and zoom. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow at the far right collapses the ribbon to this row.',
           side: 'bottom',
         },
       },
       {
-        element: '[data-tour="layout"]',
+        element: '[data-tour="print"]',
+        tab: 'file',
+        popover: {
+          title: 'Print or save as PDF',
+          description: `<b>File → Print / PDF</b> (or ${k(`${mod}+P`)}) opens the browser’s print dialog; choose <b>Save as PDF</b> there for a PDF. You always get the pages with their page numbers at 100%, even from Web layout or zoomed in.`,
+          side: 'bottom',
+        },
+      },
+      {
+        element: '[data-tour="layout-tab"]',
         popover: {
           title: 'Layout',
           description:
@@ -229,12 +245,12 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Status bar',
           description:
-            'Word and character counts (with a limit), the block your cursor is in, when the local backup was last saved, and the connection status. The two buttons on the right switch between <b>Print layout</b> (pages) and <b>Web layout</b> (one long page), just for you; a narrow window always shows one long page.',
+            'Word and character counts (with a limit), the block your cursor is in, when the local backup was last saved, and the connection status. On the right, <b>Print layout</b> (pages) or <b>Web layout</b> (one long page), and the <b>zoom</b> slider: click the percentage for presets, <b>Page width</b> and <b>One page</b>. Both are just for you; a narrow window always shows one long page, and zoom then makes the text larger or smaller.',
           side: 'top',
         },
       },
       {
-        element: '[data-tour="share"]',
+        element: orMore('share'),
         when: isOwner,
         popover: {
           title: 'Share',
@@ -245,7 +261,7 @@ export const TOURS: Record<TourId, Tour> = {
         },
       },
       {
-        element: '[data-tour="share"]',
+        element: orMore('share'),
         when: (ctx) => !isOwner(ctx),
         popover: {
           title: 'Who has access',
@@ -256,7 +272,7 @@ export const TOURS: Record<TourId, Tour> = {
         },
       },
       {
-        element: '[data-tour="theme"]',
+        element: orMore('theme'),
         popover: {
           title: 'Light or dark',
           description: 'Switch the theme here, or let it follow your system setting.',
@@ -265,7 +281,7 @@ export const TOURS: Record<TourId, Tour> = {
         },
       },
       {
-        element: '[data-tour="help"]',
+        element: orMore('help'),
         popover: {
           title: 'More tours',
           description: `Take the other tours or restart this one from here. Press ${k('?')} while the cursor is outside the document to replay this tour.`,
@@ -362,7 +378,7 @@ export const TOURS: Record<TourId, Tour> = {
         },
       },
       {
-        element: '[data-tour="insert"]',
+        element: '[data-tour="insert-tab"]',
         popover: {
           title: 'Insert anything',
           description:
@@ -429,19 +445,31 @@ export const TOURS: Record<TourId, Tour> = {
     scope: 'document',
     steps: [
       {
-        element: '[data-tour="file-menu"]',
+        element: '[data-tour="file-export"]',
+        tab: 'file',
         popover: {
           title: 'Import and export',
-          description: `Import a <code>.md</code> file, export <code>getMarkdown()</code>, <code>getHTML()</code> or <code>getJSON()</code> (notice the <code>data-uid</code> attributes <b>UniqueID</b> adds to every block), save a local backup (${k(`${mod}+S`)}, driven by <code>onUpdate</code>) and restore it.`,
+          description: `On the <b>File</b> tab: import a <code>.md</code> file, export <code>getMarkdown()</code>, <code>getHTML()</code> or <code>getJSON()</code> (notice the <code>data-uid</code> attributes <b>UniqueID</b> adds to every block). Owners and editors can also save a local backup (${k(`${mod}+S`)}, driven by <code>onUpdate</code>) and restore it.`,
           side: 'bottom',
         },
       },
       {
-        element: '[data-tour="view-menu"]',
+        element: '[data-tour="show"]',
+        tab: 'view',
         popover: {
           title: 'View options',
           description:
-            '<b>Read-only</b> calls <code>setEditable(false)</code>. <b>Invisible characters</b> shows spaces, line breaks and paragraph marks. <b>Focus mode</b> dims every block except the one you are in, using the Focus extension. <b>Print layout</b> and <b>Web layout</b> switch between pages and one long page.',
+            'On the <b>View</b> tab: <b>Invisible characters</b> shows spaces, line breaks and paragraph marks, and <b>Focus mode</b> dims every block except the one you are in, using the Focus extension. Next to them, <b>Read-only</b> calls <code>setEditable(false)</code>, and <b>Print layout</b> and <b>Web layout</b> switch between pages and one long page.',
+          side: 'bottom',
+        },
+      },
+      {
+        element: '[data-tour="zoom"]',
+        tab: 'view',
+        popover: {
+          title: 'Zoom',
+          description:
+            'CSS <code>zoom</code> on the editor, so the browser maps clicks, carets and selections and ProseMirror needs nothing special. Pagination divides its measurements by the scale, so the page count never changes with zoom. <b>Page width</b> and <b>One page</b> follow the window.',
           side: 'bottom',
         },
       },
@@ -467,7 +495,7 @@ export const TOURS: Record<TourId, Tour> = {
     scope: 'document',
     steps: [
       {
-        element: '[data-tour="presence"]',
+        element: orMore('presence'),
         popover: {
           title: 'Who’s here',
           description:
@@ -476,7 +504,7 @@ export const TOURS: Record<TourId, Tour> = {
         },
       },
       {
-        element: '[data-tour="account"]',
+        element: orMore('account'),
         popover: {
           title: 'You',
           description:
@@ -495,7 +523,7 @@ export const TOURS: Record<TourId, Tour> = {
         },
       },
       {
-        element: '[data-tour="share"]',
+        element: orMore('share'),
         popover: {
           title: 'Who has access',
           description:
@@ -540,19 +568,26 @@ export const toursFor = (scope: Tour['scope']) =>
 export function startTour(id: TourId) {
   if (TOURS[id].scope === 'document') {
     // The ribbon's groups are on its Home tab: show it, then look for them once it has rendered.
-    revealHomeTab()
+    revealTab()
     requestAnimationFrame(() => runTour(id))
   } else runTour(id)
+}
+
+/** A step on a ribbon tab selects that tab (synchronously, so its group is there) before it shows. */
+const onTab = (tab: RibbonTab, selector: string) => () => {
+  flushSync(() => revealTab(tab))
+  return document.querySelector(selector) ?? document.body
 }
 
 function runTour(id: TourId) {
   const tour = TOURS[id]
   // Skip steps whose element isn't on the page right now (e.g. an empty library or a
   // hidden sidebar), instead of showing a floating card about something that isn't there.
-  const steps = tour.steps
+  // A step on another ribbon tab is there once the tab is selected.
+  const steps: DriveStep[] = tour.steps
     .filter((step) => step.when?.(context) ?? true)
-    .filter((step) => typeof step.element !== 'string' || document.querySelector(step.element))
-    .map(({ when: _when, ...step }) => step)
+    .filter((step) => step.tab || !step.element || document.querySelector(step.element))
+    .map(({ when: _when, tab, element, ...step }) => ({ ...step, element: tab && element ? onTab(tab, element) : element }))
   const instance = driver({
     showProgress: true,
     animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
