@@ -19,8 +19,6 @@ import { Shortcuts } from './extensions/shortcuts'
 import { SlashCommand } from './extensions/slash-command'
 import { emojiSuggestion, mentionSuggestion } from './suggestions'
 
-/** Soft limit shown in the status bar. Not enforced: a hard limit would also reject collaborators' changes. */
-export const CHARACTER_LIMIT = 50_000
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']
 

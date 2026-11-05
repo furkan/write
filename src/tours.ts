@@ -245,7 +245,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Status bar',
           description:
-            'Word and character counts (with a limit), the block your cursor is in, when the local backup was last saved, and the connection status. On the right, <b>Print layout</b> (pages) or <b>Web layout</b> (one long page), and the <b>zoom</b> slider: click the percentage for presets, <b>Page width</b> and <b>One page</b>. Both are just for you; a narrow window always shows one long page, and zoom then makes the text larger or smaller.',
+            'The word count (hover it for characters) and whether your changes are synced. On the right, <b>Print layout</b> (pages) or <b>Web layout</b> (one long page), and the <b>zoom</b> slider: click the percentage for presets, <b>Page width</b> and <b>One page</b>. Both are just for you; a narrow window always shows one long page, and zoom then makes the text larger or smaller.',
           side: 'top',
         },
       },

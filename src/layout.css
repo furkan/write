@@ -122,18 +122,8 @@
   border-radius: 4px;
 }
 
-/* Narrower windows: the status bar keeps what matters (counts, sync, layout, zoom) on as few rows as it can. */
-@media (max-width: 900px) {
-  .status-bar .status-position {
-    display: none;
-  }
-}
-
+/* Narrow windows: a shorter zoom slider keeps the status bar on as few rows as it can. */
 @media (max-width: 560px) {
-  .status-bar .status-detail {
-    display: none;
-  }
-
   .zoom-range {
     width: 72px;
   }
