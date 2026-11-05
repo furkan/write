@@ -538,64 +538,22 @@
   }
 }
 
+/*
+ * Phones: the workspace is the screen's width, so anything poking past it (a collaborator's caret
+ * label at the end of a line) would scroll the whole page sideways. Clip it instead.
+ */
+@media (max-width: 700px) {
+  .workspace {
+    overflow-x: clip;
+  }
+}
+
 .main {
   min-width: 0;
 }
 
-/* ---------- Toolbar ---------- */
+/* ---------- Menu buttons ---------- */
 
-.toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  padding: 10px 0 8px;
-  background: var(--bg);
-}
-
-.toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.toolbar-row + .toolbar-row {
-  margin-top: 6px;
-}
-
-.toolbar-row.contextual {
-  background: var(--accent-bg);
-  border-color: transparent;
-}
-
-.contextual-label {
-  padding: 0 8px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  align-items: center;
-  padding-right: 6px;
-  margin-right: 2px;
-  border-right: 1px solid var(--border);
-}
-
-.group:last-child {
-  border-right: none;
-}
-
-.toolbar button,
 .bubble-menu button,
 .floating-menu button,
 .dropdown > button {
@@ -612,33 +570,20 @@
   cursor: pointer;
 }
 
-.toolbar button:hover:not(:disabled),
 .bubble-menu button:hover:not(:disabled),
 .floating-menu button:hover:not(:disabled),
 .dropdown > button:hover:not(:disabled) {
   background: var(--surface-2);
 }
 
-.toolbar button.active,
 .bubble-menu button.active {
   color: var(--accent);
   background: var(--accent-bg);
 }
 
-.toolbar button:disabled,
-.toolbar select:disabled,
 .dropdown > button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.toolbar select {
-  height: 32px;
-  padding: 0 6px;
-  font-size: 0.85rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
 }
 
 .swatch-label {
@@ -685,6 +630,15 @@
 
 .dropdown-menu.align-end {
   right: 0;
+}
+
+/* Positioned by Floating UI (see Dropdown's `fixed`); hidden until it has been placed. */
+.dropdown-menu.fixed {
+  position: fixed;
+  top: 0;
+  right: auto;
+  left: 0;
+  visibility: hidden;
 }
 
 .dropdown-menu hr {
@@ -760,11 +714,6 @@
   transform: scale(1.1);
 }
 
-.swatch-clear {
-  color: var(--muted);
-  background: var(--bg);
-}
-
 /* ---------- Editor content ---------- */
 
 .editor-shell {
@@ -804,9 +753,9 @@
   font-size: 2rem;
 }
 
-/* Keep headings clear of the sticky toolbar when jumping from the table of contents. */
+/* Keep headings clear of the sticky ribbon when jumping from the table of contents. */
 .tiptap :is(h1, h2, h3, h4, h5, h6) {
-  scroll-margin-top: 140px;
+  scroll-margin-top: calc(var(--ribbon-height, 140px) + 16px);
 }
 
 .tiptap h2 {
@@ -1445,9 +1394,9 @@
 @media (min-width: 1001px) {
   .sidebar {
     position: sticky;
-    top: 0;
+    top: var(--ribbon-height, 0px);
     align-self: start;
-    max-height: 100vh;
+    max-height: calc(100vh - var(--ribbon-height, 0px));
     overflow-y: auto;
   }
 }
@@ -1459,15 +1408,6 @@
   border-radius: var(--radius);
 }
 
-.panel-header,
-.panel-footer,
-.events-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .panel-title {
   margin: 0 0 8px;
   font-size: 0.75rem;
@@ -1475,14 +1415,6 @@
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-}
-
-.panel-header .panel-title {
-  margin: 0;
-}
-
-.panel-footer {
-  margin-top: 8px;
 }
 
 .link-button {
@@ -1532,91 +1464,6 @@
 .toc button.active {
   color: var(--accent);
   border-left-color: var(--accent);
-}
-
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin: 10px 0 8px;
-  padding: 2px;
-  background: var(--surface-2);
-  border-radius: 8px;
-}
-
-.tabs button {
-  flex: 1 1 auto;
-  padding: 4px 6px;
-  font-size: 0.78rem;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.tabs button.active {
-  background: var(--bg);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-}
-
-.output {
-  max-height: 340px;
-  margin: 0;
-  padding: 10px;
-  overflow: auto;
-  font: 0.72rem/1.5 var(--mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.events ul {
-  max-height: 300px;
-  margin: 6px 0 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-
-.events li {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 8px;
-  align-items: baseline;
-  padding: 3px 0;
-  font-size: 0.75rem;
-  border-bottom: 1px dashed var(--border);
-}
-
-.event-type {
-  padding: 0 4px;
-  font: 0.7rem var(--mono);
-  background: var(--surface-2);
-  border-radius: 3px;
-}
-
-.event-update {
-  color: var(--success);
-}
-
-.event-selectionUpdate {
-  color: var(--info);
-}
-
-.event-create {
-  color: var(--accent);
-}
-
-.event-detail {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.events time {
-  font-size: 0.7rem;
 }
 
 /* ---------- Status bar ---------- */

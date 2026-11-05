@@ -2,8 +2,8 @@ import type { Editor } from '@tiptap/react'
 import { CALLOUT_VARIANTS, type CalloutVariant } from './extensions/callout-variants'
 
 /**
- * Block-level insert actions shared by the slash menu, the floating "+" menu
- * and the toolbar's Insert menu.
+ * Block-level insert actions for the slash menu and the floating "+" menu. The ribbon's
+ * Insert tab calls the same insert helpers below.
  */
 export type BlockAction = {
   id: string
