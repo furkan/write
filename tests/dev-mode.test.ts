@@ -1,7 +1,21 @@
 /** Dev mode (`vite`) end to end: identity from the cookie, Origin checks and port clashes. */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { createServer, type Server } from 'node:net'
-import { api, DEV_PORTS, exitCodeWithin, openDocument, spawnServer, startServer, type RunningServer } from './helpers.ts'
+import { rm, utimes, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import {
+  api,
+  connectDocument,
+  DEV_PORTS,
+  exitCodeWithin,
+  openDocument,
+  readText,
+  ROOT,
+  spawnServer,
+  startServer,
+  typeParagraph,
+  type RunningServer,
+} from './helpers.ts'
 
 describe('Dev mode', () => {
   let server: RunningServer
@@ -60,6 +74,68 @@ describe('Dev mode', () => {
       reason: 'permission-denied',
     })
   })
+})
+
+describe('Dev mode restarts', () => {
+  let server: RunningServer
+  beforeAll(async () => {
+    server = await startServer({ command: 'dev', ...DEV_PORTS })
+  }, 30_000)
+  afterAll(() => server?.stop())
+
+  test('after vite.config.ts changes, the server comes back on the same ports and editing still syncs', async () => {
+    const origin = server.url
+    const ws = `ws://127.0.0.1:${server.port}/collab`
+    const { body } = await api(server, '/api/docs', { method: 'POST', headers: { origin } })
+    const id = String(body?.id)
+    const editor = await connectDocument(ws, id, { origin })
+    try {
+      typeParagraph(editor.doc, 'typed before the restart')
+      await Bun.sleep(300)
+      const mark = editor.events.length
+
+      // What Vite watches: touching the config makes it restart in-process.
+      const config = join(ROOT, 'vite.config.ts')
+      const now = new Date()
+      await utimes(config, now, now)
+      const deadline = Date.now() + 15_000
+      while (!server.output().includes('server restarted') && Date.now() < deadline) await Bun.sleep(100)
+      expect(server.output()).toContain('server restarted')
+      expect(server.output()).not.toContain('already in use')
+      expect(server.output()).not.toContain('did not restart')
+      // The new collaboration server announced itself.
+      expect(server.output().split('[write] Dev mode').length - 1).toBe(2)
+
+      // The open tab reconnects to the new collaboration server and keeps syncing.
+      await editor.waitFor(/^synced$/, { from: mark, ms: 10_000 })
+      typeParagraph(editor.doc, 'typed after the restart')
+      await Bun.sleep(1000)
+      const text = await readText(ws, id, { origin })
+      expect(text).toContain('typed before the restart')
+      expect(text).toContain('typed after the restart')
+      expect((await api(server, `/api/docs/${id}`)).body?.preview).toContain('typed before the restart')
+    } finally {
+      editor.destroy()
+    }
+  }, 40_000)
+
+  test('a changed WRITE_* setting takes effect on the restart', async () => {
+    // Vite restarts when an .env file changes. This one is git-ignored (*.local) and only read
+    // by `vite dev` in this checkout; never overwrite one that someone else wrote.
+    const envFile = join(ROOT, '.env.development.local')
+    if (await Bun.file(envFile).exists()) return
+    const restarts = () => server.output().split('server restarted').length - 1
+    const before = restarts()
+    try {
+      await writeFile(envFile, 'WRITE_DEV_USER=after-restart@x.com\n')
+      const deadline = Date.now() + 15_000
+      while (restarts() === before && Date.now() < deadline) await Bun.sleep(100)
+      expect(restarts()).toBe(before + 1)
+      expect((await api(server, '/api/me')).body).toEqual({ email: 'after-restart@x.com', mode: 'dev' })
+    } finally {
+      await rm(envFile, { force: true })
+    }
+  }, 30_000)
 })
 
 describe('Dev mode with a busy collaboration port', () => {

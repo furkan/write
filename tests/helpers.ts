@@ -7,6 +7,7 @@
  */
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { connect } from 'node:net'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -211,6 +212,38 @@ export async function startAccessKeys(): Promise<AccessKeys> {
 
 // ---------- Requests ----------
 
+/**
+ * A request whose line and headers are sent now and whose body is sent only by `finish()`, like a
+ * slow or deliberately stalled client: lets a test change access while the server waits for it.
+ */
+export function slowRequest(
+  server: RunningServer,
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  body: string,
+) {
+  const socket = connect(server.port, '127.0.0.1')
+  let response = ''
+  const parse = () => {
+    const [head = '', text = ''] = response.split('\r\n\r\n')
+    return { status: Number(head.split(' ')[1]), body: text ? (JSON.parse(text) as Record<string, unknown>) : undefined }
+  }
+  const done = new Promise<{ status: number; body?: Record<string, unknown> }>((resolveDone) => {
+    socket.on('data', (chunk: Buffer) => (response += chunk.toString()))
+    socket.once('close', () => resolveDone(parse()))
+  })
+  const all = { host: `127.0.0.1:${server.port}`, connection: 'close', ...headers, 'content-length': String(Buffer.byteLength(body)) }
+  socket.write(`${method} ${path} HTTP/1.1\r\n${Object.entries(all).map(([k, v]) => `${k}: ${v}\r\n`).join('')}\r\n`)
+  return {
+    /** Sends the body and resolves with the response. */
+    finish: () => {
+      socket.write(body)
+      return done
+    },
+  }
+}
+
 export async function api(server: RunningServer, path: string, init: RequestInit & { headers?: Record<string, string> } = {}) {
   const response = await fetch(`${server.url}${path}`, init)
   const text = await response.text()
@@ -221,36 +254,15 @@ export type CollabResult = { status: 'synced' } | { status: 'denied'; reason: st
 
 /**
  * Opens a document with the real Hocuspocus provider, as the editor does (no token set),
- * sending `headers` on the WebSocket upgrade.
+ * sending `headers` on the WebSocket upgrade, and closes it again once it synced or was denied.
  */
 export async function openDocument(url: string, name: string, headers: Record<string, string>): Promise<CollabResult> {
-  class WebSocketWithHeaders extends WebSocket {
-    constructor(target: string | URL) {
-      super(target, { headers } as unknown as string[])
-    }
-  }
-  const socket = new HocuspocusProviderWebsocket({ url, WebSocketPolyfill: WebSocketWithHeaders })
-  let provider: HocuspocusProvider | undefined
-  const result = await new Promise<CollabResult>((done) => {
-    const timer = setTimeout(() => done({ status: 'timeout' }), 5000)
-    provider = new HocuspocusProvider({
-      websocketProvider: socket,
-      name,
-      document: new Y.Doc(),
-      onSynced: () => {
-        clearTimeout(timer)
-        done({ status: 'synced' })
-      },
-      onAuthenticationFailed: ({ reason }) => {
-        clearTimeout(timer)
-        done({ status: 'denied', reason })
-      },
-    })
-    provider.attach()
-  })
-  provider?.destroy()
-  socket.destroy()
-  return result
+  const live = await connectDocument(url, name, headers)
+  live.destroy()
+  const outcome = live.events.find((event) => event === 'synced' || event.startsWith('denied:'))
+  if (outcome === 'synced') return { status: 'synced' }
+  if (outcome) return { status: 'denied', reason: outcome.slice('denied:'.length) }
+  return { status: 'timeout' }
 }
 
 /** An open collaboration connection that stays open, recording what happens to it. */
