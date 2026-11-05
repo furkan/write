@@ -154,12 +154,24 @@ export function setLayoutMode(mode: LayoutMode) {
 const NARROW_QUERY = 'screen and (max-width: 900px)'
 
 const subscribeNarrow = (onChange: () => void) => {
-  const query = window.matchMedia(NARROW_QUERY)
-  query.addEventListener('change', onChange)
-  return () => query.removeEventListener('change', onChange)
+  const queries = [window.matchMedia(NARROW_QUERY), window.matchMedia('print')]
+  for (const query of queries) query.addEventListener('change', onChange)
+  return () => queries.forEach((query) => query.removeEventListener('change', onChange))
 }
 
-export const useNarrowScreen = () => useSyncExternalStore(subscribeNarrow, () => window.matchMedia(NARROW_QUERY).matches)
+/**
+ * Frozen while printing: print media isn't `screen`, so a phone would otherwise turn pages on for
+ * the browser's own Print, with no chance to measure them (the extension doesn't measure while
+ * printing). The phone prints continuous text instead, with the sheet margins and numbers of
+ * `@page`. (Write's own Print turns pages on before it prints.)
+ */
+let lastNarrow = typeof window !== 'undefined' && window.matchMedia(NARROW_QUERY).matches
+const narrowSnapshot = () => {
+  if (!window.matchMedia('print').matches) lastNarrow = window.matchMedia(NARROW_QUERY).matches
+  return lastNarrow
+}
+
+export const useNarrowScreen = () => useSyncExternalStore(subscribeNarrow, narrowSnapshot)
 
 /** Whether the document shows as pages: Print layout, on a screen wide enough for a page. */
 export function usePagedView(): boolean {
