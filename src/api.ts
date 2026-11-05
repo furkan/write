@@ -1,5 +1,7 @@
 /** Client for the document library API served by `server/collab.ts`. */
 
+import { setSessionExpired } from './session'
+
 export type ShareRole = 'editor' | 'viewer'
 /** The caller's role on a document; `owner` is never granted by a share. */
 export type Role = 'owner' | ShareRole
@@ -29,26 +31,57 @@ export type TrashedDoc = DocMeta & {
 }
 
 async function request<T>(path: string, init?: RequestInit, base = '/api/docs'): Promise<T> {
+  // `manual`: when the Access session has expired, Access redirects to its login page. Followed,
+  // that would be a CORS failure indistinguishable from a network drop; unfollowed, it is an
+  // `opaqueredirect` response we can recognise.
   const response = await fetch(`${base}${path}`, {
     ...init,
+    redirect: 'manual',
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   })
-  if (!response.ok) throw new ApiError(response.status)
+  if (response.type === 'opaqueredirect' || response.status === 401) {
+    setSessionExpired(true)
+    throw new ApiError(401, 'session expired')
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+    throw new ApiError(response.status, typeof body?.error === 'string' ? body.error : undefined)
+  }
+  setSessionExpired(false)
   return (response.status === 204 ? undefined : await response.json()) as T
 }
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number) {
-    super(`Request failed (${status})`)
+  /** The server's `error` text, if any. */
+  error?: string
+  constructor(status: number, error?: string) {
+    super(`Request failed (${status}${error ? `: ${error}` : ''})`)
     this.status = status
+    this.error = error
   }
 }
+
+/** True for the failure a Session expired gives (401, or an Access redirect). */
+export const isSessionError = (error: unknown) => error instanceof ApiError && error.status === 401
 
 export type Me = { email: string; mode: 'access' | 'dev' }
 
 /** The signed-in user and the auth mode. */
 export const getMe = () => request<Me>('', undefined, '/api/me')
+
+/**
+ * Asks the server who we are, to tell a Session expired apart from a network drop:
+ * `expired` for a 401 or an Access redirect, `unreachable` for anything else that failed.
+ */
+export async function probeSession(): Promise<'ok' | 'expired' | 'unreachable'> {
+  try {
+    await getMe()
+    return 'ok'
+  } catch (error) {
+    return isSessionError(error) ? 'expired' : 'unreachable'
+  }
+}
 
 /** My documents plus Shared with me: every open document the caller owns or has a share on. */
 export const listDocs = () => request<{ docs: DocMeta[] }>('').then((r) => r.docs)
