@@ -56,17 +56,41 @@ export function everyNodeJson(imageUrl: string): Json {
       heading(2, 'Lists'),
       {
         type: 'bulletList',
-        content: [{ type: 'listItem', content: [p(text('Bullet'))] }],
+        content: [
+          {
+            type: 'listItem',
+            content: [
+              p(text('Bullet')),
+              { type: 'bulletList', content: [{ type: 'listItem', content: [p(text('Nested bullet'))] }] },
+            ],
+          },
+        ],
       },
       {
         type: 'orderedList',
-        content: [{ type: 'listItem', content: [p(text('Numbered'))] }],
+        attrs: { start: 3 },
+        content: [
+          {
+            type: 'listItem',
+            content: [
+              p(text('Numbered')),
+              { type: 'orderedList', content: [{ type: 'listItem', content: [p(text('Nested number'))] }] },
+            ],
+          },
+        ],
       },
       {
         type: 'taskList',
         content: [
           { type: 'taskItem', attrs: { checked: true }, content: [p(text('Done task'))] },
-          { type: 'taskItem', attrs: { checked: false }, content: [p(text('Open task'))] },
+          {
+            type: 'taskItem',
+            attrs: { checked: false },
+            content: [
+              p(text('Open task')),
+              { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [p(text('Nested task'))] }] },
+            ],
+          },
         ],
       },
       { type: 'blockquote', content: [p(text('A quotation'))] },
@@ -99,6 +123,14 @@ export function everyNodeJson(imageUrl: string): Json {
           { type: 'detailsContent', content: [p(text('Toggle content'))] },
         ],
       },
+      {
+        type: 'details',
+        attrs: { open: false },
+        content: [
+          { type: 'detailsSummary', content: [text('Closed summary')] },
+          { type: 'detailsContent', content: [p(text('Hidden content'))] },
+        ],
+      },
       p(text('The end')),
     ],
   }
@@ -120,7 +152,22 @@ export function paragraphsJson(count: number, words = 60): Json {
   return { type: 'doc', content: Array.from({ length: count }, (_, i) => p(text(`Paragraph ${i + 1}. ${filler}`))) }
 }
 
-export const pageMeta = (setup: PageSetup): Meta => ({
+/** One code block of about `kb` kilobytes, in `language`. */
+export function codeJson(kb: number, language: string): Json {
+  const line = 'const x = foo(bar, "baz") + 1; // comment <b>\n'
+  return { type: 'doc', content: [{ type: 'codeBlock', attrs: { language }, content: [text(line.repeat(Math.round((kb * 1000) / line.length)))] }] }
+}
+
+/** An `n`×`n` LaTeX matrix of x's: 180 KB of LaTeX for n = 300. */
+export const matrixLatex = (n: number) =>
+  '\\begin{matrix}' + Array.from({ length: n }, () => Array.from({ length: n }, () => 'x').join('&')).join('\\\\') + '\\end{matrix}'
+
+export const blockMathJson = (...latex: string[]): Json => ({
+  type: 'doc',
+  content: [p(text('Before the math')), ...latex.map((value) => ({ type: 'blockMath', attrs: { latex: value } })), p(text('After the math'))],
+})
+
+export const pageMeta =(setup: PageSetup): Meta => ({
   pageSize: setup.size,
   pageOrientation: setup.orientation,
   pageMargins: setup.margins,

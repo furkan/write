@@ -23,7 +23,7 @@ describe('resolveConfig', () => {
       allowedHosts: [],
       allowedOrigins: [],
       ownerEmail: 'dev@localhost',
-      pdf: { chromium: undefined, maxConcurrent: 2, maxQueue: 8, timeoutMs: 30_000, maxBytes: 25 * 1024 * 1024 },
+      pdf: { chromium: undefined, maxConcurrent: 2, maxQueue: 8, timeoutMs: 30_000, maxBytes: 5 * 1024 * 1024 },
     })
   })
 

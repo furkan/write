@@ -7,15 +7,15 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { docFileName, pdfDisposition } from '../server/collab.ts'
-import { cleanStyle, documentPage } from '../server/pdf-html.ts'
-import { createPdfRenderer, defaultChromium, PdfBusy } from '../server/pdf.ts'
+import { cleanStyle, documentPage, MAX_FORMULA_CHARS, MAX_HIGHLIGHT_CHARS } from '../server/pdf-html.ts'
+import { createPdfRenderer, defaultChromium, PdfBusy, PdfTimeout, PdfTooLarge, PdfUnavailable } from '../server/pdf.ts'
 import { IN, MARGIN_PRESETS, PAPER_SIZES, type PageSetup } from '../src/editor/paper.ts'
 import { api, connectDocument, DEV_PORTS, startServer, typeParagraph, type RunningServer } from './helpers.ts'
-import { docState, everyNodeJson, pageMeta, paragraphsJson, PNG_DATA_URL, type Meta } from './pdf-fixtures.ts'
+import { blockMathJson, codeJson, docState, everyNodeJson, matrixLatex, pageMeta, paragraphsJson, PNG_DATA_URL, type Meta } from './pdf-fixtures.ts'
 
 const CHROMIUM = process.env.WRITE_PDF_CHROMIUM || defaultChromium()
 const POPPLER = Boolean(Bun.which('pdfinfo') && Bun.which('pdftotext'))
@@ -95,6 +95,39 @@ async function layout(pdf: Buffer) {
 
 const PT = 72 / IN
 
+/** An HTML table that takes Chromium about 1 s (2000 rows) to 3.5 s (5000 rows) to print. */
+const bigTable = (rows: number) =>
+  `<table>${Array.from({ length: rows }, (_, i) => `<tr>${Array.from({ length: 8 }, (_, j) => `<td>r${i}c${j}</td>`).join('')}</tr>`).join('')}</table>`
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Whether process `pid` is gone within `ms`. */
+async function gone(pid: number, ms: number) {
+  const deadline = Date.now() + ms
+  while (alive(pid) && Date.now() < deadline) await Bun.sleep(100)
+  return !alive(pid)
+}
+
+/** Chromium headless shell browser processes started by process `parent` (their renderers are their own children). */
+function browsersOf(parent: number) {
+  const ps = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,args='], { encoding: 'utf8' }).stdout
+  return ps
+    .split('\n')
+    .map((line) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line))
+    .filter((m): m is RegExpExecArray => m !== null && Number(m[2]) === parent && m[3].includes('chrome-headless-shell'))
+    .map((m) => Number(m[1]))
+}
+
+/** The page's body, without its stylesheets. */
+const bodyOf = (html: string) => html.slice(html.indexOf('<body>'))
+
 /** The page size in pt for a page setup. */
 function expectedSize(setup: PageSetup) {
   const paper = PAPER_SIZES[setup.size]
@@ -159,6 +192,51 @@ describe('PDF page (HTML)', () => {
     expect(pdfDisposition('Résumé\r\nX-Evil: 1')).toBe(
       `attachment; filename="R_sum_-X-Evil- 1.pdf"; filename*=UTF-8''R%C3%A9sum%C3%A9-X-Evil-%201.pdf`,
     )
+    // RFC 5987: ' ( ) * ! are percent-encoded too.
+    expect(pdfDisposition("it's (1)!")).toBe(`attachment; filename="it's (1)!.pdf"; filename*=UTF-8''it%27s%20%281%29%21.pdf`)
+  })
+
+  test('a long title is cut by whole characters, and a lone surrogate becomes U+FFFD', () => {
+    // 119 letters and an emoji: the 120th character is the whole emoji, never half of it.
+    const emoji = pdfDisposition(`${'a'.repeat(119)}😀 and more`)
+    expect(emoji).toContain(`filename*=UTF-8''${'a'.repeat(119)}%F0%9F%98%80.pdf`)
+    expect(emoji).toContain(`filename="${'a'.repeat(119)}_.pdf"`)
+    expect(pdfDisposition('x\uD800y')).toContain(`filename*=UTF-8''x%EF%BF%BDy.pdf`)
+    expect(pdfDisposition('\uDC00')).toContain(`filename*=UTF-8''%EF%BF%BD.pdf`)
+  })
+
+  test('closed toggles keep only their summary; nested lists stay nested', () => {
+    const html = bodyOf(documentPage(docState(everyNodeJson('http://127.0.0.1:9/linked.png'))).html)
+    expect(html).toMatch(/<details[^>]*><summary[^>]*>Closed summary<\/summary>/)
+    expect(html).not.toMatch(/<details[^>]*open[^>]*><summary[^>]*>Closed summary/)
+    expect(html).toMatch(/<details[^>]*open[^>]*><summary[^>]*>Toggle summary/)
+    expect(html).toMatch(/<li><p>Bullet<\/p><ul><li><p>Nested bullet<\/p><\/li><\/ul><\/li>/)
+    expect(html).toMatch(/<ol start="3"><li><p>Numbered<\/p><ol><li><p>Nested number<\/p>/)
+    expect(html).toContain('Nested task')
+  })
+
+  test('code: no guessing for an unknown language, and large blocks print plain', () => {
+    const highlighted = (json: Parameters<typeof docState>[0]) => bodyOf(documentPage(docState(json)).html).includes('class="hljs-')
+    expect(highlighted(codeJson(2, 'zzz'))).toBe(false)
+    expect(highlighted(codeJson(2, 'ts'))).toBe(true)
+    expect(highlighted(codeJson(MAX_HIGHLIGHT_CHARS / 1000 + 10, 'ts'))).toBe(false)
+  })
+
+  test('math: deep nesting, huge and unparsable formulas never fail the export', () => {
+    const deep = `${'{'.repeat(5000)}x${'}'.repeat(5000)}`
+    const huge = matrixLatex(300)
+    const page = documentPage(docState(blockMathJson(deep, huge, 'x^{', 'e = mc^2'))).html
+    const html = bodyOf(page)
+    // KaTeX overflows its stack on `deep`: the source prints instead, and so does `huge` (over the cap).
+    expect(html).toContain(`<code class="math-source">${deep}</code>`)
+    expect(huge.length).toBeGreaterThan(MAX_FORMULA_CHARS)
+    expect(html).toContain('<code class="math-source">\\begin{matrix}x&amp;x')
+    // A parse error is shown by KaTeX itself (in red), and a good formula renders.
+    expect(html).toContain('katex-error')
+    expect(html).toContain('<span class="katex">')
+    expect(html).toContain('mathnormal">m</span>')
+    // Nothing like KaTeX's 80-fold output for the matrix (14 MB): the sources are printed as they are.
+    expect(html.length).toBeLessThan(3 * (huge.length + deep.length))
   })
 })
 
@@ -197,18 +275,78 @@ describe.skipIf(!CHROMIUM)('PDF renderer', () => {
     }
   }, 60_000)
 
-  test('an export that takes too long fails, and the next one works', async () => {
-    const renderer = createPdfRenderer({ ...settings, timeoutMs: 1 })
+  test('exportDocument builds the page in a worker and prints it; too large is PdfTooLarge', async () => {
+    const renderer = createPdfRenderer({ ...settings, maxBytes: 60_000 })
     try {
-      await expect(renderer.render('<p>slow</p>')).rejects.toThrow('timed out')
+      const { pdf, title } = await renderer.exportDocument(docState(everyNodeJson('http://127.0.0.1:9/x.png'), { title: 'Every node' }))
+      expect(pdf.subarray(0, 4).toString()).toBe('%PDF')
+      expect(title).toBe('Every node')
+      await expect(renderer.exportDocument(docState(paragraphsJson(400)))).rejects.toBeInstanceOf(PdfTooLarge)
     } finally {
       await renderer.close()
     }
-    const next = createPdfRenderer(settings)
+  }, 60_000)
+
+  test('a print that runs out of time is stopped, and the same renderer prints the next one', async () => {
+    const renderer = createPdfRenderer({ ...settings, timeoutMs: 1500 })
     try {
-      expect((await next.render('<p>fast</p>')).subarray(0, 4).toString()).toBe('%PDF')
+      await renderer.render('<p>warm up</p>')
+      const started = Date.now()
+      // About 3.5 s to print: the deadline lands in page.pdf().
+      await expect(renderer.render(bigTable(5000))).rejects.toBeInstanceOf(PdfTimeout)
+      expect(Date.now() - started).toBeLessThan(2500)
+      expect((await renderer.render('<p>next</p>')).subarray(0, 4).toString()).toBe('%PDF')
     } finally {
-      await next.close()
+      await renderer.close()
+    }
+  }, 60_000)
+
+  test('a browser that stops responding (SIGSTOP) is killed, and the next export starts a new one', async () => {
+    const renderer = createPdfRenderer({ ...settings, timeoutMs: 3000 })
+    try {
+      await renderer.render('<p>warm up</p>')
+      const stopped = renderer.browserPid()
+      expect(stopped).toBeGreaterThan(0)
+      process.kill(stopped as number, 'SIGSTOP')
+      await expect(renderer.render('<p>hangs</p>')).rejects.toBeInstanceOf(PdfTimeout)
+      expect((await renderer.render('<p>after</p>')).subarray(0, 4).toString()).toBe('%PDF')
+      expect(renderer.browserPid()).not.toBe(stopped)
+      expect(await gone(stopped as number, 10_000)).toBe(true)
+    } finally {
+      await renderer.close()
+    }
+  }, 60_000)
+
+  test('close() refuses waiting exports, lets running ones finish, and leaves no Chromium behind', async () => {
+    const renderer = createPdfRenderer({ ...settings, maxConcurrent: 1, maxQueue: 5 })
+    await renderer.render('<p>warm up</p>')
+    const pid = renderer.browserPid() as number
+    const jobs = [renderer.render(bigTable(1000)), renderer.render('<p>waits</p>'), renderer.render('<p>waits too</p>')]
+    // The first one is printing by now; the other two wait for its slot.
+    await Bun.sleep(300)
+    const closing = renderer.close()
+    const results = await Promise.allSettled(jobs)
+    await closing
+    expect(results[0].status).toBe('fulfilled')
+    for (const result of results.slice(1)) expect((result as PromiseRejectedResult).reason).toBeInstanceOf(PdfUnavailable)
+    await expect(renderer.render('<p>after close</p>')).rejects.toBeInstanceOf(PdfUnavailable)
+    expect(await gone(pid, 5000)).toBe(true)
+    expect(browsersOf(process.pid)).toEqual([])
+  }, 60_000)
+
+  test.skipIf(!POPPLER)('a display formula wider than the page wraps instead of being cut off', async () => {
+    const renderer = createPdfRenderer(settings)
+    try {
+      const wide = `${Array.from({ length: 30 }, (_, i) => `a_{${i + 1}}`).join(' + ')} = \\text{Wide end}`
+      const { pdf } = await renderer.exportDocument(docState(blockMathJson(wide)))
+      const { width, words } = await layout(pdf)
+      const text = await pdfTool('pdftotext', pdf)
+      expect(text).toContain('Wide end')
+      expect(text).toContain('After the math')
+      // Everything inside the right margin (1 in = 72 pt).
+      expect(Math.max(...words.map((w) => w.x1))).toBeLessThanOrEqual(width - 72 + 0.5)
+    } finally {
+      await renderer.close()
     }
   }, 60_000)
 })
@@ -377,6 +515,99 @@ describe.skipIf(!CHROMIUM)('PDF limits', () => {
     // Once the others are done, the next one goes through.
     expect((await getPdf(server, 'small')).response.status).toBe(200)
   }, 60_000)
+})
+
+describe.skipIf(!CHROMIUM)('Heavy exports', () => {
+  let server: RunningServer
+  beforeAll(async () => {
+    server = await startServer({
+      command: 'dev',
+      ...DEV_PORTS,
+      env: { WRITE_PDF_CHROMIUM: CHROMIUM as string, WRITE_PDF_TIMEOUT_SECONDS: '20' },
+      seed: (dir) =>
+        seedDocs(dir, [
+          // The review's documents: 1 MB of code in an unknown language, and a 300×300 matrix.
+          { id: 'code', state: docState(codeJson(1000, 'zzz')) },
+          { id: 'matrix', state: docState(blockMathJson(matrixLatex(300))) },
+          { id: 'plan', state: docState(paragraphsJson(3)) },
+        ]),
+    })
+  }, 30_000)
+  afterAll(() => server?.stop())
+
+  test('the API and the collaboration server stay responsive while 12 heavy exports run', async () => {
+    const live = await connectDocument(`ws://127.0.0.1:${server.port}/collab`, 'plan', { ...cookie(BOB), origin: server.url })
+    try {
+      const exports = Promise.all(Array.from({ length: 12 }, (_, i) => getPdf(server, i % 3 === 2 ? 'matrix' : 'code', CAROL)))
+      let done = false
+      void exports.finally(() => (done = true))
+      const latencies: number[] = []
+      const syncs: number[] = []
+      for (let i = 0; !done; i++) {
+        const started = performance.now()
+        await fetch(`${server.url}/api/docs`, { headers: cookie(CAROL) })
+        latencies.push(performance.now() - started)
+        if (i % 5 === 0) {
+          // A collaborator's edit is confirmed by the server meanwhile.
+          const typed = performance.now()
+          typeParagraph(live.doc, `typed while exporting ${i}`)
+          while (live.provider.unsyncedChanges > 0 && performance.now() - typed < 5000) await Bun.sleep(5)
+          syncs.push(performance.now() - typed)
+        }
+        await Bun.sleep(50)
+      }
+      const results = await exports
+      const statuses = results.map((r) => r.response.status)
+      // Each either succeeds or fails cleanly: busy (2 running + 8 waiting), or out of time.
+      for (const r of results.filter((r) => r.response.status !== 200)) {
+        expect(r.response.status).toBe(503)
+        expect(['busy', 'timed out']).toContain(r.json().error as string)
+      }
+      expect(statuses.filter((s) => s === 200).length).toBeGreaterThanOrEqual(2)
+      expect(latencies.length).toBeGreaterThan(10)
+      console.log(
+        `[pdf.test] 12 heavy exports: ${statuses.join(',')}; /api/docs max ${Math.max(...latencies).toFixed(0)} ms over ` +
+          `${latencies.length} requests; a collaborator's edit confirmed within ${Math.max(...syncs).toFixed(0)} ms`,
+      )
+      expect(Math.max(...latencies)).toBeLessThan(300)
+      expect(Math.max(...syncs)).toBeLessThan(500)
+    } finally {
+      live.destroy()
+    }
+  }, 90_000)
+
+  test('a Vite restart during exports leaves one browser, not two', async () => {
+    // Vite drops the old server's open connections when it restarts, so some requests just fail.
+    expect((await fetch(`${server.url}/api/me`)).status).toBe(200)
+    // New connections, not ones the previous test left open.
+    const pending = Array.from({ length: 4 }, () =>
+      fetch(`${server.url}/api/docs/code/pdf`, { headers: { ...cookie(CAROL), connection: 'close' } }).then(
+        async (response) => (await response.arrayBuffer(), response.status),
+        (error: Error) => error.message.split(':')[0],
+      ),
+    )
+    await Bun.sleep(800)
+    const restarts = server.output().split('server restarted').length
+    const now = new Date()
+    await utimes(join(server.root, 'vite.config.ts'), now, now)
+    const deadline = Date.now() + 20_000
+    while (server.output().split('server restarted').length === restarts && Date.now() < deadline) await Bun.sleep(100)
+    const results = await Promise.all(pending)
+    console.log(`[pdf.test] exports across a restart: ${results.join(', ')}`)
+    for (const result of results) if (typeof result === 'number') expect([200, 503]).toContain(result)
+    expect((await getPdf(server, 'plan', CAROL)).response.status).toBe(200)
+    // Give the old runtime's browser its grace period to close.
+    const settle = Date.now() + 15_000
+    while (browsersOf(server.child.pid as number).length > 1 && Date.now() < settle) await Bun.sleep(200)
+    expect(browsersOf(server.child.pid as number)).toHaveLength(1)
+  }, 90_000)
+
+  test('stopping the server leaves no Chromium behind', async () => {
+    const browsers = browsersOf(server.child.pid as number)
+    expect(browsers.length).toBeGreaterThan(0)
+    await server.stop()
+    for (const pid of browsers) expect(await gone(pid, 10_000)).toBe(true)
+  }, 30_000)
 })
 
 describe('Without Chromium', () => {

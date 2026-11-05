@@ -56,7 +56,7 @@ export type PdfSettings = {
   maxQueue: number
   /** Time for one export, waiting included. */
   timeoutMs: number
-  /** Largest document (its stored state, and the page built from it) that is exported; larger is 413. */
+  /** Largest stored document exported (the page built from it may be `PAGE_FACTOR` times that); larger is 413. */
   maxBytes: number
 }
 
@@ -130,7 +130,7 @@ function pdfSettings(env: Env, dir: (raw: string) => string): PdfSettings {
     maxConcurrent: number(env, 'WRITE_PDF_MAX_CONCURRENT', 2, { min: 1, max: 16 }),
     maxQueue: number(env, 'WRITE_PDF_MAX_QUEUE', 8, { min: 0, max: 1000 }),
     timeoutMs: number(env, 'WRITE_PDF_TIMEOUT_SECONDS', 30, { min: 1, max: 600 }) * 1000,
-    maxBytes: Math.round(number(env, 'WRITE_PDF_MAX_MB', 25, { min: 0.01, max: 1024, integer: false }) * 1024 * 1024),
+    maxBytes: Math.round(number(env, 'WRITE_PDF_MAX_MB', 5, { min: 0.01, max: 100, integer: false }) * 1024 * 1024),
   }
 }
 

@@ -19,8 +19,7 @@ import {
   type User,
 } from './auth.ts'
 import { describeConfig, type WriteConfig } from './config.ts'
-import { documentPage } from './pdf-html.ts'
-import { createPdfRenderer, PdfBusy, PdfUnavailable, type PdfRenderer } from './pdf.ts'
+import { createPdfRenderer, PdfBusy, PdfTimeout, PdfTooLarge, PdfUnavailable, type PdfRenderer } from './pdf.ts'
 import {
   canEdit,
   isShareRole,
@@ -1089,21 +1088,25 @@ async function sharesRoute(
   return send(res, 200, meta)
 }
 
+/** RFC 5987 `attr-char` leaves out `'()*!`, which `encodeURIComponent` keeps. */
+const encodeRfc5987 = (value: string) =>
+  encodeURIComponent(value).replace(/['()*!]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+
 /**
  * A download file name from a document's title: no path separators, quotes or control characters,
- * as `filename="…"` (ASCII) and `filename*=UTF-8''…` (the title as it is).
+ * at most 120 characters (whole code points, so an emoji is never cut in half; a lone surrogate
+ * from a client becomes U+FFFD), as `filename="…"` (ASCII) and `filename*=UTF-8''…` (the title).
  */
 export function pdfDisposition(title: string) {
-  const name =
-    title
-      // oxlint-disable-next-line no-control-regex -- control characters are what this removes
-      .replace(/[\u0000-\u001f\u007f"\\/:*?<>|]+/g, '-')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 120)
-      .replace(/^[.\s-]+|[.\s-]+$/g, '') || 'Untitled document'
-  const ascii = name.replace(/[^\x20-\x7e]/g, '_')
-  return `attachment; filename="${ascii}.pdf"; filename*=UTF-8''${encodeURIComponent(`${name}.pdf`)}`
+  const cleaned = (title as string & { toWellFormed: () => string })
+    .toWellFormed()
+    // oxlint-disable-next-line no-control-regex -- control characters are what this removes
+    .replace(/[\u0000-\u001f\u007f"\\/:*?<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const name = Array.from(cleaned).slice(0, 120).join('').replace(/^[.\s-]+|[.\s-]+$/g, '') || 'Untitled document'
+  const ascii = name.replace(/[^\x20-\x7e]/gu, '_')
+  return `attachment; filename="${ascii}.pdf"; filename*=UTF-8''${encodeRfc5987(`${name}.pdf`)}`
 }
 
 /** What people see when the server can't make PDFs (no Chromium); the details are in the server's log. */
@@ -1112,43 +1115,49 @@ const PDF_UNAVAILABLE = 'PDF download isn’t set up on this server yet. Ask who
 /**
  * `GET /api/docs/:id/pdf`: the document as a PDF, with its page setup and page numbers and no
  * browser headers (server/pdf.ts). The caller has a role; it is checked again after the state is
- * read, like `duplicate`. 413 when the document is larger than `WRITE_PDF_MAX_MB`, 503 when
- * Chromium isn't installed or too many exports are running.
+ * read, like `duplicate`. 413 when the document is larger than `WRITE_PDF_MAX_MB`; 503 when
+ * Chromium isn't installed, too many exports are running, or the export runs out of time.
  */
 async function pdfRoute(
   res: ServerResponse,
   { id, server, user, runtime }: { id: string; server: Server; user: User; runtime: Runtime },
 ) {
-  const { pdf, config } = runtime
+  const { pdf } = runtime
   // The reason (a path, how to install) is for whoever runs the server: it is in the log.
   const unavailable = () => send(res, 503, { error: 'pdf unavailable', message: PDF_UNAVAILABLE })
   if (pdf.unavailable) return unavailable()
-  const tooLarge = () => send(res, 413, { error: 'document too large for a PDF' })
   const state = await currentState(server, id)
   if (!roleFor(id, user)) return notFound(res)
-  if (state && state.byteLength > config.pdf.maxBytes) return tooLarge()
-  const page = documentPage(state)
-  if (Buffer.byteLength(page.html) > config.pdf.maxBytes) return tooLarge()
-  let file: Buffer
+  let result: { pdf: Buffer; title: string }
   try {
-    file = await pdf.render(page.html)
+    result = await pdf.exportDocument(state)
   } catch (error) {
+    if (error instanceof PdfTooLarge) return send(res, 413, { error: 'document too large for a PDF' })
     if (error instanceof PdfBusy) {
       res.setHeader('Retry-After', '5')
       return send(res, 503, { error: 'busy', message: 'Too many PDF downloads at once. Try again in a moment.' })
     }
-    if (error instanceof PdfUnavailable) return unavailable()
+    if (error instanceof PdfUnavailable) {
+      return send(res, 503, { error: 'pdf unavailable', message: 'The server is restarting. Try again in a moment.' })
+    }
+    if (error instanceof PdfTimeout) {
+      console.warn(`[write] PDF export of ${id} timed out`)
+      return send(res, 503, { error: 'timed out', message: 'The PDF took too long to make. Try again in a moment.' })
+    }
     console.error(`[write] PDF export of ${id} failed:`, error)
     return send(res, 503, { error: 'pdf failed', message: 'The PDF could not be made. Try again in a moment.' })
   }
-  audit('export', { actor: user.email, doc: id, format: 'pdf', bytes: file.length })
-  res.statusCode = 200
-  res.setHeader('Content-Type', 'application/pdf')
-  res.setHeader('Content-Disposition', pdfDisposition(page.title))
-  res.setHeader('Content-Length', String(file.length))
-  res.setHeader('Cache-Control', 'no-store')
-  res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.end(file)
+  // Every header first: nothing is audited for a download that doesn't go out.
+  const headers = {
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': pdfDisposition(result.title),
+    'Content-Length': String(result.pdf.length),
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  }
+  audit('export', { actor: user.email, doc: id, format: 'pdf', bytes: result.pdf.length })
+  res.writeHead(200, headers)
+  res.end(result.pdf)
 }
 
 /**
