@@ -11,11 +11,16 @@ bun dev
 
 Open the URL Vite prints. The server listens on every interface, so other devices on your Tailscale network can use `http://<tailscale-ip>:5173` or `http://<machine>.<tailnet>.ts.net:5173`.
 
-`bun dev` runs in **Dev mode**: there is no sign-in, and you are `dev@localhost` (or `WRITE_DEV_USER`, or whoever the `write-dev-user` cookie names, so you can try several users in one browser). `bun run preview` runs in **Access mode** (see [Running the pilot](#running-the-pilot-access-mode)). Settings are `WRITE_*` environment variables, all listed in [`.env.example`](.env.example); they can also go in a `.env.local` file. Both ports are fixed: if the app port or the collaboration port is taken, startup stops with an error instead of moving to another port.
+`bun dev` runs in **Dev mode**: there is no sign-in, and you are `dev@localhost` (or `WRITE_DEV_USER`, or whoever the `write-dev-user` cookie names; the account menu's **Switch user…** sets that cookie, so you can try several users in one browser). `bun run preview` runs in **Access mode** (see [Running the pilot](#running-the-pilot-access-mode)). Settings are `WRITE_*` environment variables, all listed in [`.env.example`](.env.example); they can also go in a `.env.local` file. Both ports are fixed: if the app port or the collaboration port is taken, startup stops with an error instead of moving to another port.
 
-- **Library:** the home page lists your documents and the ones shared with you. Start one from a template (Blank, Feature tour, Meeting notes, Project brief, Journal), then search, sort, switch between grid and list, rename, copy or move to the trash.
-- **Trash:** deleting moves a document to the Trash (with an **Undo** button right after). Restore it from the Trash for 30 days; after that it is deleted forever. You can also delete forever or empty the Trash by hand.
-- **Documents:** each opens at `?doc=<id>`, for its owner and the people it is shared with (editors edit together; viewers read). Rename it in the title field (✍️ goes back to the library), and use **File** for new documents, copies, import, export and moving it to the trash.
+- **Library:** the home page has two sections, **My documents** and **Shared with me** (with each owner's email). Start a document from a template (Blank, Feature tour, Meeting notes, Project brief, Journal), then search and sort (both cover both sections), switch between grid and list, and use each document's ⋮ menu. What the menu offers follows your role: the owner can rename, share, copy and move to the trash; an editor can rename and copy; a viewer can copy. On a document shared with you, **Remove from my list** drops your own share (only the owner can share it with you again).
+- **Sharing:** the owner opens **Share** (in the document header, the **File** menu or the library's ⋮ menu), adds people by email as **Editor** or **Viewer**, changes their role or removes them, and uses **Copy link** to send the address. The link opens only for the people listed: there is no link sharing. People also need access to Write itself (the Access policy), which the admin manages. Up to 50 people per document. Everyone else with access sees the same list, read-only.
+- **Trash:** deleting moves a document to your Trash (with an **Undo** button right after). Only the owner can trash a document, and the Trash shows only your own. Restore it for 30 days; after that it is deleted forever. You can also delete forever or empty the Trash by hand. While a shared document is in the Trash, the people it is shared with can't open it: an open tab says "The owner moved this document to the trash", and access comes back if the owner restores it.
+- **Documents:** each opens at `?doc=<id>`, for its owner and the people it is shared with. Owners and editors edit together; viewers get a **View only** badge and a read-only editor and title, and the **File** menu keeps only what doesn't change the document (copy, export). **View → Read-only** stays available to owners and editors as a view preference. Rename a document in the title field (✍️ goes back to the library), and use **File** for new documents, copies, import, export and moving it to the trash. If the owner changes your role, removes you or trashes the document while you have it open, the page follows within a few seconds.
+- **Presence:** collaborators' carets and avatars are labelled with the part of their email before the `@` (hover for the full email), in a colour derived from the email, so it is the same on every device. Names can't be edited.
+- **Account:** the round button in the header shows the email you're signed in with. In Access mode it has **Sign out**; in Dev mode, **Switch user…**.
+- **Session expiry:** if your Cloudflare Access session expires while a document is open, a banner offers **Sign in again**, which opens a new tab. Keep typing meanwhile: once you have signed in, the tab reconnects and your changes merge. A dropped network connection shows "Offline" instead. If Write can't confirm who you are when a page loads, it shows a sign-in screen.
+- **Local backups:** your own edits are snapshotted to this browser's storage per user and document (`write:backup:<email>:<id>`), and **File → Restore local backup…** brings them back. Viewers take none.
 - **Theme:** use the theme button for System, Light or Dark. The choice is remembered per browser and applied before first paint.
 - **Guided tours:** the library and welcome tours open on your first visit, unless you start typing or clicking first. Replay them, or take the others, from the **?** button or by pressing `?`.
 
@@ -92,7 +97,7 @@ To restore, stop the server, replace `.collab-data/` with a snapshot (or copy si
 
 `server/collab.ts` is a Vite plugin that starts a [Hocuspocus](https://tiptap.dev/docs/hocuspocus) server on `127.0.0.1:1234` (`WRITE_COLLAB_PORT`) alongside the dev and preview servers. Browsers connect to `/collab` on the Vite port, and Vite forwards the WebSocket to it, so only port 5173 needs to be reachable. Documents are stored as Yjs updates in `.collab-data/` (`WRITE_DATA_DIR`), which is gitignored. Pending writes are flushed when the dev server stops.
 
-The editor waits for the first sync before it mounts. A brand-new document created from a template is seeded by writing the template straight into the Yjs document. If the server can't be reached within 4 seconds, the editor opens offline and merges its changes when the connection comes back.
+The editor waits for the first sync before it mounts. A brand-new document created from a template is seeded by writing the template straight into the Yjs document, only by its owner and only while it is empty. If the server can't be reached within 4 seconds, the editor opens offline and merges its changes when the connection comes back.
 
 ## Patched dependency
 
@@ -108,15 +113,18 @@ server/audit.ts           Audit log lines
 tests/                    bun test suites: unit tests and the real server in Dev and Access modes
 src/App.tsx               Router: library or document
 src/pages/Library.tsx     Document library (templates, search, grid and list, actions)
-src/pages/DocumentPage.tsx  Editor page: sync gating, template seeding, view state
-src/api.ts                Library API client
+src/pages/DocumentPage.tsx  Editor page: sync gating, roles, template seeding, view state, lost access
+src/pages/SignIn.tsx      Sign-in, "can't reach the server" and "signed in again" screens
+src/api.ts                Library API client (detects a Session expired)
+src/session.ts            The signed-in user (from /api/me), Session expired state, account actions
+src/identity.ts           Caret label and colour from an email
 src/theme.ts              Theme choice (System, Light, Dark)
 src/editor/templates.ts   New-document templates
 src/editor/extensions.ts  Every extension and its configuration
 src/editor/extensions/    Custom extensions (Callout, Spoiler, Shortcuts, SlashCommand)
 src/editor/blocks.tsx     Block insert actions shared by the slash menu, "+" menu and toolbar
 src/editor/suggestion/    Popup list used by the slash, mention and emoji menus
-src/components/           Toolbar, menus, sidebar (TOC and inspector), header, status bar
+src/components/           Toolbar, menus, sidebar (TOC and inspector), header, status bar, share dialog, account menu
 src/tours.ts              Tutorial overlays (driver.js)
 ```
 

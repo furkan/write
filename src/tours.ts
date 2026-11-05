@@ -25,7 +25,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Your documents 📚',
           description:
-            'This is the library: every shared document on this server. Everything you see here is shared with anyone who can open this page.',
+            'This is your library: the documents you own and the ones other people have shared with you. Nobody else sees your documents unless you share them.',
         },
       },
       {
@@ -48,18 +48,27 @@ export const TOURS: Record<TourId, Tour> = {
       {
         element: '[data-tour="doc-list"]',
         popover: {
-          title: 'Recent documents',
+          title: 'My documents',
           description:
-            'Sorted by last edit, with a live preview of each one. Use the controls above the list to switch between grid and list view, or to sort by title.',
+            'Documents you own, sorted by last edit, with a live preview of each one. Use the controls above to switch between grid and list view, or to sort by title. Search and sort cover both sections.',
+          side: 'top',
+        },
+      },
+      {
+        element: '[data-tour="shared"]',
+        popover: {
+          title: 'Shared with me',
+          description:
+            'Documents other people shared with you, with the owner’s email. As an <b>editor</b> you can edit and rename; as a <b>viewer</b> you can read, copy and export.',
           side: 'top',
         },
       },
       {
         element: '[data-tour="doc-actions"]',
         popover: {
-          title: 'Rename, copy, delete',
+          title: 'Rename, share, copy, delete',
           description:
-            'Each document’s ⋮ menu can rename it (open editors update live), make a copy, open it in a new tab or move it to the trash.',
+            'Each document’s ⋮ menu can rename it (open editors update live), share it, make a copy, open it in a new tab or move it to the trash. On a document shared with you, <b>Remove from my list</b> takes it off your list.',
           side: 'left',
         },
       },
@@ -68,7 +77,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Trash',
           description:
-            'Deleted documents wait here for 30 days. Restore one, or delete it forever. Right after deleting, the <b>Undo</b> button in the message at the bottom brings it back.',
+            'Your deleted documents wait here for 30 days. Restore one, or delete it forever. Right after deleting, the <b>Undo</b> button in the message at the bottom brings it back. While a shared document is in the trash, the people it’s shared with can’t open it.',
           side: 'bottom',
           align: 'end',
         },
@@ -78,6 +87,15 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Theme',
           description: 'Choose light, dark, or follow your system. Your choice is remembered in this browser.',
+          side: 'bottom',
+          align: 'end',
+        },
+      },
+      {
+        element: '[data-tour="account"]',
+        popover: {
+          title: 'Your account',
+          description: 'The email you’re signed in with, and where you sign out.',
           side: 'bottom',
           align: 'end',
         },
@@ -103,6 +121,15 @@ export const TOURS: Record<TourId, Tour> = {
           title: 'Title',
           description:
             'Click to rename the document. The title syncs live to collaborators and to the library. The ✍️ logo takes you back to all documents.',
+          side: 'bottom',
+          align: 'start',
+        },
+      },
+      {
+        element: '[data-tour="view-only"]',
+        popover: {
+          title: 'View only',
+          description: 'This document was shared with you as a viewer: you can read, copy and export it, but not change it.',
           side: 'bottom',
           align: 'start',
         },
@@ -165,6 +192,16 @@ export const TOURS: Record<TourId, Tour> = {
           description:
             'Word and character counts (with a limit), the block your cursor is in, when the local backup was last saved, and the connection status.',
           side: 'top',
+        },
+      },
+      {
+        element: '[data-tour="share"]',
+        popover: {
+          title: 'Share',
+          description:
+            'Invite people by email as editors or viewers, and copy the link to send them. Only the people listed can open it.',
+          side: 'bottom',
+          align: 'end',
         },
       },
       {
@@ -393,16 +430,18 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Who’s here',
           description:
-            'Everyone editing this document right now. Open this page on another device (for example over Tailscale) or in another browser window to watch edits and cursors sync.',
+            'Everyone who has this document open right now, shown by the part of their email before the @. Hover an avatar, or a caret in the text, for the full email.',
           side: 'bottom',
         },
       },
       {
-        element: '[data-tour="user"]',
+        element: '[data-tour="account"]',
         popover: {
-          title: 'Your name and colour',
-          description: 'Click to rename yourself. Other people see your cursor and selection in this colour.',
-          side: 'top',
+          title: 'You',
+          description:
+            'Others see your cursor labelled with the part of your email before the @, in this colour. The colour comes from your email, so it’s the same on every device.',
+          side: 'bottom',
+          align: 'end',
         },
       },
       {
@@ -410,16 +449,16 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Sync status',
           description:
-            'Edits sync through a Hocuspocus server running inside the dev server and are saved to disk. If the connection drops, keep typing: your changes merge when it comes back.',
+            'Edits sync through a Hocuspocus server running inside the app server and are saved to disk. If the connection drops, or your session expires, keep typing: your changes merge when it comes back.',
           side: 'top',
         },
       },
       {
         element: '[data-tour="share"]',
         popover: {
-          title: 'Share the link',
+          title: 'Share it',
           description:
-            'Copy this document’s link and send it to anyone who can reach this server, for example over Tailscale. The library (✍️) lists every document.',
+            'The owner invites people by email as <b>editors</b> or <b>viewers</b>; everyone else sees who has access. <b>Copy link</b> gives you the address to send, which opens only for the people listed.',
           side: 'bottom',
           align: 'end',
         },
