@@ -119,18 +119,25 @@ export function pageGeometry(setup: PageSetup): Omit<PaginationOptions, 'enabled
   }
 }
 
-/** The `@page` rule that makes printed sheets match the page setup. */
-export function pageRule(setup: PageSetup, paged: boolean): string {
+/**
+ * The `@page` rules for printing, in either layout: the browser splits the document into sheets
+ * of the document's paper size, with its margins (Print layout's on-screen pages are never
+ * printed: see pagination.css). Page numbers are a rule of their own, so a browser without
+ * margin boxes (WebKit) drops only that rule and keeps the size and margins; Safari can add its
+ * own numbers ("Print headers and footers"). `--print-content-height` is a sheet's printable
+ * height, for images (layout.css).
+ */
+export function pageRules(setup: PageSetup): string {
   const [width, height] = PAPER_SIZES[setup.size].css
   const size = setup.orientation === 'landscape' ? `${height} ${width}` : `${width} ${height}`
-  // Paged: the editor already draws the margins and page numbers, so the sheet has none.
-  if (paged) return `@page { size: ${size}; margin: 0; }`
-  // Continuous (only when printing from the browser's own menu: Write's Print shows pages first):
-  // the printer splits the document into pages with the document's margins, and numbers them in
-  // the bottom margin like the paged footer does.
+  const [top, , bottom] = MARGIN_PRESETS[setup.margins].margins
   const margin = MARGIN_PRESETS[setup.margins].margins.map((m) => `${m / IN}in`).join(' ')
-  const number = '@bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt system-ui, sans-serif; color: #6b6375; }'
-  return `@page { size: ${size}; margin: ${margin}; ${number} }`
+  const contentHeight = (pageGeometry(setup).pageHeight - top - bottom) / IN
+  return [
+    `@page { size: ${size}; margin: ${margin}; }`,
+    '@page { @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt system-ui, sans-serif; color: #6b6375; } }',
+    `@media print { :root { --print-content-height: ${Math.floor(contentHeight * 1000) / 1000}in; } }`,
+  ].join('\n')
 }
 
 /*
@@ -154,24 +161,12 @@ export function setLayoutMode(mode: LayoutMode) {
 const NARROW_QUERY = 'screen and (max-width: 900px)'
 
 const subscribeNarrow = (onChange: () => void) => {
-  const queries = [window.matchMedia(NARROW_QUERY), window.matchMedia('print')]
-  for (const query of queries) query.addEventListener('change', onChange)
-  return () => queries.forEach((query) => query.removeEventListener('change', onChange))
+  const query = window.matchMedia(NARROW_QUERY)
+  query.addEventListener('change', onChange)
+  return () => query.removeEventListener('change', onChange)
 }
 
-/**
- * Frozen while printing: print media isn't `screen`, so a phone would otherwise turn pages on for
- * the browser's own Print, with no chance to measure them (the extension doesn't measure while
- * printing). The phone prints continuous text instead, with the sheet margins and numbers of
- * `@page`. (Write's own Print turns pages on before it prints.)
- */
-let lastNarrow = typeof window !== 'undefined' && window.matchMedia(NARROW_QUERY).matches
-const narrowSnapshot = () => {
-  if (!window.matchMedia('print').matches) lastNarrow = window.matchMedia(NARROW_QUERY).matches
-  return lastNarrow
-}
-
-export const useNarrowScreen = () => useSyncExternalStore(subscribeNarrow, narrowSnapshot)
+export const useNarrowScreen = () => useSyncExternalStore(subscribeNarrow, () => window.matchMedia(NARROW_QUERY).matches)
 
 /** Whether the document shows as pages: Print layout, on a screen wide enough for a page. */
 export function usePagedView(): boolean {

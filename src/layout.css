@@ -228,15 +228,61 @@
     padding: 0;
   }
 
+  /*
+   * One print path for both layouts: the browser splits the document into sheets with the page
+   * setup's size and margins (@page, see pageRules), so the sheet's margins are the only margins
+   * and Print layout's on-screen pages (pagination.css is screen-only) aren't printed.
+   */
   .editor .tiptap {
     min-height: 0;
+    padding: 0;
     /* Paper is always at 100%, whatever the zoom on screen. */
     zoom: 1 !important;
   }
 
-  /* Web layout: the sheet's margins (from @page) are the only margins. */
-  .editor .tiptap:not(.paginated) {
-    padding: 0;
+  .tiptap > .pagination-pages {
+    display: none !important;
+  }
+
+  /* The text starts at the sheet's top margin. */
+  .tiptap > :first-child,
+  .tiptap > .pagination-pages + * {
+    margin-top: 0;
+  }
+
+  /* What the on-screen pages used to look after: nothing is cut at a sheet's edge. */
+  .tiptap :is(h1, h2, h3, h4, h5, h6) {
+    break-after: avoid;
+  }
+
+  .tiptap tr {
+    break-inside: avoid;
+  }
+
+  .tiptap thead {
+    display: table-header-group;
+  }
+
+  .tiptap .tableWrapper,
+  .tiptap [data-type='block-math'] {
+    overflow: visible;
+  }
+
+  .tiptap pre {
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .tiptap pre code {
+    white-space: inherit;
+  }
+
+  .tiptap :is(img, iframe) {
+    max-width: 100%;
+    max-height: var(--print-content-height, 9in);
+    object-fit: contain;
+    break-inside: avoid;
   }
 
   /* No placeholders, focus dimming or selection on paper. */

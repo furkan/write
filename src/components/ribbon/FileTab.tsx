@@ -93,7 +93,7 @@ async function importMarkdown(editor: Editor, file: File) {
  */
 export function FileTab({ editor, session }: TabProps) {
   const me = useMe()
-  const { role, view, backup, share, print } = useDocumentChrome()
+  const { role, view, backup, share } = useDocumentChrome()
   const writer = canWrite(role)
   const isOwner = role === 'owner'
   const baseName = () => fileSafe(getTitle(session) || 'Untitled document')
@@ -130,7 +130,8 @@ export function FileTab({ editor, session }: TabProps) {
       </RibbonGroup>
 
       <RibbonGroup label="Print" tour="print">
-        <RibbonButton size="large" label="Print / PDF" title="Print or save as PDF" shortcut={`${mod}+P`} icon={Printer} onClick={print} />
+        {/* The browser's dialog, as Ctrl/Cmd+P: the sheets follow the page setup (pageRules). */}
+        <RibbonButton size="large" label="Print / PDF" title="Print or save as PDF" shortcut={`${mod}+P`} icon={Printer} onClick={() => window.print()} />
       </RibbonGroup>
 
       <RibbonGroup label="Share">

@@ -11,7 +11,7 @@ export type ViewOptions = {
 
 /**
  * What the document page gives the ribbon beyond the editor: who you are here, the view, and the
- * page-level actions (share, print, backup). The File and View tabs and the bar's actions use it.
+ * page-level actions (share, backup). The File and View tabs and the bar's actions use it.
  */
 export type DocumentChrome = {
   /** The caller's role; `null` while unknown (opened offline). */
@@ -25,8 +25,6 @@ export type DocumentChrome = {
   backup: () => void
   /** Open the share dialog ("Who has access" for everyone but the owner). */
   share: () => void
-  /** Print or save as PDF, always as pages at 100%. */
-  print: () => void
   /** The zoom shown now, in percent (a fit's result included). */
   zoom: number
 }

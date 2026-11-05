@@ -28,9 +28,8 @@ import { StatusBar } from '../components/StatusBar'
 import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
-import { paginationKey } from '../editor/extensions/pagination/Pagination'
 import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRetrying } from '../editor/hooks'
-import { pageGeometry, pageRule, trackPageSetupUndo, usePagedView, usePageSetup } from '../editor/page-setup'
+import { pageGeometry, pageRules, trackPageSetupUndo, usePagedView, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
 import { setDocumentScroller } from '../editor/scroller'
 import { fitZoom, useZoomSetting, type ZoomFit } from '../editor/zoom'
@@ -311,134 +310,17 @@ function SyncedDocument({ name, templateId, access }: DocumentPageProps & { acce
 }
 
 /**
- * The `@page` rule for printing, kept in a <style> element of its own: the sheet size and
- * margins follow the document's page setup.
+ * The `@page` rules for printing, kept in a <style> element of its own: the sheet size and
+ * margins follow the document's page setup (see pageRules).
  */
-function usePrintPageRule(rule: string) {
+function usePrintPageRules(rules: string) {
   useEffect(() => {
     const style = document.createElement('style')
     style.dataset.pageRule = ''
-    style.textContent = rule
+    style.textContent = rules
     document.head.append(style)
     return () => style.remove()
-  }, [rule])
-}
-
-/** Resolves once the page count has held still for a few frames (fonts loaded, pages measured). */
-async function pagesSettled(editor: Editor) {
-  await document.fonts?.ready
-  let last = -1
-  let stable = 0
-  for (let frame = 0; frame < 120 && stable < 3; frame++) {
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    const count = paginationKey.getState(editor.state)?.pageCount ?? 0
-    stable = count === last ? stable + 1 : 0
-    last = count
-  }
-}
-
-const isPrintKey = (event: KeyboardEvent) =>
-  (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'p'
-
-/** Where you are reading: the document position at the top of the scroller, and how far below its top. */
-type Place = { pos: number; offset: number }
-
-function readingPlace(editor: Editor, view: HTMLElement): Place | null {
-  const box = view.getBoundingClientRect()
-  const page = editor.view.dom.getBoundingClientRect()
-  const x = Math.min(Math.max(page.left + page.width / 2, box.left + 1), box.right - 1)
-  const hit = editor.view.posAtCoords({ left: x, top: Math.max(box.top, page.top) + 1 })
-  return hit ? { pos: hit.pos, offset: editor.view.coordsAtPos(hit.pos).top - box.top } : null
-}
-
-function restorePlace(editor: Editor, view: HTMLElement, place: Place) {
-  if (place.pos > editor.state.doc.content.size) return
-  view.scrollTop += editor.view.coordsAtPos(place.pos).top - view.getBoundingClientRect().top - place.offset
-}
-
-/**
- * Print or save as PDF through the browser's dialog, always as pages at 100%: in Web layout, on a
- * narrow screen or zoomed, the page shows Print layout at 100% while printing (`printing`), and
- * goes back afterwards, to the same place in the document (a document position, since the page
- * heights differ). Ctrl/Cmd+P takes the same path. (The browser's own Print menu item can't be
- * intercepted; it still prints at 100%, and in Web layout with the page numbers of `@page`.)
- *
- * Going back waits for `afterprint`. Where that never comes (print() returned at once, without a
- * dialog), the next click, key, focus or return to the tab does it, and printing again while
- * still in that state opens the dialog again rather than doing nothing.
- */
-function usePrint(editor: Editor, printing: boolean, setPrinting: (printing: boolean) => void, view: HTMLElement | null): () => void {
-  const printingRef = useRef(printing)
-  const place = useRef<Place | null>(null)
-  useEffect(() => {
-    printingRef.current = printing
-  }, [printing])
-
-  const print = useCallback(() => {
-    if (printingRef.current) {
-      window.print()
-      return
-    }
-    place.current = view && readingPlace(editor, view)
-    setPrinting(true)
-  }, [editor, view, setPrinting])
-
-  useEffect(() => {
-    if (!printing) return
-    let cancelled = false
-    const done = () => setPrinting(false)
-    const onKey = (event: KeyboardEvent) => !isPrintKey(event) && done()
-    const onVisible = () => document.visibilityState === 'visible' && done()
-    window.addEventListener('afterprint', done)
-    void pagesSettled(editor).then(() => {
-      if (cancelled) return
-      window.print()
-      window.addEventListener('pointerdown', done, { once: true })
-      window.addEventListener('keydown', onKey)
-      window.addEventListener('focus', done, { once: true })
-      document.addEventListener('visibilitychange', onVisible)
-    })
-    return () => {
-      cancelled = true
-      window.removeEventListener('afterprint', done)
-      window.removeEventListener('pointerdown', done)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('focus', done)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [printing, editor, setPrinting])
-
-  // Back from printing: once the view has its own layout and zoom again, scroll back to the place.
-  const wasPrinting = useRef(false)
-  useEffect(() => {
-    if (printing) {
-      wasPrinting.current = true
-      return
-    }
-    if (!wasPrinting.current) return
-    wasPrinting.current = false
-    const saved = place.current
-    place.current = null
-    if (!saved || !view) return
-    // Two frames: the layout switches back first, then the pagination measures.
-    const frames = { id: 0 }
-    frames.id = requestAnimationFrame(() => {
-      frames.id = requestAnimationFrame(() => restorePlace(editor, view, saved))
-    })
-    return () => cancelAnimationFrame(frames.id)
-  }, [printing, editor, view])
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!isPrintKey(event)) return
-      event.preventDefault()
-      print()
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [print])
-
-  return print
+  }, [rules])
 }
 
 /**
@@ -587,15 +469,13 @@ function Workspace({ session, template, role }: WorkspaceProps) {
 
   const editorRef = useRef<Editor | null>(null)
   const getEditor = useCallback(() => editorRef.current, [])
-  // Set while printing (see usePrint): pages at 100%, whatever the view.
-  const [printing, setPrinting] = useState(false)
 
   // Print layout shows pages; Web layout, or a screen too narrow for a page, one continuous page.
-  // Printing always shows pages.
+  // Printing doesn't use either: the browser paginates with the page setup (see pageRules).
   const pageSetup = usePageSetup(session)
-  const paged = usePagedView() || printing
+  const paged = usePagedView()
   const pagination = useMemo(() => ({ enabled: paged, ...pageGeometry(pageSetup) }), [paged, pageSetup])
-  usePrintPageRule(pageRule(pageSetup, paged))
+  usePrintPageRules(pageRules(pageSetup))
 
   const backupTimer = useRef<number | undefined>(undefined)
 
@@ -782,17 +662,16 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   const [sharing, setSharing] = useState(false)
 
   const mainRef = useRef<HTMLElement>(null)
-  // The document's scroller, as state: the menus, printing and the zoom need it once it exists.
+  // The document's scroller, as state: the menus and the zoom need it once it exists.
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   useDocumentScroller(scroller)
   useKeyboardHeight()
-  const print = usePrint(editor, printing, setPrinting, scroller)
 
-  // Zoom: a percentage, or a fit in Print layout. Printing is always at 100%.
+  // Zoom: a percentage, or a fit in Print layout. Printing is always at 100% (print CSS).
   const zoomSetting = useZoomSetting()
-  const fit = paged && !printing ? zoomSetting.fit : null
+  const fit = paged ? zoomSetting.fit : null
   const fitted = useFitZoom(fit, pagination.pageWidth, pagination.pageHeight, mainRef, scroller)
-  const zoom = printing ? 100 : fit ? (fitted ?? 100) : zoomSetting.percent
+  const zoom = fit ? (fitted ?? 100) : zoomSetting.percent
   useZoomAnchor(zoom, editor, scroller)
   // Room for the sidebar beside the page at 100%. Zoomed in further, the page scrolls sideways in
   // the document area instead (like a landscape page wider than the window): the contents stay.
@@ -807,10 +686,9 @@ function Workspace({ session, template, role }: WorkspaceProps) {
       setView: (next) => setView((prev) => ({ ...prev, ...next })),
       backup: () => backup(editor),
       share: () => setSharing(true),
-      print,
       zoom,
     }),
-    [role, view, readOnly, canToggleReadOnly, backup, editor, print, zoom],
+    [role, view, readOnly, canToggleReadOnly, backup, editor, zoom],
   )
 
   const style = {
