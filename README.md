@@ -24,6 +24,7 @@ Open the URL Vite prints. The server listens on every interface, so other device
 - **Session expiry:** if your Cloudflare Access session expires while a document is open, a banner offers **Sign in again**, which opens a new tab. Keep typing meanwhile: once you have signed in, the tab reconnects and your changes merge. A dropped network connection shows "Offline" instead. If Cloudflare Access can't check who you are for a while (its signing keys are unavailable), the status bar says it is retrying, and the tab reconnects by itself, waiting longer each time (up to 30 seconds). If Write can't confirm who you are when a page loads, it shows a sign-in screen. If the browser is now signed in as someone else (another account in the new tab, or **Switch user…** in another tab), an open tab stops syncing rather than carry on as that person, and offers to reload as them or to sign back in (in Dev mode, switch back).
 - **Local backups:** your own edits are snapshotted to this browser's storage per user and document (`write:backup:<email>:<id>`), and **File → Restore local backup…** brings them back. Only your own changes are backed up: opening a document, or edits arriving from collaborators, never replace your backup. Viewers take none. A backup made before documents had owners (`write:backup:<id>`) is copied to the owner's key when the owner opens the document, unless they already have a newer one; collaborators never get it.
 - **Ribbon:** formatting lives in a Word-style ribbon. The arrow at its right collapses it to the tab row (remembered per browser); a tab then opens over the document. On a narrow screen, or whenever a tab's groups don't fit, the ribbon scrolls sideways.
+- **Print layout:** documents show as pages, like Word: a page number in each footer, and **View → Print layout / Web layout** to switch to one continuous page. That choice is yours, remembered per browser; below 900 px wide the document is always continuous. The page size (A4, Letter, Legal, A5), orientation and margins (Normal, Narrow, Wide) belong to the document: owners and editors change them in the **View** menu and everyone sees the change. New documents are A4 portrait with normal margins. Printing gives one sheet per page, on white paper in either theme, without the app around it.
 - **Theme:** use the theme button for System, Light or Dark. The choice is remembered per browser and applied before first paint.
 - **Guided tours:** the library and welcome tours open on your first visit, unless you start typing or clicking first. Replay them, or take the others, from the **?** button or by pressing `?`.
 
@@ -35,7 +36,7 @@ Open the URL Vite prints. The server listens on every interface, so other device
 | Small additions | Placeholder, character and word count (soft 50k limit shown in the status bar), Focus, text align, multi-colour highlight, text colour, font family and size (`TextStyleKit`), sub/superscript, Typography, task lists, resizable images, tables, details (toggle sections), YouTube, emoji, invisible characters, UniqueID |
 | UI | Word-style ribbon (quick access undo and redo; Home and Insert tabs; contextual Table and Code tabs; collapsible; `lucide-react` icons), bubble menu, floating "+" menu, slash commands, `@` mentions, `:` emoji picker, drag handle, syntax-highlighted code blocks (lowlight), file drop and paste for images, table of contents |
 | Content and API | Markdown import and export, HTML and JSON export, read-only mode, a local backup driven by `onUpdate` |
-| Custom extensions | `Callout` (node with a React node view and an input rule), `Spoiler` (mark with input and paste rules and Markdown support), `Shortcuts` (commands, keyboard shortcuts, `!today` and `!shrug`), `SlashCommand` |
+| Custom extensions | `Callout` (node with a React node view and an input rule), `Spoiler` (mark with input and paste rules and Markdown support), `Shortcuts` (commands, keyboard shortcuts, `!today` and `!shrug`), `SlashCommand`, `Pagination` (pages from decorations, trimmed from [tiptap-pagination-plus](https://github.com/RomikMakavana/tiptap-pagination-plus), MIT) |
 | Bigger lifts | Collaboration (Yjs and Hocuspocus) with live carets and presence, math (KaTeX) |
 
 ## Document library
@@ -65,7 +66,7 @@ Every `/api/*` request needs an identity (401 without one; 503 when Access's sig
 
 **The collaboration socket** opens only documents in the index, for users with a role: a `?doc=` name nobody created is refused rather than created. A viewer's connection is read-only, enforced by the server, which drops their updates. Whenever access to a document changes (share, unshare, role change, trash, restore, delete forever), the server closes every socket on that document; clients reconnect, are authorized again with their new role, and Yjs merges anything they had not synced. Each client then announces its presence again, so carets and avatars come back without anyone moving. A presence ID belongs to the user who first sent it, while they are connected and for a minute after, so nobody else can take it over while its owner reconnects.
 
-Titles live in the shared Yjs document (`meta.title`) and sync live. Each time the server persists a document, it also updates `index.json` in the data dir with the title, preview text and edit time. `index.json` (version 2) also holds each document's `owner` and `shares`, and the tombstones with their former owner. Trashed documents keep their file until they are deleted forever; the server checks hourly for ones older than 30 days.
+Titles live in the shared Yjs document (`meta.title`) and sync live, like the page setup (`meta.pageSize`, `meta.pageOrientation`, `meta.pageMargins`; missing means A4, portrait, normal). Each time the server persists a document, it also updates `index.json` in the data dir with the title, preview text and edit time. `index.json` (version 2) also holds each document's `owner` and `shares`, and the tombstones with their former owner. Trashed documents keep their file until they are deleted forever; the server checks hourly for ones older than 30 days.
 
 ### Upgrading a Dev server from before per-user access
 
@@ -212,7 +213,8 @@ src/identity.ts           Caret label and colour from an email
 src/theme.ts              Theme choice (System, Light, Dark)
 src/editor/templates.ts   New-document templates
 src/editor/extensions.ts  Every extension and its configuration
-src/editor/extensions/    Custom extensions (Callout, Spoiler, Shortcuts, SlashCommand)
+src/editor/extensions/    Custom extensions (Callout, Spoiler, Shortcuts, SlashCommand, Pagination)
+src/editor/page-setup.ts  Page setup (in the shared document) and Print or Web layout (per browser)
 src/editor/blocks.tsx     Block insert actions shared by the slash menu, "+" menu and ribbon
 src/editor/suggestion/    Popup list used by the slash, mention and emoji menus
 src/components/           Menus, sidebar (table of contents), header, status bar, share dialog, account menu
