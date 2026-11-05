@@ -1,5 +1,5 @@
 import { Database } from '@hocuspocus/extension-database'
-import { Server, type Connection } from '@hocuspocus/server'
+import { Server, type Connection, type Document } from '@hocuspocus/server'
 import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -29,6 +29,7 @@ import {
   shareOf,
   statusFor,
   type Role,
+  type ShareRole,
   type Shares,
 } from './roles.ts'
 
@@ -267,6 +268,24 @@ const isTrashed = (id: string) => entryOf(id)?.trashedAt !== undefined
 const roleFor = (id: string, user: User) => roleOf(entryOf(id), user.email)
 
 /**
+ * Changes a document's index entry in one synchronous step that reads the entry at write time,
+ * so no handler ever writes back a copy taken before an `await` (a request body, the disk) over
+ * a change made meanwhile: a share, a trash, a purge. Changes nothing and returns undefined when
+ * the document is gone, or is not in the state the change applies to.
+ */
+function updateEntry(
+  id: string,
+  state: 'open' | 'trashed' | 'any',
+  change: (entry: IndexEntry) => IndexEntry,
+): IndexEntry | undefined {
+  const entry = entryOf(id)
+  if (!entry) return undefined
+  const trashed = entry.trashedAt !== undefined
+  if ((state === 'open' && trashed) || (state === 'trashed' && !trashed)) return undefined
+  return (docs[id] = change(entry))
+}
+
+/**
  * Plain text of a Yjs document's editor content. Walks the Yjs tree rather than parsing
  * `toString()`, which neither escapes text nor keeps words together across marks.
  */
@@ -298,37 +317,35 @@ const getTitle = (doc: Y.Doc) => {
 
 /** Refreshes an indexed document's title, preview and edit time. Never creates an entry. */
 function updateIndexFromDoc(id: string, doc: Y.Doc) {
-  const existing = entryOf(id)
-  if (!existing) return
   const text = extractText(doc)
-  // Spread the existing entry so other fields (owner, shares, trashedAt) survive.
-  docs[id] = {
-    ...existing,
+  // Spread the entry so other fields (owner, shares, trashedAt) survive.
+  return updateEntry(id, 'any', (entry) => ({
+    ...entry,
     title: getTitle(doc),
     preview: text.slice(0, 400),
     words: text ? text.split(' ').length : 0,
     updatedAt: Date.now(),
-  }
+  }))
 }
 
 /** Adds a new document to the index, owned by `owner`, with no shares. */
-function addEntry(id: string, owner: string, doc: Y.Doc) {
+function addEntry(id: string, owner: string, doc: Y.Doc): IndexEntry {
   const now = Date.now()
   docs[id] = { title: '', preview: '', words: 0, createdAt: now, updatedAt: now, owner, shares: {} }
-  updateIndexFromDoc(id, doc)
+  return updateIndexFromDoc(id, doc) ?? docs[id]
 }
 
 /**
  * A document as someone with `role` sees it. Shares are listed for the owner, or for anyone
  * when `withShares` is set (`GET /:id`: everyone with access sees who has access).
  */
-function toMeta(id: string, role: Role, { withShares = false } = {}): DocMeta {
-  const { shares, ...entry } = docs[id]
-  return { id, ...entry, role, ...(withShares || role === 'owner' ? { shares: { ...shares } } : {}) }
+function toMeta(id: string, entry: IndexEntry, role: Role, { withShares = false } = {}): DocMeta {
+  const { shares, ...rest } = entry
+  return { id, ...rest, role, ...(withShares || role === 'owner' ? { shares: { ...shares } } : {}) }
 }
 
 const toTrashed = (id: string) => {
-  const meta = toMeta(id, 'owner')
+  const meta = toMeta(id, docs[id], 'owner')
   return { ...meta, purgeAt: (meta.trashedAt ?? 0) + TRASH_RETENTION_MS }
 }
 
@@ -337,13 +354,15 @@ const newId = () => randomBytes(9).toString('base64url')
 // ---------- Collaboration server ----------
 
 /** What Hocuspocus hooks see as `context` once a connection is authenticated. */
-export type CollabContext = { user: User; role: Role }
+type CollabContext = { user: User; role: Role }
 
-/** The running collaboration server and the configuration it was started with. */
+/** A running collaboration server and the configuration it was started with. */
 type Runtime = {
   server: Server<CollabContext>
   config: WriteConfig
   authenticator: Authenticator
+  /** The hourly Trash expiry and backup timer. */
+  maintenance: ReturnType<typeof setInterval>
 }
 
 /**
@@ -388,6 +407,23 @@ function listen(server: Server<CollabContext>, port: number) {
   })
 }
 
+/**
+ * Presence (awareness) states belong to the connection that first sent them. Hocuspocus applies
+ * awareness for any Yjs client ID, and a read-only connection's too, so without this anyone on a
+ * document could rewrite or remove someone else's caret and name. Keyed by document, then client ID.
+ */
+const awarenessOwners = new WeakMap<Document, Map<number, Connection>>()
+
+function mayUpdatePresence(document: Document, connection: Connection, clientId: number) {
+  let owners = awarenessOwners.get(document)
+  if (!owners) awarenessOwners.set(document, (owners = new Map()))
+  const owner = owners.get(clientId)
+  // A closed connection's states are removed with it, so its IDs are free again.
+  if (owner && owner !== connection && document.hasConnection(owner)) return false
+  owners.set(clientId, connection)
+  return true
+}
+
 async function startRuntime(config: WriteConfig): Promise<Runtime> {
   indexState.dirs = { data: config.dataDir, backups: config.backupDir }
   await mkdir(config.dataDir, { recursive: true })
@@ -397,7 +433,7 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
     port: config.collabPort,
     address: '127.0.0.1',
     quiet: true,
-    // Vite owns the process signals; we flush pending stores when its server closes.
+    // Vite owns the process signals; the server is stopped when Vite's server closes.
     stopOnSignals: false,
     // Persist quickly so little is lost if the dev server is stopped abruptly.
     debounce: 500,
@@ -425,10 +461,26 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
       if (role === 'viewer') connectionConfig.readOnly = true
       return { user: identity.user, role } satisfies CollabContext
     },
-    // Access may have changed while this connection was being set up (after onAuthenticate,
-    // before it was registered, so `closeConnections` missed it): check once more.
+    // `closeConnections` only reaches connections already registered on the document. One that
+    // was still loading the document when access changed is caught here, before any of its
+    // messages (including those queued while it authenticated) is applied, ...
+    async beforeHandleMessage({ documentName, context, connection }) {
+      if (roleFor(documentName, context.user) === context.role) return
+      resetConnection(connection)
+      throw new CollabRejection('permission-denied')
+    },
+    // ... and here, if it sent nothing before it was registered: then it would still receive updates.
     async connected({ documentName, context, connection }) {
       if (roleFor(documentName, context.user) !== context.role) resetConnection(connection)
+    },
+    async beforeHandleAwareness({ document, connection, states, removedClients }) {
+      if (!connection) return
+      for (const clientId of [...states.keys()]) {
+        if (!mayUpdatePresence(document, connection, clientId)) states.delete(clientId)
+      }
+      for (const clientId of [...removedClients]) {
+        if (!mayUpdatePresence(document, connection, clientId)) removedClients.delete(clientId)
+      }
     },
     extensions: [
       new Database({
@@ -449,35 +501,77 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
     ],
   })
   await listen(server, config.collabPort)
-  startMaintenance(server)
-  return { server, config, authenticator }
+  const maintenance = startMaintenance(server)
+  console.log(describeConfig(config))
+  return { server, config, authenticator, maintenance }
 }
 
-// Vite re-imports the config (and this module) when it restarts, so keep the
-// running server on globalThis to avoid binding the port twice.
-const globalKey = Symbol.for('write.collabServer.v2')
-type GlobalWithServer = typeof globalThis & {
-  [globalKey]?: { configJson: string; runtime: Promise<Runtime> }
-}
-
-function ensureRuntime(config: WriteConfig): Promise<Runtime> {
-  const g = globalThis as GlobalWithServer
-  const configJson = JSON.stringify(config)
-  const running = g[globalKey]
-  if (running) {
-    // The running server keeps its data dir, ports and auth settings until the process restarts.
-    if (running.configJson !== configJson) {
-      console.warn('[write] WRITE_* settings changed; restart the server to apply them.')
-    }
-    return running.runtime
+/**
+ * Stops a collaboration server and frees its port: open documents are stored and unloaded
+ * (clients reconnect to the next server), the index is written, and the in-memory index is
+ * forgotten so the next server reads it afresh from its own data dir.
+ */
+async function stopRuntime({ server, maintenance }: Runtime) {
+  clearInterval(maintenance)
+  // destroy() closes every connection, stores and unloads every document, and closes the port.
+  // A document held open by a request in progress could keep it waiting, so don't wait forever.
+  // (The port itself is closed at once.)
+  await Promise.race([server.destroy(), new Promise((done) => setTimeout(done, 5000).unref())])
+  try {
+    await saveIndex()
+  } catch (error) {
+    console.error('[write] writing the document index failed:', error)
   }
-  const runtime = startRuntime(config)
-  g[globalKey] = { configJson, runtime }
-  // Let a later restart retry if startup failed (e.g. the port was busy).
-  runtime.catch(() => {
-    delete g[globalKey]
-  })
-  return runtime
+  for (const id of Object.keys(docs)) delete docs[id]
+  deleted.clear()
+  indexState.loaded = false
+}
+
+/**
+ * One Vite server's collaboration server. Vite restarts in-process when `vite.config.ts`, a
+ * file it imports (like this one) or an `.env` file changes: it creates the new server, with a
+ * fresh copy of this module and of the configuration, before it closes the old one. So each
+ * Vite server gets its own instance, which starts only once the previous one has stopped and
+ * released the collaboration port, and which stops when its Vite server closes.
+ */
+type Instance = {
+  runtime: Promise<Runtime>
+  /** Set once `stopped` has resolved. */
+  isStopped: boolean
+  /** Resolves once this instance's server has stopped (or never started). */
+  stopped: Promise<void>
+  stop: () => Promise<void>
+}
+
+const globalKey = Symbol.for('write.collabServer.v3')
+const processState = globalThis as typeof globalThis & { [globalKey]?: Instance }
+
+function createInstance(config: WriteConfig): Instance {
+  const previous = processState[globalKey]
+  const runtime = (previous ? previous.stopped : Promise.resolve()).then(() => startRuntime(config))
+  let resolveStopped = () => {}
+  const stopped = new Promise<void>((done) => (resolveStopped = done))
+  const markStopped = () => {
+    instance.isStopped = true
+    resolveStopped()
+  }
+  let stopping: Promise<void> | undefined
+  const instance: Instance = {
+    runtime,
+    isStopped: false,
+    stopped,
+    stop: () =>
+      (stopping ??= runtime
+        .then(stopRuntime, () => undefined)
+        .finally(() => {
+          if (processState[globalKey] === instance) delete processState[globalKey]
+          markStopped()
+        })),
+  }
+  // A server that failed to start holds no port: the next one may start right away.
+  runtime.catch(() => markStopped())
+  processState[globalKey] = instance
+  return instance
 }
 
 // ---------- Trash ----------
@@ -514,22 +608,30 @@ function resetConnection(connection: Connection) {
   connection.webSocket.close(RESET_CONNECTION, 'Reset Connection')
 }
 
-/** Moves an open document to the Trash. Its shares stay, inactive, until it is restored. */
-async function moveToTrash(server: Server, id: string, actor: string) {
-  const entry = entryOf(id)
-  if (!entry || entry.trashedAt !== undefined) return
-  docs[id] = { ...entry, trashedAt: Date.now() }
-  await saveIndex()
+/**
+ * Moves an open document to the Trash; its shares stay, inactive, until it is restored. Changes
+ * the index in memory (the caller saves it) and returns the entry, or undefined if it wasn't open.
+ */
+function moveToTrash(server: Server, id: string, actor: string) {
+  const entry = updateEntry(id, 'open', (current) => ({ ...current, trashedAt: Date.now() }))
+  if (!entry) return undefined
   // Open tabs reconnect, are refused, and show a "moved to the trash" banner.
   closeConnections(server, id)
   audit('trash', { actor, doc: id, shares: Object.keys(entry.shares).length })
+  return entry
 }
 
-async function restoreFromTrash(server: Server, id: string, actor: string) {
-  docs[id] = { ...docs[id], trashedAt: undefined }
-  await saveIndex()
+/** Restores a trashed document and its shares, like `moveToTrash` (the caller saves the index). */
+function restoreFromTrash(server: Server, id: string, actor: string) {
+  const entry = updateEntry(id, 'trashed', (current) => {
+    const restored = { ...current }
+    delete restored.trashedAt
+    return restored
+  })
+  if (!entry) return undefined
   closeConnections(server, id)
-  audit('restore', { actor, doc: id, shares: Object.keys(docs[id].shares).length })
+  audit('restore', { actor, doc: id, shares: Object.keys(entry.shares).length })
+  return entry
 }
 
 /**
@@ -548,8 +650,8 @@ async function purge(server: Server, ids: string[], actor: string) {
     deleted.set(id, entry.owner)
     delete docs[id]
   }
-  await saveIndex()
   for (const id of purged) closeConnections(server, id)
+  await saveIndex()
   await Promise.all(purged.map((id) => rm(fileFor(id), { force: true })))
   for (const { id, entry } of removed) {
     audit('purge', { actor, doc: id, owner: entry.owner, shares: Object.keys(entry.shares).length })
@@ -634,16 +736,42 @@ function startMaintenance(server: Server) {
     }
   }
   void run()
-  setInterval(() => void run(), HOUR).unref()
+  return setInterval(() => void run(), HOUR).unref()
 }
 
 // ---------- REST API ----------
 
+/** Request bodies are small JSON objects: a title, a role, a list of IDs. */
+const MAX_BODY_BYTES = 64 * 1024
+
+/** An error with the response it should become. */
+class HttpError {
+  readonly status: number
+  readonly error: string
+  constructor(status: number, error: string) {
+    this.status = status
+    this.error = error
+  }
+}
+
+/** Reads a JSON object body, up to `MAX_BODY_BYTES` (413 beyond; 400 if it isn't JSON). */
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const tooLarge = new HttpError(413, 'request body too large')
+  if (Number(req.headers['content-length']) > MAX_BODY_BYTES) throw tooLarge
   const chunks: Buffer[] = []
-  for await (const chunk of req) chunks.push(chunk as Buffer)
+  let size = 0
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length
+    if (size > MAX_BODY_BYTES) throw tooLarge
+    chunks.push(chunk)
+  }
   if (!chunks.length) return {}
-  const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
+    throw new HttpError(400, 'bad request')
+  }
   return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
 }
 
@@ -656,35 +784,33 @@ function send(res: ServerResponse, status: number, body?: unknown) {
 
 const cleanTitle = (value: unknown) => (typeof value === 'string' ? value.trim().slice(0, 200) : '')
 
-/** Sets the title inside the live Yjs document, so open editors update immediately. */
-async function setTitle(server: Server, id: string, title: string) {
-  const connection = await server.hocuspocus.openDirectConnection(id)
-  try {
-    await connection.transact((doc) => doc.getMap('meta').set('title', title))
-  } finally {
-    await connection.disconnect()
-  }
-}
-
 // ---------- Identity ----------
 
-/** The user of each `/api/*` request, set by `identify()` before any handler runs. */
-const requestUsers = new WeakMap<IncomingMessage, User>()
+/** The collaboration server and the caller of each `/api/*` request, set by `identify()`. */
+type RequestContext = { runtime: Runtime; user: User }
+const requests = new WeakMap<IncomingMessage, RequestContext>()
 
 /**
  * Runs first for every `/api/*` request: the Origin check for anything but GET and HEAD,
  * then the caller's identity. Without one the request ends here with 401 (or 403 for a
- * foreign origin or a token without an email).
+ * foreign origin or a token without an email, 503 when it can't be checked).
  */
 const identify =
-  ({ authenticator, config }: Runtime): Connect.NextHandleFunction =>
+  (instance: Instance): Connect.NextHandleFunction =>
   async (req, res, next) => {
+    let runtime: Runtime
+    try {
+      // Only waits while the server (re)starts.
+      runtime = await instance.runtime
+    } catch {
+      return send(res, 503, { error: 'unavailable' })
+    }
     const header = nodeHeaders(req.headers)
     let identity: Identity
     try {
-      identity = await identifyRequest(authenticator, header, {
+      identity = await identifyRequest(runtime.authenticator, header, {
         checkOrigin: req.method !== 'GET' && req.method !== 'HEAD',
-        allowedOrigins: config.allowedOrigins,
+        allowedOrigins: runtime.config.allowedOrigins,
       })
     } catch (error) {
       console.error('[write] identifying a request failed:', error)
@@ -700,19 +826,17 @@ const identify =
       const error = { 401: 'unauthenticated', 403: 'forbidden', 503: 'unavailable' }[identity.status]
       return send(res, identity.status, { error })
     }
-    requestUsers.set(req, identity.user)
+    requests.set(req, { runtime, user: identity.user })
     next()
   }
 
 /** `GET /api/me`: who the server thinks the caller is. */
-const meApi =
-  ({ config }: Runtime): Connect.NextHandleFunction =>
-  (req, res, next) => {
-    if (req.method !== 'GET' || new URL(req.url ?? '/', 'http://localhost').pathname !== '/') return next()
-    const user = requestUsers.get(req)
-    if (!user) return send(res, 401, { error: 'unauthenticated' })
-    return send(res, 200, { email: user.email, mode: config.auth.mode })
-  }
+const meApi: Connect.NextHandleFunction = (req, res, next) => {
+  if (req.method !== 'GET' || new URL(req.url ?? '/', 'http://localhost').pathname !== '/') return next()
+  const context = requests.get(req)
+  if (!context) return send(res, 401, { error: 'unauthenticated' })
+  return send(res, 200, { email: context.user.email, mode: context.runtime.config.auth.mode })
+}
 
 // ---------- REST API handlers ----------
 
@@ -720,29 +844,46 @@ type Handler = (
   req: IncomingMessage,
   res: ServerResponse,
   next: () => void,
-  route: { id?: string; action?: string; sub?: string; server: Server<CollabContext>; user: User },
+  route: {
+    id?: string
+    action?: string
+    sub?: string
+    /** The JSON body, already read (`{}` for GET and HEAD). */
+    body: Record<string, unknown>
+    server: Server<CollabContext>
+    user: User
+  },
 ) => Promise<void>
 
 /**
- * Parses `/:id/:action/:sub`, passes the caller (`user`) and handles errors. A malformed escape
- * (e.g. %E0) must not crash the server.
+ * Parses `/:id/:action/:sub`, reads the body and handles errors. The body is read **before**
+ * the handler runs, so a handler resolves the caller's role and acts on it with nothing awaited
+ * in between: a client can't send the headers, wait for its access to change, then the body.
  */
-function route({ server }: Runtime, handler: Handler): Connect.NextHandleFunction {
+function route(handler: Handler): Connect.NextHandleFunction {
   return async (req, res, next) => {
     // `identify()` runs first, so this only fails if the middleware order is broken.
-    const user = requestUsers.get(req)
-    if (!user) return send(res, 401, { error: 'unauthenticated' })
+    const context = requests.get(req)
+    if (!context) return send(res, 401, { error: 'unauthenticated' })
     try {
       const url = new URL(req.url ?? '/', 'http://localhost')
       const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
       // Longer paths are nobody's route.
       if (segments.length > 3) return next()
       const [id, action, sub] = segments
-      await handler(req, res, next, { id, action, sub, server, user })
+      const body = req.method === 'GET' || req.method === 'HEAD' ? {} : await readJson(req)
+      await handler(req, res, next, { id, action, sub, body, server: context.runtime.server, user: context.user })
     } catch (error) {
-      // Malformed escapes in the URL or malformed JSON bodies.
-      if (error instanceof URIError || error instanceof SyntaxError) return send(res, 400, { error: 'bad request' })
-      return send(res, 500, { error: error instanceof Error ? error.message : 'error' })
+      // A malformed escape in the URL (e.g. %E0) must not crash the server.
+      if (error instanceof URIError) return send(res, 400, { error: 'bad request' })
+      if (error instanceof HttpError) {
+        // The rest of an oversized body is never read; don't reuse the connection.
+        if (error.status === 413) res.setHeader('Connection', 'close')
+        return send(res, error.status, { error: error.error })
+      }
+      // Details (paths, internals) go to the log, not to the client.
+      console.error(`[write] ${req.method} ${req.originalUrl ?? req.url} failed:`, error)
+      return send(res, 500, { error: 'error' })
     }
   }
 }
@@ -754,220 +895,257 @@ const notFound = (res: ServerResponse) => send(res, 404, { error: 'not found' })
 const forbidden = (res: ServerResponse) => send(res, 403, { error: 'forbidden' })
 
 /** `/api/trash`: the caller's own Trash. List, restore, delete forever, empty. */
-const trashApi = (runtime: Runtime) =>
-  route(runtime, async (req, res, next, { id, action, sub, server, user }) => {
-    if (sub) return next()
-    if (!id && req.method === 'GET') {
-      const list = trashedIds()
-        .filter((docId) => isOwnTrashed(docId, user))
-        .map(toTrashed)
-        .sort((a, b) => (b.trashedAt ?? 0) - (a.trashedAt ?? 0))
-      return send(res, 200, { docs: list, retentionDays: TRASH_RETENTION_MS / DAY })
+const trashApi = route(async (req, res, next, { id, action, sub, body, server, user }) => {
+  if (sub) return next()
+  if (!id && req.method === 'GET') {
+    const list = trashedIds()
+      .filter((docId) => isOwnTrashed(docId, user))
+      .map(toTrashed)
+      .sort((a, b) => (b.trashedAt ?? 0) - (a.trashedAt ?? 0))
+    return send(res, 200, { docs: list, retentionDays: TRASH_RETENTION_MS / DAY })
+  }
+
+  // Empties the Trash as the caller saw it: only the IDs listed, so documents trashed in the
+  // meantime are not deleted unseen. IDs that aren't the caller's own trashed documents are skipped.
+  if (!id && req.method === 'DELETE') {
+    const { ids } = body
+    if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) {
+      return send(res, 400, { error: 'expected { ids: string[] }' })
     }
+    const purged = await purge(
+      server,
+      ids.filter((docId) => isOwnTrashed(docId, user)),
+      user.email,
+    )
+    return send(res, 200, { purged: purged.length })
+  }
 
-    // Empties the Trash as the caller saw it: only the IDs listed, so documents trashed in the
-    // meantime are not deleted unseen. IDs that aren't the caller's own trashed documents are skipped.
-    if (!id && req.method === 'DELETE') {
-      const { ids } = await readJson(req)
-      if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) {
-        return send(res, 400, { error: 'expected { ids: string[] }' })
-      }
-      const purged = await purge(
-        server,
-        ids.filter((docId) => isOwnTrashed(docId, user)),
-        user.email,
-      )
-      return send(res, 200, { purged: purged.length })
-    }
+  if (!id) return next()
+  // Only the owner's documents in the Trash can be restored or deleted forever.
+  if (!isOwnTrashed(id, user)) return notFound(res)
 
-    if (!id) return next()
-    // Only the owner's documents in the Trash can be restored or deleted forever.
-    if (!isOwnTrashed(id, user)) return notFound(res)
+  if (action === 'restore' && req.method === 'POST') {
+    const entry = restoreFromTrash(server, id, user.email)
+    if (!entry) return notFound(res)
+    await saveIndex()
+    return send(res, 200, toMeta(id, entry, 'owner'))
+  }
 
-    if (action === 'restore' && !sub && req.method === 'POST') {
-      await restoreFromTrash(server, id, user.email)
-      return send(res, 200, toMeta(id, 'owner'))
-    }
+  if (!action && req.method === 'DELETE') {
+    await purge(server, [id], user.email)
+    return send(res, 204)
+  }
 
-    if (!action && req.method === 'DELETE') {
-      await purge(server, [id], user.email)
-      return send(res, 204)
-    }
+  return next()
+})
 
-    return next()
-  })
-
-/** `PUT|DELETE /api/docs/:id/shares/:email`. The caller's role on `id` is `role` (never null). */
+/**
+ * `PUT|DELETE /api/docs/:id/shares/:email`. `role` is the caller's role on `id`, resolved in the
+ * same synchronous step as the change.
+ */
 async function sharesRoute(
   req: IncomingMessage,
   res: ServerResponse,
-  { id, target, role, server, user }: { id: string; target: string; role: Role; server: Server; user: User },
+  {
+    id,
+    target,
+    role,
+    body,
+    server,
+    user,
+  }: { id: string; target: string; role: Role; body: Record<string, unknown>; server: Server; user: User },
 ) {
   const email = normalizeEmail(target)
-  const entry = docs[id]
 
   // Shares change only through the owner, except that a collaborator may remove their own
   // ("Remove from my list").
   if (req.method === 'DELETE') {
     if (role !== 'owner' && email !== user.email) return forbidden(res)
-    if (shareOf(entry, email)) {
-      const { [email]: removed, ...rest } = entry.shares
-      docs[id] = { ...entry, shares: rest }
-      await saveIndex()
+    let removed: ShareRole | null = null
+    updateEntry(id, 'open', (entry) => {
+      removed = shareOf(entry, email)
+      if (!removed) return entry
+      const { [email]: _, ...shares } = entry.shares
+      return { ...entry, shares }
+    })
+    if (removed) {
       closeConnections(server, id)
       audit('unshare', { actor: user.email, doc: id, email, role: removed, self: email === user.email })
+      await saveIndex()
     }
     return send(res, 204)
   }
 
   if (req.method !== 'PUT') return send(res, 405, { error: 'method not allowed' })
   if (role !== 'owner') return forbidden(res)
-  const body = await readJson(req)
-  if (!isShareRole(body.role)) return send(res, 400, { error: 'role must be "editor" or "viewer"' })
+  const next = body.role
+  if (!isShareRole(next)) return send(res, 400, { error: 'role must be "editor" or "viewer"' })
   if (!isValidEmail(email)) return send(res, 400, { error: 'invalid email' })
+  const current = docs[id]
   // The caller is the owner, so this also covers sharing with yourself.
-  if (email === entry.owner) return send(res, 400, { error: 'the owner already has access' })
-  const previous = shareOf(entry, email)
-  if (!previous && Object.keys(entry.shares).length >= MAX_SHARES) {
+  if (email === current.owner) return send(res, 400, { error: 'the owner already has access' })
+  const previous = shareOf(current, email)
+  if (!previous && Object.keys(current.shares).length >= MAX_SHARES) {
     return send(res, 409, { error: `a document can be shared with at most ${MAX_SHARES} people` })
   }
-  if (previous !== body.role) {
-    docs[id] = { ...entry, shares: { ...entry.shares, [email]: body.role } satisfies Shares }
-    await saveIndex()
-    // A role change matters to open sockets too: a viewer's connection is read-only.
-    closeConnections(server, id)
-    audit(previous ? 'role_change' : 'share', {
-      actor: user.email,
-      doc: id,
-      email,
-      role: body.role,
-      ...(previous ? { from: previous } : {}),
-    })
-  }
-  return send(res, 200, toMeta(id, 'owner'))
+  if (previous === next) return send(res, 200, toMeta(id, current, 'owner'))
+  const entry = updateEntry(id, 'open', (latest) => ({ ...latest, shares: { ...latest.shares, [email]: next } }))
+  if (!entry) return notFound(res)
+  // A role change matters to open sockets too: a viewer's connection is read-only.
+  closeConnections(server, id)
+  audit(previous ? 'role_change' : 'share', {
+    actor: user.email,
+    doc: id,
+    email,
+    role: next,
+    ...(previous ? { from: previous } : {}),
+  })
+  const meta = toMeta(id, entry, 'owner')
+  await saveIndex()
+  return send(res, 200, meta)
 }
 
 /**
  * `/api/docs`: the library. Every handler for one document resolves the caller's role first,
- * before touching the document (in particular before `openDirectConnection` and `currentState`,
- * which skip the collaboration server's hooks).
+ * and acts on it without awaiting anything in between; in particular before
+ * `openDirectConnection` and `currentState`, which skip the collaboration server's hooks,
+ * and checking again after them.
  */
-const docsApi = (runtime: Runtime) =>
-  route(runtime, async (req, res, next, { id, action, sub, server, user }) => {
-    // My documents and Shared with me: open documents the caller owns or has a share on.
-    if (!id && req.method === 'GET') {
-      const list: DocMeta[] = []
-      for (const docId of Object.keys(docs)) {
-        const role = roleFor(docId, user)
-        if (role) list.push(toMeta(docId, role))
-      }
-      list.sort((a, b) => b.updatedAt - a.updatedAt)
-      return send(res, 200, { docs: list })
+const docsApi = route(async (req, res, next, { id, action, sub, body, server, user }) => {
+  // My documents and Shared with me: open documents the caller owns or has a share on.
+  if (!id && req.method === 'GET') {
+    const list: DocMeta[] = []
+    for (const docId of Object.keys(docs)) {
+      const role = roleFor(docId, user)
+      if (role) list.push(toMeta(docId, docs[docId], role))
     }
+    list.sort((a, b) => b.updatedAt - a.updatedAt)
+    return send(res, 200, { docs: list })
+  }
 
-    // The only way to create a document: it belongs to the caller and has no shares.
-    if (!id && req.method === 'POST') {
-      const body = await readJson(req)
-      const docId = newId()
-      const doc = new Y.Doc()
-      const title = cleanTitle(body.title)
-      if (title) doc.getMap('meta').set('title', title)
-      await writeAtomic(fileFor(docId), Y.encodeStateAsUpdate(doc))
-      addEntry(docId, user.email, doc)
-      await saveIndex()
-      audit('create', { actor: user.email, doc: docId })
-      return send(res, 201, toMeta(docId, 'owner'))
-    }
+  // The only way to create a document: it belongs to the caller and has no shares.
+  if (!id && req.method === 'POST') {
+    const docId = newId()
+    const doc = new Y.Doc()
+    const title = cleanTitle(body.title)
+    if (title) doc.getMap('meta').set('title', title)
+    await writeAtomic(fileFor(docId), Y.encodeStateAsUpdate(doc))
+    const entry = addEntry(docId, user.email, doc)
+    audit('create', { actor: user.email, doc: docId })
+    const meta = toMeta(docId, entry, 'owner')
+    await saveIndex()
+    return send(res, 201, meta)
+  }
 
-    if (!id) return next()
+  if (!id) return next()
 
-    // Always 200, so opening a document doesn't log a failed request. `none` reveals nothing more.
-    if (action === 'status' && !sub && req.method === 'GET') {
-      return send(res, 200, statusFor(entryOf(id), deleted.get(id), user.email))
-    }
+  // Always 200, so opening a document doesn't log a failed request. `none` reveals nothing more.
+  if (action === 'status' && !sub && req.method === 'GET') {
+    return send(res, 200, statusFor(entryOf(id), deleted.get(id), user.email))
+  }
 
-    // Moves the document to the Trash (owner only). Repeating it is fine.
-    if (!action && req.method === 'DELETE') {
-      if (isOwnTrashed(id, user)) return send(res, 204)
-      const role = roleFor(id, user)
-      if (!role) return notFound(res)
-      if (role !== 'owner') return forbidden(res)
-      await moveToTrash(server, id, user.email)
-      return send(res, 204)
-    }
-
+  // Moves the document to the Trash (owner only). Repeating it is fine.
+  if (!action && req.method === 'DELETE') {
+    if (isOwnTrashed(id, user)) return send(res, 204)
     const role = roleFor(id, user)
     if (!role) return notFound(res)
+    if (role !== 'owner') return forbidden(res)
+    moveToTrash(server, id, user.email)
+    await saveIndex()
+    return send(res, 204)
+  }
 
-    if (action === 'shares' && sub) return sharesRoute(req, res, { id, target: sub, role, server, user })
-    if (sub) return next()
+  const role = roleFor(id, user)
+  if (!role) return notFound(res)
 
-    // Everyone with access sees who has access.
-    if (!action && req.method === 'GET') return send(res, 200, toMeta(id, role, { withShares: true }))
+  if (action === 'shares' && sub) return sharesRoute(req, res, { id, target: sub, role, body, server, user })
+  if (sub) return next()
 
-    if (!action && req.method === 'PATCH') {
-      if (!canEdit(role)) return forbidden(res)
-      const title = cleanTitle((await readJson(req)).title)
-      await setTitle(server, id, title)
-      // Access may have changed while the title was being written.
-      const after = roleFor(id, user)
-      if (!after) return notFound(res)
-      const state = await currentState(server, id)
-      const doc = new Y.Doc()
-      if (state) Y.applyUpdate(doc, state)
-      updateIndexFromDoc(id, doc)
-      docs[id] = { ...docs[id], title }
-      await saveIndex()
-      return send(res, 200, toMeta(id, after))
+  // Everyone with access sees who has access.
+  if (!action && req.method === 'GET') return send(res, 200, toMeta(id, docs[id], role, { withShares: true }))
+
+  if (!action && req.method === 'PATCH') {
+    if (!canEdit(role)) return forbidden(res)
+    const title = cleanTitle(body.title)
+    // Writes the title into the live Yjs document, so open editors update immediately.
+    const connection = await server.hocuspocus.openDirectConnection(id)
+    let now = null as Role | null
+    let renamed = undefined as IndexEntry | undefined
+    try {
+      await connection.transact((doc) => {
+        // Access may have changed while the document loaded: check again, in the same step as the write.
+        now = roleFor(id, user)
+        if (!canEdit(now)) return
+        doc.getMap('meta').set('title', title)
+        renamed = updateIndexFromDoc(id, doc)
+      })
+    } finally {
+      await connection.disconnect()
     }
+    if (!renamed || !now) return now ? forbidden(res) : notFound(res)
+    const meta = toMeta(id, renamed, now)
+    await saveIndex()
+    return send(res, 200, meta)
+  }
 
-    // Anyone with access may copy: the copy is the caller's, with no shares.
-    if (action === 'duplicate' && req.method === 'POST') {
-      const state = await currentState(server, id)
-      const doc = new Y.Doc()
-      if (state) Y.applyUpdate(doc, state)
-      const sourceTitle = getTitle(doc) || extractText(doc).slice(0, 60) || 'Untitled document'
-      doc.getMap('meta').set('title', `Copy of ${sourceTitle}`)
-      const copyId = newId()
-      await writeAtomic(fileFor(copyId), Y.encodeStateAsUpdate(doc))
-      addEntry(copyId, user.email, doc)
-      await saveIndex()
-      audit('create', { actor: user.email, doc: copyId, from: id })
-      return send(res, 201, toMeta(copyId, 'owner'))
-    }
+  // Anyone with access may copy: the copy is the caller's, with no shares.
+  if (action === 'duplicate' && req.method === 'POST') {
+    const state = await currentState(server, id)
+    // Access may have changed while the document was read.
+    if (!roleFor(id, user)) return notFound(res)
+    const doc = new Y.Doc()
+    if (state) Y.applyUpdate(doc, state)
+    const sourceTitle = getTitle(doc) || extractText(doc).slice(0, 60) || 'Untitled document'
+    doc.getMap('meta').set('title', `Copy of ${sourceTitle}`)
+    const copyId = newId()
+    await writeAtomic(fileFor(copyId), Y.encodeStateAsUpdate(doc))
+    const entry = addEntry(copyId, user.email, doc)
+    audit('create', { actor: user.email, doc: copyId, from: id })
+    const meta = toMeta(copyId, entry, 'owner')
+    await saveIndex()
+    return send(res, 201, meta)
+  }
 
-    return next()
-  })
+  return next()
+})
 
-async function attach(
-  middlewares: Connect.Server,
-  httpServer: { once(event: 'close', listener: () => void): unknown } | null,
-  config: WriteConfig,
-) {
-  const runtime = await ensureRuntime(config)
-  console.log(describeConfig(runtime.config))
+/** Mounts the API for one Vite server, served by `instance`'s collaboration server. */
+function mount(middlewares: Connect.Server, instance: Instance) {
   // Identity first: nothing under /api is served without one.
-  middlewares.use('/api', identify(runtime))
-  middlewares.use('/api/me', meApi(runtime))
-  middlewares.use('/api/docs', docsApi(runtime))
-  middlewares.use('/api/trash', trashApi(runtime))
+  middlewares.use('/api', identify(instance))
+  middlewares.use('/api/me', meApi)
+  middlewares.use('/api/docs', docsApi)
+  middlewares.use('/api/trash', trashApi)
   // Unknown API paths get a JSON 404, not the app's index.html.
   middlewares.use('/api', (_req, res) => send(res, 404, { error: 'not found' }))
-  httpServer?.once('close', () => {
-    runtime.server.hocuspocus.flushPendingStores()
-    void saveIndex().catch(() => undefined)
-  })
 }
 
 /** The Vite plugin. `config` comes from `resolveConfig()` in `vite.config.ts`. */
 export function collabServer(config: WriteConfig): Plugin {
+  let instance: Instance | undefined
+  const start = async (middlewares: Connect.Server) => {
+    const previous = processState[globalKey]
+    const restarting = previous !== undefined && !previous.isStopped
+    instance = createInstance(config)
+    mount(middlewares, instance)
+    if (restarting) {
+      // Vite closes the old server (which stops its collaboration server and frees the port)
+      // only after this one is set up, so don't wait here: requests wait for the runtime.
+      instance.runtime.catch((error: unknown) => console.error('[write] the collaboration server did not restart:', error))
+    } else {
+      // A first start that fails (port in use, a migration refused) stops Vite.
+      await instance.runtime
+    }
+  }
+  const stop = async () => {
+    await instance?.stop()
+  }
   return {
     name: 'write:collab-server',
-    async configureServer(vite) {
-      await attach(vite.middlewares, vite.httpServer, config)
-    },
-    async configurePreviewServer(preview) {
-      await attach(preview.middlewares, preview.httpServer, config)
-    },
+    configureServer: (vite) => start(vite.middlewares),
+    configurePreviewServer: (preview) => start(preview.middlewares),
+    // Vite awaits these: on a restart and on shutdown, documents are stored and the port freed.
+    closeServer: stop,
+    closePreviewServer: stop,
   }
 }
