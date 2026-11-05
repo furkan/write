@@ -30,7 +30,7 @@ import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle
 import { buildExtensions } from '../editor/extensions'
 import { paginationKey } from '../editor/extensions/pagination/Pagination'
 import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRetrying } from '../editor/hooks'
-import { pageGeometry, pageRule, trackPageSetupUndo, useLayoutMode, useNarrowScreen, usePageSetup } from '../editor/page-setup'
+import { pageGeometry, pageRule, trackPageSetupUndo, usePagedView, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
 import { setDocumentScroller } from '../editor/scroller'
 import { fitZoom, useZoomSetting, type ZoomFit } from '../editor/zoom'
@@ -337,39 +337,102 @@ async function pagesSettled(editor: Editor) {
   }
 }
 
+const isPrintKey = (event: KeyboardEvent) =>
+  (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'p'
+
+/** Where you are reading: the document position at the top of the scroller, and how far below its top. */
+type Place = { pos: number; offset: number }
+
+function readingPlace(editor: Editor, view: HTMLElement): Place | null {
+  const box = view.getBoundingClientRect()
+  const page = editor.view.dom.getBoundingClientRect()
+  const x = Math.min(Math.max(page.left + page.width / 2, box.left + 1), box.right - 1)
+  const hit = editor.view.posAtCoords({ left: x, top: Math.max(box.top, page.top) + 1 })
+  return hit ? { pos: hit.pos, offset: editor.view.coordsAtPos(hit.pos).top - box.top } : null
+}
+
+function restorePlace(editor: Editor, view: HTMLElement, place: Place) {
+  if (place.pos > editor.state.doc.content.size) return
+  view.scrollTop += editor.view.coordsAtPos(place.pos).top - view.getBoundingClientRect().top - place.offset
+}
+
 /**
  * Print or save as PDF through the browser's dialog, always as pages at 100%: in Web layout, on a
  * narrow screen or zoomed, the page shows Print layout at 100% while printing (`printing`), and
- * goes back afterwards. Ctrl/Cmd+P takes the same path. (The browser's own Print menu item can't
- * be intercepted; it still prints at 100%, and in Web layout with the page numbers of `@page`.)
+ * goes back afterwards, to the same place in the document (a document position, since the page
+ * heights differ). Ctrl/Cmd+P takes the same path. (The browser's own Print menu item can't be
+ * intercepted; it still prints at 100%, and in Web layout with the page numbers of `@page`.)
+ *
+ * Going back waits for `afterprint`. Where that never comes (print() returned at once, without a
+ * dialog), the next click, key, focus or return to the tab does it, and printing again while
+ * still in that state opens the dialog again rather than doing nothing.
  */
-function usePrint(editor: Editor, printing: boolean, setPrinting: (printing: boolean) => void): () => void {
-  const print = useCallback(() => setPrinting(true), [setPrinting])
+function usePrint(editor: Editor, printing: boolean, setPrinting: (printing: boolean) => void, view: HTMLElement | null): () => void {
+  const printingRef = useRef(printing)
+  const place = useRef<Place | null>(null)
+  useEffect(() => {
+    printingRef.current = printing
+  }, [printing])
+
+  const print = useCallback(() => {
+    if (printingRef.current) {
+      window.print()
+      return
+    }
+    place.current = view && readingPlace(editor, view)
+    setPrinting(true)
+  }, [editor, view, setPrinting])
 
   useEffect(() => {
     if (!printing) return
     let cancelled = false
     const done = () => setPrinting(false)
+    const onKey = (event: KeyboardEvent) => !isPrintKey(event) && done()
+    const onVisible = () => document.visibilityState === 'visible' && done()
     window.addEventListener('afterprint', done)
     void pagesSettled(editor).then(() => {
       if (cancelled) return
       window.print()
-      // Where print() doesn't wait for the dialog and afterprint doesn't come, the next click does.
       window.addEventListener('pointerdown', done, { once: true })
+      window.addEventListener('keydown', onKey)
+      window.addEventListener('focus', done, { once: true })
+      document.addEventListener('visibilitychange', onVisible)
     })
     return () => {
       cancelled = true
       window.removeEventListener('afterprint', done)
       window.removeEventListener('pointerdown', done)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('focus', done)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [printing, editor, setPrinting])
 
+  // Back from printing: once the view has its own layout and zoom again, scroll back to the place.
+  const wasPrinting = useRef(false)
+  useEffect(() => {
+    if (printing) {
+      wasPrinting.current = true
+      return
+    }
+    if (!wasPrinting.current) return
+    wasPrinting.current = false
+    const saved = place.current
+    place.current = null
+    if (!saved || !view) return
+    // Two frames: the layout switches back first, then the pagination measures.
+    const frames = { id: 0 }
+    frames.id = requestAnimationFrame(() => {
+      frames.id = requestAnimationFrame(() => restorePlace(editor, view, saved))
+    })
+    return () => cancelAnimationFrame(frames.id)
+  }, [printing, editor, view])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'p') {
-        event.preventDefault()
-        print()
-      }
+      if (!isPrintKey(event)) return
+      event.preventDefault()
+      print()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
@@ -378,21 +441,72 @@ function usePrint(editor: Editor, printing: boolean, setPrinting: (printing: boo
   return print
 }
 
+/**
+ * A phone's keyboard: Android resizes the layout for it (`interactive-widget=resizes-content` in
+ * index.html); iOS doesn't, and the shell (100dvh) would run under the keyboard, status bar and
+ * caret included. While the visible viewport is clearly shorter than the window (and not because
+ * of a pinch zoom), the shell takes its height (`--app-height`, see App.css).
+ */
+function useKeyboardHeight() {
+  useEffect(() => {
+    const visual = window.visualViewport
+    if (!visual) return
+    const root = document.documentElement
+    const update = () => {
+      const covered = visual.scale < 1.01 && window.innerHeight - visual.height > 80
+      if (covered) root.style.setProperty('--app-height', `${Math.round(visual.height)}px`)
+      else root.style.removeProperty('--app-height')
+    }
+    update()
+    visual.addEventListener('resize', update)
+    return () => {
+      visual.removeEventListener('resize', update)
+      root.style.removeProperty('--app-height')
+    }
+  }, [])
+}
+
 /** Space the page keeps on screen: the editor's padding around it (see layout.css). */
 const PAGE_PADDING = { x: 48, top: 16, bottom: 16 }
+
+/** Keys that scroll a page, and how far: a fraction of the view's height, or to an end. */
+const SCROLL_KEYS: Record<string, (view: HTMLElement, shift: boolean) => number> = {
+  PageDown: (v) => v.clientHeight * 0.875,
+  PageUp: (v) => -v.clientHeight * 0.875,
+  ' ': (v, shift) => (shift ? -1 : 1) * v.clientHeight * 0.875,
+  ArrowDown: () => 40,
+  ArrowUp: () => -40,
+  End: (v) => v.scrollHeight,
+  Home: (v) => -v.scrollHeight,
+}
 
 /**
  * Registers the document scroller (see editor/scroller.ts) and publishes its height as
  * `--doc-view-height`, for the sticky sidebar's own scrolling (see App.css).
+ *
+ * The page itself doesn't scroll, so scrolling keys pressed with nothing focused would do
+ * nothing. The scroller is focusable (tabIndex -1) and takes focus when the page opens with
+ * nothing else focused; keys that still reach the body (after a dialog closes, say) scroll it too.
  */
 function useDocumentScroller(view: HTMLElement | null) {
   useLayoutEffect(() => {
     if (!view) return
     setDocumentScroller(view)
+    if (!document.activeElement || document.activeElement === document.body) view.focus({ preventScroll: true })
+    const onKey = (event: KeyboardEvent) => {
+      const distance = SCROLL_KEYS[event.key]
+      if (!distance || event.defaultPrevented || event.target !== document.body) return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      event.preventDefault()
+      view.focus({ preventScroll: true })
+      view.scrollBy({ top: distance(view, event.shiftKey) })
+    }
+    window.addEventListener('keydown', onKey)
     const observer = new ResizeObserver(() => view.style.setProperty('--doc-view-height', `${view.clientHeight}px`))
     observer.observe(view)
     return () => {
       observer.disconnect()
+      window.removeEventListener('keydown', onKey)
       setDocumentScroller(null)
     }
   }, [view])
@@ -479,9 +593,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   // Print layout shows pages; Web layout, or a screen too narrow for a page, one continuous page.
   // Printing always shows pages.
   const pageSetup = usePageSetup(session)
-  const layoutMode = useLayoutMode()
-  const narrow = useNarrowScreen()
-  const paged = (layoutMode === 'print' && !narrow) || printing
+  const paged = usePagedView() || printing
   const pagination = useMemo(() => ({ enabled: paged, ...pageGeometry(pageSetup) }), [paged, pageSetup])
   usePrintPageRule(pageRule(pageSetup, paged))
 
@@ -667,13 +779,14 @@ function Workspace({ session, template, role }: WorkspaceProps) {
 
   const reconnect = useCallback(() => resume(session), [session])
 
-  const print = usePrint(editor, printing, setPrinting)
   const [sharing, setSharing] = useState(false)
 
   const mainRef = useRef<HTMLElement>(null)
-  // The document's scroller, as state: the menus and the zoom need it once it exists.
+  // The document's scroller, as state: the menus, printing and the zoom need it once it exists.
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   useDocumentScroller(scroller)
+  useKeyboardHeight()
+  const print = usePrint(editor, printing, setPrinting, scroller)
 
   // Zoom: a percentage, or a fit in Print layout. Printing is always at 100%.
   const zoomSetting = useZoomSetting()
@@ -681,8 +794,9 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   const fitted = useFitZoom(fit, pagination.pageWidth, pagination.pageHeight, mainRef, scroller)
   const zoom = printing ? 100 : fit ? (fitted ?? 100) : zoomSetting.percent
   useZoomAnchor(zoom, editor, scroller)
-  // Room for the sidebar beside the page as it shows (zoomed); a fitted page leaves it room.
-  const sidebarFits = useMediaQuery(`(min-width: ${Math.ceil((pagination.pageWidth * zoom) / 100) + SIDEBAR_ROOM}px)`) || !!fit
+  // Room for the sidebar beside the page at 100%. Zoomed in further, the page scrolls sideways in
+  // the document area instead (like a landscape page wider than the window): the contents stay.
+  const sidebarFits = useMediaQuery(`(min-width: ${Math.ceil(pagination.pageWidth) + SIDEBAR_ROOM}px)`)
 
   const canToggleReadOnly = canWrite && !closedWhileOpen
   const chrome = useMemo<DocumentChrome>(
@@ -755,7 +869,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
         )}
         {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
         {/* The only part of the page that scrolls: the ribbon above and the status bar below stay put. */}
-        <div className="doc-scroll" ref={setScroller}>
+        <div className="doc-scroll" ref={setScroller} tabIndex={-1}>
           <div className="workspace">
             <main className="main" ref={mainRef}>
               <div className="editor-shell" data-tour="editor">

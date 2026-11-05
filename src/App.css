@@ -34,15 +34,19 @@
  * The document page is an app shell: the ribbon at the top and the status bar at the bottom stay
  * put, and only the document area (.doc-scroll) scrolls. The page itself never scrolls or
  * bounces, so there is nothing to pull past the ribbon (no pull-to-refresh) or the status bar.
+ * The library scrolls as a normal page and keeps pull-to-refresh.
  */
 html:has(.doc-shell),
 html:has(.doc-shell) body {
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
+/* --app-height: the visible height while a phone's keyboard is open (see useKeyboardHeight). */
 .app.doc-shell {
-  height: 100dvh;
+  height: var(--app-height, 100dvh);
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -57,6 +61,11 @@ html:has(.doc-shell) body {
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+/* Focusable only so the scrolling keys work before a click (see useDocumentScroller). */
+.doc-scroll:focus {
+  outline: none;
 }
 
 .logo {

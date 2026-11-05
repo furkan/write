@@ -34,8 +34,6 @@
   background: var(--bg);
   color-scheme: light;
   -webkit-font-smoothing: antialiased;
-  /* No rubber-banding or pull-to-refresh past the top or bottom of the page. */
-  overscroll-behavior: none;
 }
 
 /* Dark theme: follows the system unless the user picked Light, or when they picked Dark. */
@@ -104,7 +102,6 @@
 body {
   margin: 0;
   background: var(--bg);
-  overscroll-behavior: none;
 }
 
 button,
