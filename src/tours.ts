@@ -12,8 +12,21 @@ const k = (keys: string) => `<kbd>${keys}</kbd>`
 
 export type TourId = 'library' | 'welcome' | 'formatting' | 'blocks' | 'developer' | 'collaboration'
 
+/** What the current user can do on this page, so steps only describe what they can do. */
+export type TourContext = { role: 'owner' | 'editor' | 'viewer' | null; mode: 'access' | 'dev' }
+
+let context: TourContext = { role: null, mode: 'access' }
+
+/** Called by each page with the signed-in user's auth mode and their role on the document. */
+export const setTourContext = (next: TourContext) => void (context = next)
+
+/** A step, shown only when `when` (if any) says it applies to the current user. */
+type TourStep = DriveStep & { when?: (ctx: TourContext) => boolean }
+
 /** `scope` says which page a tour belongs to (its elements only exist there). */
-type Tour = { title: string; summary: string; scope: 'library' | 'document'; steps: DriveStep[] }
+type Tour = { title: string; summary: string; scope: 'library' | 'document'; steps: TourStep[] }
+
+const isOwner = (ctx: TourContext) => ctx.role === 'owner'
 
 export const TOURS: Record<TourId, Tour> = {
   library: {
@@ -93,9 +106,21 @@ export const TOURS: Record<TourId, Tour> = {
       },
       {
         element: '[data-tour="account"]',
+        when: (ctx) => ctx.mode === 'access',
         popover: {
           title: 'Your account',
           description: 'The email you’re signed in with, and where you sign out.',
+          side: 'bottom',
+          align: 'end',
+        },
+      },
+      {
+        element: '[data-tour="account"]',
+        when: (ctx) => ctx.mode === 'dev',
+        popover: {
+          title: 'Your account',
+          description:
+            'The email you’re using. This server runs in Dev mode, with no sign-in: <b>Switch user…</b> lets you try Write as someone else.',
           side: 'bottom',
           align: 'end',
         },
@@ -117,6 +142,7 @@ export const TOURS: Record<TourId, Tour> = {
       },
       {
         element: '[data-tour="title"]',
+        when: (ctx) => ctx.role !== 'viewer',
         popover: {
           title: 'Title',
           description:
@@ -127,6 +153,7 @@ export const TOURS: Record<TourId, Tour> = {
       },
       {
         element: '[data-tour="view-only"]',
+        when: (ctx) => ctx.role === 'viewer',
         popover: {
           title: 'View only',
           description: 'This document was shared with you as a viewer: you can read, copy and export it, but not change it.',
@@ -136,6 +163,17 @@ export const TOURS: Record<TourId, Tour> = {
       },
       {
         element: '[data-tour="editor"]',
+        when: (ctx) => ctx.role === 'viewer',
+        popover: {
+          title: 'The document',
+          description: 'Changes the owner and editors make appear here live, as they type.',
+          side: 'top',
+          align: 'start',
+        },
+      },
+      {
+        element: '[data-tour="editor"]',
+        when: (ctx) => ctx.role !== 'viewer',
         popover: {
           title: 'The document',
           description:
@@ -196,10 +234,22 @@ export const TOURS: Record<TourId, Tour> = {
       },
       {
         element: '[data-tour="share"]',
+        when: isOwner,
         popover: {
           title: 'Share',
           description:
             'Invite people by email as editors or viewers, and copy the link to send them. Only the people listed can open it.',
+          side: 'bottom',
+          align: 'end',
+        },
+      },
+      {
+        element: '[data-tour="share"]',
+        when: (ctx) => !isOwner(ctx),
+        popover: {
+          title: 'Who has access',
+          description:
+            'See who this document is shared with, and copy its link. Only the owner can invite people, and the link opens only for the people listed.',
           side: 'bottom',
           align: 'end',
         },
@@ -456,7 +506,7 @@ export const TOURS: Record<TourId, Tour> = {
       {
         element: '[data-tour="share"]',
         popover: {
-          title: 'Share it',
+          title: 'Who has access',
           description:
             'The owner invites people by email as <b>editors</b> or <b>viewers</b>; everyone else sees who has access. <b>Copy link</b> gives you the address to send, which opens only for the people listed.',
           side: 'bottom',
@@ -500,7 +550,10 @@ export function startTour(id: TourId) {
   const tour = TOURS[id]
   // Skip steps whose element isn't on the page right now (e.g. an empty library or a
   // hidden sidebar), instead of showing a floating card about something that isn't there.
-  const steps = tour.steps.filter((step) => typeof step.element !== 'string' || document.querySelector(step.element))
+  const steps = tour.steps
+    .filter((step) => step.when?.(context) ?? true)
+    .filter((step) => typeof step.element !== 'string' || document.querySelector(step.element))
+    .map(({ when: _when, ...step }) => step)
   const instance = driver({
     showProgress: true,
     animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,

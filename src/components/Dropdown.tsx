@@ -8,10 +8,15 @@ type DropdownProps = {
   className?: string
   tour?: string
   disabled?: boolean
+  /**
+   * `menu` (default): a menu of `MenuItem`s. `disclosure`: a popover that may hold other content
+   * (text, plain buttons), announced as an expandable group rather than a menu.
+   */
+  kind?: 'menu' | 'disclosure'
 }
 
 /** A small accessible popover menu that closes on outside click or Escape. */
-export function Dropdown({ label, title, children, align = 'start', className, tour, disabled }: DropdownProps) {
+export function Dropdown({ label, title, children, align = 'start', className, tour, disabled, kind = 'menu' }: DropdownProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const menuId = useId()
@@ -38,7 +43,7 @@ export function Dropdown({ label, title, children, align = 'start', className, t
         type="button"
         title={title}
         aria-label={title}
-        aria-haspopup="menu"
+        aria-haspopup={kind === 'menu' ? 'menu' : undefined}
         aria-expanded={open}
         aria-controls={menuId}
         disabled={disabled}
@@ -48,7 +53,12 @@ export function Dropdown({ label, title, children, align = 'start', className, t
         {label}
       </button>
       {open && (
-        <div className={`dropdown-menu align-${align}`} role="menu" id={menuId}>
+        <div
+          className={`dropdown-menu align-${align}`}
+          role={kind === 'menu' ? 'menu' : 'group'}
+          aria-label={kind === 'menu' ? undefined : title}
+          id={menuId}
+        >
           {children(() => setOpen(false))}
         </div>
       )}
