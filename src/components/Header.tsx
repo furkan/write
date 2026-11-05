@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/react'
 import { useRef, useState } from 'react'
-import { createDoc, deleteDoc, docUrl, duplicateDoc, libraryUrl } from '../api'
+import { createDoc, docUrl, duplicateDoc, libraryUrl, trashDoc } from '../api'
 import { loadBackup, saveBackup } from '../editor/backup'
 import { setTitle, type Session } from '../editor/collab'
 import { initialContent } from '../editor/content'
@@ -81,15 +81,15 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
     }
   }
 
-  const remove = async () => {
-    if (!window.confirm(`Delete “${title || 'Untitled document'}” for everyone? This can’t be undone.`)) return
+  // Reversible, so no confirmation: the library shows an "Undo" toast.
+  const moveToTrash = async () => {
     try {
-      await deleteDoc(session.name)
+      await trashDoc(session.name)
     } catch {
-      window.alert('Could not delete the document. Is the server running? Nothing was deleted.')
+      window.alert('Could not move the document to the trash. Is the server running?')
       return
     }
-    window.location.assign(libraryUrl())
+    window.location.assign(libraryUrl(session.name))
   }
 
   const importMarkdown = async (file: File) => {
@@ -250,10 +250,10 @@ export function Header({ editor, session, presence, view, onViewChange }: Header
                 disabled={view.readOnly}
                 onSelect={() => {
                   close()
-                  void remove()
+                  void moveToTrash()
                 }}
               >
-                <span className="danger-text">Delete document…</span>
+                <span className="danger-text">Move to trash</span>
               </MenuItem>
             </>
           )}

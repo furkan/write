@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createDoc, deleteDoc, displayTitle, docUrl, duplicateDoc, listDocs, renameDoc, type DocMeta } from '../api'
+import {
+  createDoc,
+  deleteForever,
+  displayTitle,
+  docUrl,
+  duplicateDoc,
+  emptyTrash,
+  listDocs,
+  listTrash,
+  renameDoc,
+  restoreOrConfirmOpen,
+  trashDoc,
+  type DocMeta,
+  type TrashedDoc,
+} from '../api'
 import { Dropdown, MenuItem } from '../components/Dropdown'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { readStorage, writeStorage } from '../editor/storage'
@@ -9,6 +23,9 @@ import './library.css'
 
 type SortKey = 'updated' | 'created' | 'title'
 type ViewMode = 'grid' | 'list'
+type Section = 'docs' | 'trash'
+/** `undo` offers to restore a document that was just moved to the trash. */
+type Toast = { text: string; undo?: DocMeta }
 
 const REFRESH_MS = 10_000
 
@@ -25,6 +42,53 @@ function relativeTime(timestamp: number, now = Date.now()) {
   return new Date(timestamp).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+/** "in 29 days", "tomorrow", "in 5 hours". */
+function timeUntil(timestamp: number, now = Date.now()) {
+  const hours = Math.max(0, (timestamp - now) / 3_600_000)
+  if (hours < 24) return relativeFormat.format(Math.max(1, Math.ceil(hours)), 'hour')
+  return relativeFormat.format(Math.ceil(hours / 24), 'day')
+}
+
+const matchesQuery = (doc: DocMeta, query: string) => {
+  const q = query.trim().toLowerCase()
+  return !q || `${displayTitle(doc)} ${doc.preview}`.toLowerCase().includes(q)
+}
+
+/** Reads and removes `?trashed=<id>` (set by a document's "Move to trash"). */
+function takeTrashedParam() {
+  const url = new URL(window.location.href)
+  const id = url.searchParams.get('trashed')
+  if (!id) return null
+  url.searchParams.delete('trashed')
+  window.history.replaceState(null, '', url)
+  return id
+}
+
+// Read once per page load (navigation to the library is always a full load). Module scope
+// rather than an effect, so React's development double-run of effects can't lose it.
+let justTrashed = takeTrashedParam()
+
+const sectionFromUrl = (): Section => (window.location.hash === '#trash' ? 'trash' : 'docs')
+
+/** The library or the Trash, kept in the URL hash so Back and links work. */
+function useSection() {
+  const [section, setSection] = useState<Section>(sectionFromUrl)
+  useEffect(() => {
+    const sync = () => setSection(sectionFromUrl())
+    window.addEventListener('popstate', sync)
+    return () => window.removeEventListener('popstate', sync)
+  }, [])
+  const go = (next: Section) => {
+    if (next === section) return
+    const url = new URL(window.location.href)
+    url.hash = next === 'trash' ? 'trash' : ''
+    window.history.pushState(null, '', url.hash ? url : url.pathname + url.search)
+    setSection(next)
+    window.scrollTo({ top: 0 })
+  }
+  return [section, go] as const
+}
+
 function usePersisted<T extends string>(key: string, allowed: readonly T[], fallback: T) {
   const [value, setValue] = useState<T>(() => {
     const saved = readStorage(key)
@@ -39,19 +103,24 @@ function usePersisted<T extends string>(key: string, allowed: readonly T[], fall
 
 export function Library() {
   const [docs, setDocs] = useState<DocMeta[] | null>(null)
+  const [trash, setTrash] = useState<TrashedDoc[] | null>(null)
+  const [retentionDays, setRetentionDays] = useState(30)
+  const [section, goTo] = useSection()
   const [error, setError] = useState(false)
   const [query, setQuery] = useState('')
   const [sort, setSort] = usePersisted<SortKey>('write:library-sort', ['updated', 'created', 'title'], 'updated')
   const [view, setView] = usePersisted<ViewMode>('write:library-view', ['grid', 'list'], 'grid')
   const [busy, setBusy] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToastState] = useState<Toast | null>(null)
+  const setToast = (text: string, undo?: DocMeta) => setToastState({ text, undo })
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // Load now, then keep the list fresh (other people edit, rename and create documents too).
+  // Load now, then keep the lists fresh (other people edit, rename, create and delete documents too).
   useEffect(() => {
     let cancelled = false
-    const refresh = () =>
+    // The two lists load independently, so a failing Trash request can't blank the documents.
+    const refresh = () => {
       listDocs().then(
         (list) => {
           if (cancelled) return
@@ -60,6 +129,19 @@ export function Library() {
         },
         () => !cancelled && setError(true),
       )
+      listTrash().then(
+        (trashed) => {
+          if (cancelled) return
+          setTrash(trashed.docs)
+          setRetentionDays(trashed.retentionDays)
+          // Arriving from a document's File → Move to trash: offer to undo it here.
+          const doc = justTrashed && trashed.docs.find((d) => d.id === justTrashed)
+          justTrashed = null
+          if (doc) setToastState({ text: `Moved “${displayTitle(doc)}” to the trash.`, undo: doc })
+        },
+        () => undefined,
+      )
+    }
     void refresh()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void refresh()
@@ -73,8 +155,8 @@ export function Library() {
   }, [])
 
   useEffect(() => {
-    document.title = 'Documents – Write'
-  }, [])
+    document.title = section === 'trash' ? 'Trash – Write' : 'Documents – Write'
+  }, [section])
 
   // `/` focuses search; the library tour opens on a first visit.
   useEffect(() => {
@@ -101,17 +183,14 @@ export function Library() {
 
   useEffect(() => {
     if (!toast) return
-    const timer = window.setTimeout(() => setToast(null), 3000)
+    // Leave time to reach an "Undo" button.
+    const timer = window.setTimeout(() => setToastState(null), toast.undo ? 8000 : 3000)
     return () => window.clearTimeout(timer)
   }, [toast])
 
   const visible = useMemo(() => {
     if (!docs) return []
-    const q = query.trim().toLowerCase()
-    const filtered = q
-      ? docs.filter((doc) => `${displayTitle(doc)} ${doc.preview}`.toLowerCase().includes(q))
-      : docs
-    return [...filtered].sort((a, b) => {
+    return docs.filter((doc) => matchesQuery(doc, query)).sort((a, b) => {
       if (sort === 'title') return displayTitle(a).localeCompare(displayTitle(b), undefined, { sensitivity: 'base' })
       if (sort === 'created') return b.createdAt - a.createdAt
       return b.updatedAt - a.updatedAt
@@ -150,16 +229,60 @@ export function Library() {
     }
   }
 
-  const remove = async (doc: DocMeta) => {
-    if (!window.confirm(`Delete “${displayTitle(doc)}” for everyone? This can’t be undone.`)) return
+  const restore = async (doc: DocMeta, message = `Restored “${displayTitle(doc)}”.`) => {
     try {
-      await deleteDoc(doc.id)
+      await restoreOrConfirmOpen(doc.id)
+      setTrash((list) => list?.filter((d) => d.id !== doc.id) ?? list)
+      setDocs(await listDocs())
+      setToast(message)
+    } catch {
+      setToast('Restore failed. It may have been deleted forever.')
+    }
+  }
+
+  // Reversible, so no confirmation: the toast offers "Undo".
+  const moveToTrash = async (doc: DocMeta) => {
+    try {
+      await trashDoc(doc.id)
       setDocs((list) => list?.filter((d) => d.id !== doc.id) ?? list)
-      setToast(`Deleted “${displayTitle(doc)}”.`)
+      setTrash((list) => (list ? [{ ...doc, trashedAt: Date.now(), purgeAt: Date.now() + retentionDays * 86_400_000 }, ...list] : list))
+      setToast(`Moved “${displayTitle(doc)}” to the trash.`, doc)
+    } catch {
+      setToast('Could not move the document to the trash.')
+    }
+  }
+
+  const removeForever = async (doc: TrashedDoc) => {
+    if (!window.confirm(`Delete “${displayTitle(doc)}” forever? This can’t be undone.`)) return
+    try {
+      await deleteForever(doc.id)
+      setTrash((list) => list?.filter((d) => d.id !== doc.id) ?? list)
+      setToast(`Deleted “${displayTitle(doc)}” forever.`)
     } catch {
       setToast('Delete failed.')
     }
   }
+
+  const empty = async () => {
+    // Exactly the documents on screen: anything trashed since the last refresh stays.
+    const ids = (trash ?? []).map((d) => d.id)
+    if (!window.confirm(`Delete ${ids.length === 1 ? 'this document' : `all ${ids.length} documents`} in the trash forever? This can’t be undone.`)) return
+    try {
+      const { purged } = await emptyTrash(ids)
+      const fresh = await listTrash()
+      setTrash(fresh.docs)
+      setToast(
+        fresh.docs.length
+          ? `Deleted ${purged} forever. ${fresh.docs.length} newly trashed ${fresh.docs.length === 1 ? 'document was' : 'documents were'} kept.`
+          : 'Trash emptied.',
+      )
+    } catch {
+      setToast('Could not empty the trash.')
+    }
+  }
+
+  const trashCount = trash?.length ?? 0
+  const visibleTrash = (trash ?? []).filter((doc) => matchesQuery(doc, query))
 
   return (
     <div className="library">
@@ -213,113 +336,208 @@ export function Library() {
         </div>
       </header>
 
-      <section className="templates-band" aria-labelledby="templates-title">
-        <div className="library-inner">
-          <h2 id="templates-title" className="section-title">
-            Start a new document
-          </h2>
-          <div className="templates" data-tour="templates">
-            {TEMPLATES.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                className="template"
-                disabled={busy !== null}
-                onClick={() => void startFromTemplate(template)}
-              >
-                <span className={`page-thumb${template.id === 'blank' ? ' blank' : ''}`} aria-hidden>
-                  {template.id === 'blank' ? (
-                    <span className="plus">＋</span>
-                  ) : (
-                    template.thumbnail.map((line, i) => (
-                      <span key={i} className={i === 0 ? 'thumb-title' : 'thumb-line'}>
-                        {line}
-                      </span>
-                    ))
-                  )}
-                  {busy === template.id && <span className="spinner thumb-spinner" />}
-                </span>
-                <span className="template-name">{template.name}</span>
-                <span className="template-desc muted small">{template.description}</span>
-              </button>
-            ))}
+      {section === 'docs' && (
+        <section className="templates-band" aria-labelledby="templates-title">
+          <div className="library-inner">
+            <h2 id="templates-title" className="section-title">
+              Start a new document
+            </h2>
+            <div className="templates" data-tour="templates">
+              {TEMPLATES.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  className="template"
+                  disabled={busy !== null}
+                  onClick={() => void startFromTemplate(template)}
+                >
+                  <span className={`page-thumb${template.id === 'blank' ? ' blank' : ''}`} aria-hidden>
+                    {template.id === 'blank' ? (
+                      <span className="plus">＋</span>
+                    ) : (
+                      template.thumbnail.map((line, i) => (
+                        <span key={i} className={i === 0 ? 'thumb-title' : 'thumb-line'}>
+                          {line}
+                        </span>
+                      ))
+                    )}
+                    {busy === template.id && <span className="spinner thumb-spinner" />}
+                  </span>
+                  <span className="template-name">{template.name}</span>
+                  <span className="template-desc muted small">{template.description}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      <main className="library-inner docs-section">
-        <div className="docs-toolbar">
-          <h2 className="section-title">{query ? `Results for “${query}”` : 'Recent documents'}</h2>
-          <div className="docs-controls">
-            <label className="sort">
-              <span className="visually-hidden">Sort by</span>
-              <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort documents">
-                <option value="updated">Last edited</option>
-                <option value="created">Date created</option>
-                <option value="title">Title</option>
-              </select>
-            </label>
-            <div className="view-toggle" role="group" aria-label="Layout">
-              <button
-                type="button"
-                aria-pressed={view === 'grid'}
-                title="Grid view"
-                onClick={() => setView('grid')}
-              >
-                ▦
+      {section === 'trash' ? (
+        <main className="library-inner docs-section trash-section">
+          <div className="docs-toolbar">
+            <div className="trash-heading">
+              <button type="button" className="back-button" onClick={() => goTo('docs')}>
+                ← Documents
               </button>
-              <button
-                type="button"
-                aria-pressed={view === 'list'}
-                title="List view"
-                onClick={() => setView('list')}
-              >
-                ☰
+              <h2 className="section-title">{query ? `Trash results for “${query}”` : 'Trash'}</h2>
+            </div>
+            <button
+              type="button"
+              className="secondary-button danger-text"
+              disabled={trashCount === 0}
+              onClick={() => void empty()}
+            >
+              Empty trash
+            </button>
+          </div>
+          <p className="trash-note muted small">
+            Documents in the trash are deleted forever after {retentionDays} days. Daily backups are kept on the server
+            too.
+          </p>
+          {error && trash === null ? (
+            <p className="empty">Couldn’t reach the server. Is `bun dev` running?</p>
+          ) : trash === null ? (
+            <div className="loading inline" role="status">
+              <span className="spinner" aria-hidden /> Loading the trash…
+            </div>
+          ) : visibleTrash.length === 0 ? (
+            <div className="empty">
+              {query ? (
+                <p>Nothing in the trash matches “{query}”.</p>
+              ) : (
+                <>
+                  <p className="empty-title">The trash is empty</p>
+                  <p className="muted">Documents you delete stay here for {retentionDays} days.</p>
+                </>
+              )}
+            </div>
+          ) : (
+            <ul className="docs list trash-list">
+              {visibleTrash.map((doc) => (
+                <li key={doc.id} className="doc-row">
+                  <span className="doc-icon" aria-hidden>
+                    ▤
+                  </span>
+                  <div className="doc-row-main">
+                    <span className="doc-title">{displayTitle(doc)}</span>
+                    <span className="doc-snippet muted small">{doc.preview || 'Empty document'}</span>
+                    <span className="trash-dates small">
+                      <time dateTime={new Date(doc.trashedAt).toISOString()}>Trashed {relativeTime(doc.trashedAt)}</time>
+                      {' · '}deleted forever {timeUntil(doc.purgeAt)}
+                    </span>
+                  </div>
+                  <div className="trash-actions">
+                    <button type="button" className="secondary-button" onClick={() => void restore(doc)}>
+                      Restore
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-danger-button"
+                      title={`Delete “${displayTitle(doc)}” forever`}
+                      aria-label={`Delete “${displayTitle(doc)}” forever`}
+                      onClick={() => void removeForever(doc)}
+                    >
+                      Delete forever
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </main>
+      ) : (
+        <main className="library-inner docs-section">
+          <div className="docs-toolbar">
+            <h2 className="section-title">{query ? `Results for “${query}”` : 'Recent documents'}</h2>
+            <div className="docs-controls">
+              <label className="sort">
+                <span className="visually-hidden">Sort by</span>
+                <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort documents">
+                  <option value="updated">Last edited</option>
+                  <option value="created">Date created</option>
+                  <option value="title">Title</option>
+                </select>
+              </label>
+              <div className="view-toggle" role="group" aria-label="Layout">
+                <button
+                  type="button"
+                  aria-pressed={view === 'grid'}
+                  title="Grid view"
+                  onClick={() => setView('grid')}
+                >
+                  ▦
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={view === 'list'}
+                  title="List view"
+                  onClick={() => setView('list')}
+                >
+                  ☰
+                </button>
+              </div>
+              <button type="button" className="trash-button" data-tour="trash" onClick={() => goTo('trash')}>
+                <TrashIcon />
+                Trash
+                {trashCount > 0 && <span className="count">{trashCount}</span>}
               </button>
             </div>
           </div>
-        </div>
 
-        {error && docs === null ? (
-          <p className="empty">Couldn’t reach the server. Is `bun dev` running?</p>
-        ) : docs === null ? (
-          <div className="loading inline" role="status">
-            <span className="spinner" aria-hidden /> Loading documents…
-          </div>
-        ) : visible.length === 0 ? (
-          <div className="empty">
-            {query ? (
-              <p>No documents match “{query}”.</p>
-            ) : (
-              <>
-                <p className="empty-title">No documents yet</p>
-                <p className="muted">Pick a template above to create your first one.</p>
-              </>
-            )}
-          </div>
-        ) : (
-          <ul className={`docs ${view}`} data-tour="doc-list">
-            {visible.map((doc, index) => (
-              <DocItem
-                key={doc.id}
-                doc={doc}
-                view={view}
-                isFirst={index === 0}
-                renaming={renaming === doc.id}
-                onStartRename={() => setRenaming(doc.id)}
-                onRename={(title) => void rename(doc, title)}
-                onCancelRename={() => setRenaming(null)}
-                onDuplicate={() => void duplicate(doc)}
-                onDelete={() => void remove(doc)}
-              />
-            ))}
-          </ul>
-        )}
-      </main>
+          {error && docs === null ? (
+            <p className="empty">Couldn’t reach the server. Is `bun dev` running?</p>
+          ) : docs === null ? (
+            <div className="loading inline" role="status">
+              <span className="spinner" aria-hidden /> Loading documents…
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="empty">
+              {query ? (
+                <p>No documents match “{query}”.</p>
+              ) : (
+                <>
+                  <p className="empty-title">No documents yet</p>
+                  <p className="muted">Pick a template above to create your first one.</p>
+                </>
+              )}
+            </div>
+          ) : (
+            <ul className={`docs ${view}`} data-tour="doc-list">
+              {visible.map((doc, index) => (
+                <DocItem
+                  key={doc.id}
+                  doc={doc}
+                  view={view}
+                  isFirst={index === 0}
+                  renaming={renaming === doc.id}
+                  onStartRename={() => setRenaming(doc.id)}
+                  onRename={(title) => void rename(doc, title)}
+                  onCancelRename={() => setRenaming(null)}
+                  onDuplicate={() => void duplicate(doc)}
+                  onDelete={() => void moveToTrash(doc)}
+                />
+              ))}
+            </ul>
+          )}
+        </main>
+      )}
 
       {toast && (
         <div className="toast" role="status">
-          {toast}
+          <span>{toast.text}</span>
+          {toast.undo && (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                const { undo } = toast
+                setToastState(null)
+                if (undo) void restore(undo, 'Moved back to your documents.')
+              }}
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -398,7 +616,7 @@ function DocItem({ doc, view, isFirst, renaming, onStartRename, onRename, onCanc
               onDelete()
             }}
           >
-            <span className="danger-text">Delete</span>
+            <span className="danger-text">Move to trash</span>
           </MenuItem>
         </>
       )}
@@ -440,5 +658,13 @@ function DocItem({ doc, view, isFirst, renaming, onStartRename, onRename, onCanc
         {menu}
       </div>
     </li>
+  )
+}
+
+function TrashIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+    </svg>
   )
 }

@@ -59,8 +59,18 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Rename, copy, delete',
           description:
-            'Each document’s ⋮ menu can rename it (open editors update live), make a copy, open it in a new tab or delete it.',
+            'Each document’s ⋮ menu can rename it (open editors update live), make a copy, open it in a new tab or move it to the trash.',
           side: 'left',
+        },
+      },
+      {
+        element: '[data-tour="trash"]',
+        popover: {
+          title: 'Trash',
+          description:
+            'Deleted documents wait here for 30 days. Restore one, or delete it forever. Right after deleting, the <b>Undo</b> button in the message at the bottom brings it back.',
+          side: 'bottom',
+          align: 'end',
         },
       },
       {

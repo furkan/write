@@ -104,16 +104,42 @@
   color: var(--danger);
 }
 
-.primary-button {
+.primary-button,
+.secondary-button {
   display: inline-flex;
   align-items: center;
   height: 36px;
   padding: 0 16px;
+  font: inherit;
   font-weight: 600;
   color: var(--accent-contrast);
   text-decoration: none;
   background: var(--accent);
+  border: 1px solid transparent;
   border-radius: 8px;
+  cursor: pointer;
+}
+
+.secondary-button {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+.secondary-button.danger-text {
+  color: var(--danger);
+}
+
+.primary-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.closed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
 }
 
 .deleted-banner {
@@ -125,9 +151,13 @@
   border-bottom: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
-.deleted-banner a {
-  color: inherit;
+.deleted-banner a,
+.deleted-banner .banner-button {
+  padding: 0;
+  font: inherit;
   font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
 }
 
 .loading.deleted {

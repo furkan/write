@@ -23,5 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Collaboration documents (Hocuspocus)
+# Collaboration documents (Hocuspocus) and their daily backups
 .collab-data
+.collab-backups
