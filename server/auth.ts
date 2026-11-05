@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, errors, jwtVerify } from 'jose'
-import type { AuthMode, AuthSettings } from './config.ts'
+import type { AuthSettings } from './config.ts'
 
 /**
  * Who is making a request. In Access mode the user is the verified email in Cloudflare Access's
@@ -10,9 +10,9 @@ import type { AuthMode, AuthSettings } from './config.ts'
 /** A user, identified only by their email, trimmed and lowercased. */
 export type User = { email: string }
 
-export const ACCESS_JWT_HEADER = 'cf-access-jwt-assertion'
+const ACCESS_JWT_HEADER = 'cf-access-jwt-assertion'
 /** Dev mode only: sets the identity, so several users can be tried in one browser. */
-export const DEV_USER_COOKIE = 'write-dev-user'
+const DEV_USER_COOKIE = 'write-dev-user'
 
 export const normalizeEmail = (value: unknown) => (typeof value === 'string' ? value.trim().toLowerCase() : '')
 
@@ -43,7 +43,6 @@ export type Identity =
     }
 
 export type Authenticator = {
-  mode: AuthMode
   identify(header: HeaderGetter): Promise<Identity>
 }
 
@@ -60,13 +59,21 @@ function readCookie(header: string | undefined, name: string) {
   return undefined
 }
 
-// Errors that mean "Access's keys can't be fetched right now", not "this token is bad".
-const KEYS_UNAVAILABLE = new Set(['ERR_JWKS_TIMEOUT', 'ERR_JWKS_INVALID'])
+/**
+ * jose errors that mean "this token is bad" (401). Anything else, such as the key set timing
+ * out, answering 5xx or HTML (`ERR_JOSE_GENERIC`), or holding an unusable key, means the keys
+ * can't be used right now (503): a Cloudflare blip must not look like an expired session.
+ */
+const isTokenError = (error: unknown): error is InstanceType<typeof errors.JOSEError> =>
+  error instanceof errors.JOSEError &&
+  (/^ERR_JW[TS]_/.test(error.code) ||
+    ['ERR_JWKS_NO_MATCHING_KEY', 'ERR_JWKS_MULTIPLE_MATCHING_KEYS', 'ERR_JOSE_ALG_NOT_ALLOWED', 'ERR_JOSE_NOT_SUPPORTED'].includes(
+      error.code,
+    ))
 
 export function createAuthenticator(settings: AuthSettings): Authenticator {
   if (settings.mode === 'dev') {
     return {
-      mode: 'dev',
       identify: async (header) => {
         const fromCookie = normalizeEmail(readCookie(header('cookie'), DEV_USER_COOKIE))
         const email = fromCookie && fromCookie.length <= 254 ? fromCookie : settings.devUser
@@ -79,7 +86,6 @@ export function createAuthenticator(settings: AuthSettings): Authenticator {
   const keys = createRemoteJWKSet(new URL(settings.certsUrl))
   const issuer = `https://${settings.teamDomain}`
   return {
-    mode: 'access',
     identify: async (header) => {
       // Only the header: Cloudflare advises against trusting the CF_Authorization cookie.
       const token = header(ACCESS_JWT_HEADER)
@@ -102,12 +108,12 @@ export function createAuthenticator(settings: AuthSettings): Authenticator {
         }
         return { ok: true, user: { email } }
       } catch (error) {
-        if (error instanceof errors.JOSEError && !KEYS_UNAVAILABLE.has(error.code)) {
+        if (isTokenError(error)) {
           const claim = error instanceof errors.JWTClaimValidationFailed ? ` (${error.claim})` : ''
           return { ok: false, status: 401, reason: `${error.code}${claim}` }
         }
         const why = error instanceof Error ? error.message : String(error)
-        console.error(`[write] could not fetch the Cloudflare Access signing keys from ${settings.certsUrl}: ${why}`)
+        console.error(`[write] could not use the Cloudflare Access signing keys from ${settings.certsUrl}: ${why}`)
         return { ok: false, status: 503, reason: 'signing keys unavailable' }
       }
     },

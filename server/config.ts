@@ -104,14 +104,24 @@ function accessSettings(env: Env): AuthSettings {
     )
   }
   const domain = teamDomain(team)
-  const certsUrl = value(env, 'WRITE_ACCESS_CERTS_URL') ?? `https://${domain}/cdn-cgi/access/certs`
+  const certsUrl = value(env, 'WRITE_ACCESS_CERTS_URL') ?? defaultCertsUrl(domain)
+  let url: URL
   try {
-    new URL(certsUrl)
+    url = new URL(certsUrl)
   } catch {
     throw new ConfigError(`WRITE_ACCESS_CERTS_URL is not a URL: "${certsUrl}".`)
   }
+  // Whoever serves the keys decides who signs in. Plain http only for a local test key server.
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback(url.hostname))) {
+    throw new ConfigError(`WRITE_ACCESS_CERTS_URL must be https:// (or http:// on 127.0.0.1 for tests), got "${certsUrl}".`)
+  }
   return { mode: 'access', teamDomain: domain, aud, certsUrl }
 }
+
+const defaultCertsUrl = (domain: string) => `https://${domain}/cdn-cgi/access/certs`
+
+const isLoopback = (hostname: string) =>
+  hostname === 'localhost' || hostname === '[::1]' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
 
 /**
  * @param mode `dev` for `vite dev`, `access` for `vite preview`.
@@ -140,7 +150,14 @@ export function resolveConfig(mode: AuthMode, env: Env, root: string): WriteConf
 /** The one startup line naming the auth mode. */
 export function describeConfig(config: WriteConfig) {
   const where = `data in ${config.dataDir}, collaboration on 127.0.0.1:${config.collabPort}`
-  return config.auth.mode === 'access'
-    ? `[write] Access mode: every request needs a Cloudflare Access JWT for team ${config.auth.teamDomain}; ${where}`
-    : `[write] Dev mode (no verification, not for the internet): identity from the write-dev-user cookie, else ${config.auth.devUser}; ${where}`
+  if (config.auth.mode === 'access') {
+    const { teamDomain: domain, certsUrl } = config.auth
+    // A WRITE_ACCESS_CERTS_URL left in an .env file would quietly trust other keys: always say so.
+    const keys =
+      certsUrl === defaultCertsUrl(domain)
+        ? ''
+        : `; WARNING: signing keys from ${certsUrl} (WRITE_ACCESS_CERTS_URL), not from Cloudflare`
+    return `[write] Access mode: every request needs a Cloudflare Access JWT for team ${domain}${keys}; ${where}`
+  }
+  return `[write] Dev mode (no verification, not for the internet): identity from the write-dev-user cookie, else ${config.auth.devUser}; ${where}`
 }

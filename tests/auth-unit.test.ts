@@ -1,7 +1,7 @@
 /** Unit tests for configuration and identity, without starting a server. */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { createAuthenticator, isAllowedOrigin, type HeaderGetter } from '../server/auth.ts'
-import { ConfigError, resolveConfig } from '../server/config.ts'
+import { ConfigError, describeConfig, resolveConfig } from '../server/config.ts'
 import { AUD, startAccessKeys, TEAM_DOMAIN, type AccessKeys } from './helpers.ts'
 
 const ROOT = '/srv/write'
@@ -73,6 +73,23 @@ describe('resolveConfig', () => {
       ownerEmail: 'owner@example.com',
     })
     expect(config.auth).toMatchObject({ certsUrl: 'http://127.0.0.1:9999/certs' })
+  })
+
+  test('WRITE_ACCESS_CERTS_URL must be https, or http on loopback', () => {
+    const access = { WRITE_ACCESS_TEAM_DOMAIN: 'acme.cloudflareaccess.com', WRITE_ACCESS_AUD: 'aud1' }
+    for (const url of ['http://keys.example.com/certs', 'http://10.0.0.5/certs', 'ftp://127.0.0.1/certs', 'file:///etc/keys']) {
+      expect(() => resolveConfig('access', { ...access, WRITE_ACCESS_CERTS_URL: url }, ROOT)).toThrow(ConfigError)
+    }
+    for (const url of ['https://keys.example.com/certs', 'http://127.0.0.1:9999/certs', 'http://localhost:1/certs', 'http://[::1]:1/certs']) {
+      expect(resolveConfig('access', { ...access, WRITE_ACCESS_CERTS_URL: url }, ROOT).auth).toMatchObject({ certsUrl: url })
+    }
+  })
+
+  test('the startup line warns when the signing keys are not Cloudflare\'s', () => {
+    const access = { WRITE_ACCESS_TEAM_DOMAIN: 'acme.cloudflareaccess.com', WRITE_ACCESS_AUD: 'aud1' }
+    expect(describeConfig(resolveConfig('access', access, ROOT))).not.toContain('WARNING')
+    const custom = describeConfig(resolveConfig('access', { ...access, WRITE_ACCESS_CERTS_URL: 'http://127.0.0.1:9999/certs' }, ROOT))
+    expect(custom).toContain('WARNING: signing keys from http://127.0.0.1:9999/certs (WRITE_ACCESS_CERTS_URL)')
   })
 
   test('Access mode refuses to start without both Access variables', () => {
@@ -176,6 +193,34 @@ describe('Access mode identity', () => {
     })
     const token = await keys.sign()
     expect(await offline.identify(withToken(token))).toMatchObject({ ok: false, status: 503 })
+  })
+
+  test.each([
+    ['502 Bad Gateway', () => new Response('<html>bad gateway</html>', { status: 502 })],
+    ['200 with an HTML page', () => new Response('<html>sign in</html>', { headers: { 'content-type': 'text/html' } })],
+    ['200 with no keys', () => Response.json({ nope: true })],
+  ])('signing keys answering %s are 503 and logged', async (_name, answer) => {
+    const broken = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: answer })
+    const errors: unknown[] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => void errors.push(args.join(' '))
+    try {
+      const authenticator = createAuthenticator({
+        mode: 'access',
+        teamDomain: TEAM_DOMAIN,
+        aud: AUD,
+        certsUrl: `http://127.0.0.1:${broken.port}/certs`,
+      })
+      expect(await authenticator.identify(withToken(await keys.sign()))).toMatchObject({
+        ok: false,
+        status: 503,
+        reason: 'signing keys unavailable',
+      })
+      expect(String(errors[0])).toContain(`could not use the Cloudflare Access signing keys from http://127.0.0.1:${broken.port}/certs`)
+    } finally {
+      console.error = original
+      void broken.stop(true)
+    }
   })
 })
 
