@@ -714,11 +714,6 @@
   transform: scale(1.1);
 }
 
-.swatch-clear {
-  color: var(--muted);
-  background: var(--bg);
-}
-
 /* ---------- Editor content ---------- */
 
 .editor-shell {

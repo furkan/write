@@ -32,16 +32,29 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
   const current = tabs.find((t) => t.id === view.tab) ?? tabs[0]
   const showPanel = !view.collapsed || view.flyout
 
+  // A contextual tab that went away hands back to Home for good, so coming back into a table
+  // later doesn't select the Table tab again.
+  useEffect(() => {
+    if (current.id !== view.tab) focusTab('home')
+  }, [current.id, view.tab])
+
   useStickyOffset(rootRef)
 
-  // The collapsed ribbon's flyout closes on a click elsewhere (but not on a tour's own popover).
+  // The collapsed ribbon's flyout closes on a click elsewhere (but not on a tour's own popover),
+  // and on Escape, which an open menu inside it takes first (Dropdown stops it in the capture
+  // phase). From the keyboard,
+  // focus goes back to the selected tab.
   useEffect(() => {
     if (!view.flyout) return
     const onPointer = (event: PointerEvent) => {
       const target = event.target as Element
       if (!rootRef.current?.contains(target) && !target.closest?.('.driver-popover, .driver-overlay')) closeFlyout()
     }
-    const onKey = (event: globalThis.KeyboardEvent) => event.key === 'Escape' && closeFlyout()
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (rootRef.current?.contains(document.activeElement)) rootRef.current.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
+      closeFlyout()
+    }
     document.addEventListener('pointerdown', onPointer)
     document.addEventListener('keydown', onKey)
     return () => {
@@ -63,7 +76,16 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
   const chain = () => editor.chain().focus()
 
   return (
-    <div ref={rootRef} className={`ribbon${view.collapsed ? ' collapsed' : ''}`} data-tour="toolbar">
+    <div
+      ref={rootRef}
+      className={`ribbon${view.collapsed ? ' collapsed' : ''}`}
+      data-tour="toolbar"
+      onBlur={(event) => {
+        // Tabbing out of the flyout closes it, rather than leaving it over the document.
+        const next = event.relatedTarget as Element | null
+        if (view.flyout && next && !rootRef.current?.contains(next) && !next.closest('.driver-popover')) closeFlyout()
+      }}
+    >
       <div className="ribbon-bar">
         <div className="ribbon-qat" role="group" aria-label="Quick access" data-tour="history">
           <RibbonButton label="Undo" shortcut={`${mod}+Z`} icon={Undo2} disabled={readOnly || !s.canUndo} onClick={() => chain().undo().run()} />
@@ -116,7 +138,6 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
             role="toolbar"
             aria-label={current.label}
             aria-disabled={readOnly}
-            data-tour={current.id === 'table' ? 'table-controls' : undefined}
           >
             <current.Panel editor={editor} s={s} disabled={readOnly} />
           </div>
