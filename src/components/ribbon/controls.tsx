@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, LoaderCircle } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
 import { Dropdown } from '../Dropdown'
 import { keepSelection, tooltip } from './editorState'
@@ -20,6 +20,8 @@ export function RibbonGroup({ label, tour, children }: { label: string; tour?: s
 
 type ButtonProps = {
   label: string
+  /** The tooltip, when it says more than the label. The label stays the accessible name. */
+  title?: string
   shortcut?: string
   icon?: LucideIcon
   /** A custom glyph instead of an icon (B, I, U…). */
@@ -32,23 +34,32 @@ type ButtonProps = {
   /** For toggles: whether it is on. Leave undefined for plain commands. */
   active?: boolean
   disabled?: boolean
+  /** Working on it: a spinner instead of the icon; clicks are ignored, but the button keeps focus (aria-disabled). */
+  busy?: boolean
+  /** `danger` for destructive actions (Move to trash). */
+  tone?: 'danger'
   onClick: () => void
 }
 
-export function RibbonButton({ label, shortcut, icon: Icon, glyph, size = 'small', active, disabled, onClick }: ButtonProps) {
-  const title = tooltip(label, shortcut)
+export function RibbonButton({ label, title, shortcut, icon, glyph, size = 'small', active, disabled, busy, tone, onClick }: ButtonProps) {
+  const Icon = busy ? LoaderCircle : icon
+  // The name is the label (what you see, and what you say to voice control); a longer `title` is
+  // only the tooltip, and so the description.
   return (
     <button
       type="button"
-      className={`ribbon-btn ${size}${active ? ' active' : ''}`}
-      title={title}
-      aria-label={title}
+      className={`ribbon-btn ${size}${active ? ' active' : ''}${tone ? ` ${tone}` : ''}`}
+      title={tooltip(title ?? label, shortcut)}
+      aria-label={tooltip(label, shortcut)}
       aria-pressed={active}
+      aria-busy={busy || undefined}
+      aria-disabled={busy || undefined}
       disabled={disabled}
       onMouseDown={keepSelection}
-      onClick={onClick}
+      onClick={busy ? undefined : onClick}
     >
-      {glyph ?? (Icon && <Icon aria-hidden size={size === 'large' ? 24 : 16} strokeWidth={size === 'large' ? 1.6 : 2} />)}
+      {(!busy && glyph) ||
+        (Icon && <Icon aria-hidden className={busy ? 'ribbon-spin' : undefined} size={size === 'large' ? 24 : 16} strokeWidth={size === 'large' ? 1.6 : 2} />)}
       {size !== 'small' && <span className="ribbon-btn-label">{label}</span>}
     </button>
   )

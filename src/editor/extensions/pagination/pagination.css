@@ -1,0 +1,259 @@
+/*
+ * Paged layout: see Pagination.ts for how the floats make pages. The extension sets the
+ * `paginated` class and the --page-* variables on the editor element.
+ *
+ * Screen only. Printing never uses these pages: the browser paginates with the document's
+ * paper size and margins from `@page` (see pageRules in editor/page-setup.ts), in either layout,
+ * and the decorations are hidden (layout.css).
+ */
+
+@media screen {
+  .editor .tiptap.paginated {
+    /* Contains the floats, so the editor is exactly as tall as its pages. */
+    display: flow-root;
+    box-sizing: border-box;
+    width: var(--page-width);
+    min-height: 0;
+    margin: 0 auto;
+    padding: var(--page-margin-top) var(--page-margin-right) 0 var(--page-margin-left);
+    background: var(--paper);
+    box-shadow:
+      0 0 0 1px var(--paper-edge),
+      var(--page-shadow);
+  }
+
+  .editor .tiptap.paginated > .pagination-pages + * {
+    margin-top: 0;
+  }
+
+  .pagination-pages {
+    pointer-events: none;
+    user-select: none;
+  }
+
+  /* Zero-width float as tall as a page's content area: the next break goes under it. */
+  .pagination-spacer {
+    float: left;
+    clear: both;
+    width: 0;
+    height: 0;
+    margin-top: var(--page-content-height);
+  }
+
+  /* Full width, margins included: this page's bottom margin, the gap, the next page's top margin. */
+  .pagination-break {
+    position: relative;
+    /* Above positioned content (callouts, table cells) whose backgrounds reach into the margins. */
+    z-index: 1;
+    float: left;
+    clear: both;
+    width: var(--page-width);
+    margin-right: calc(-1 * var(--page-margin-right));
+    margin-left: calc(-1 * var(--page-margin-left));
+  }
+
+  .pagination-footer,
+  .pagination-header {
+    background: var(--paper);
+  }
+
+  .pagination-header {
+    height: var(--page-margin-top);
+  }
+
+  .pagination-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--page-margin-bottom);
+    font: 0.75rem/1 var(--sans);
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Wider than the page, to cover the page's side shadow between pages. */
+  .pagination-gap {
+    position: relative;
+    height: var(--page-gap);
+    margin: 0 -24px;
+    background: var(--canvas);
+  }
+
+  /* The bottom edge (with its shadow) of the page above and the top edge of the page below. */
+  .pagination-gap::before,
+  .pagination-gap::after {
+    position: absolute;
+    right: 24px;
+    left: 24px;
+    height: 1px;
+    content: '';
+    background: var(--paper-edge);
+  }
+
+  .pagination-gap::before {
+    top: 0;
+    box-shadow: var(--page-shadow);
+  }
+
+  .pagination-gap::after {
+    bottom: 0;
+  }
+
+  .pagination-break:last-child > :not(.pagination-footer) {
+    display: none;
+  }
+
+  /*
+   * An empty line fits beside a break (it needs no width), so it would sit behind it. As a full
+   * width box of its own it can't, so it moves to the next page like any other line.
+   */
+  .tiptap.paginated :is(p, h1, h2, h3, h4, h5, h6):has(> br.ProseMirror-trailingBreak:only-child) {
+    display: flow-root;
+    min-width: 100%;
+  }
+
+  /*
+   * Content that would otherwise be one unbreakable box (a block formatting context): such a box
+   * moves whole to the next page, and one taller than a page would never fit. These let lines and
+   * table rows move to the next page one by one instead.
+   */
+
+  .tiptap.paginated pre {
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .tiptap.paginated pre code {
+    white-space: inherit;
+  }
+
+  /* Images, videos and display math can't be split: never taller than a page. */
+  .tiptap.paginated img,
+  .tiptap.paginated div[data-youtube-video] iframe {
+    max-height: var(--page-content-height);
+    object-fit: contain;
+  }
+
+  /*
+   * A formula taller than a page scrolls inside its box (and is cut off on paper). The box is its
+   * own formatting context, so it's full width, or it would squeeze beside a break (as rows do).
+   */
+  .tiptap.paginated [data-type='block-math'] {
+    min-width: 100%;
+    max-height: var(--page-content-height);
+    overflow: auto;
+  }
+
+  /*
+   * Callouts and toggles: blocks whose lines break across pages, with the icon positioned in the
+   * padding. (Not floated: a float can't sit higher than an earlier float, and every page break is
+   * one.) If the first line moves to the next page, the icon stays behind the break.
+   */
+  .tiptap.paginated .callout {
+    display: block;
+    position: relative;
+    padding-left: 52px;
+  }
+
+  .tiptap.paginated .callout-icon {
+    position: absolute;
+    top: 10px;
+    left: 14px;
+  }
+
+  .tiptap.paginated [data-type='details'] {
+    display: block;
+    position: relative;
+    padding-left: calc(12px + 22px + 0.4em);
+  }
+
+  .tiptap.paginated [data-type='details'] > button {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+  }
+
+  /* Task items stay one box each (with the checkbox), full width so they can't squeeze beside a break. */
+  .tiptap.paginated ul[data-type='taskList'] li {
+    min-width: 100%;
+  }
+
+  /*
+   * Tables: each row is its own box (a grid), so rows move to the next page one at a time. The
+   * extension places every cell in its column (`grid-column`) and gives the table its column
+   * template (`--table-columns`, which resized columns keep), so cells under a rowspan and wide
+   * colspans line up as in the table. A rowspan cell itself is drawn in its first row only.
+   */
+  .tiptap.paginated .tableWrapper,
+  .tiptap.paginated table {
+    overflow: visible;
+  }
+
+  .tiptap.paginated table,
+  .tiptap.paginated tbody {
+    display: block;
+  }
+
+  .tiptap.paginated table > colgroup {
+    display: none;
+  }
+
+  .tiptap.paginated tr {
+    display: grid;
+    grid-template-columns: var(--table-columns, repeat(auto-fit, minmax(0, 1fr)));
+    /* A box that is its own formatting context fits beside a float when it can shrink enough,
+       even to nothing. Full width, it can't, so it moves below the break instead. */
+    min-width: 100%;
+  }
+
+  .tiptap.paginated tr + tr {
+    margin-top: -1px;
+  }
+
+  .tiptap.paginated :is(td, th) {
+    display: block;
+    grid-row: 1;
+  }
+
+  /* Neighbouring borders overlap, as in a collapsed table: every column but the first. */
+  .tiptap.paginated :is(td, th):not([style*='grid-column: 1 /']) {
+    margin-left: -1px;
+  }
+
+  /*
+   * A row or task item taller than a page can't move to the next page whole; the extension gives it
+   * this class so its lines break across pages instead. A tall row's cells stack.
+   */
+  .tiptap.paginated tr.pagination-tall,
+  .tiptap.paginated tr.pagination-tall > :is(td, th) {
+    display: block;
+  }
+
+  .tiptap.paginated tr.pagination-tall > :is(td, th) + :is(td, th) {
+    margin-top: -1px;
+    margin-left: 0;
+  }
+
+  .tiptap.paginated ul[data-type='taskList'] li.pagination-tall {
+    display: block;
+    position: relative;
+    padding-left: 1.5em;
+  }
+
+  .tiptap.paginated ul[data-type='taskList'] li.pagination-tall > label {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+
+  /* A collaborator's name sits above their caret: on a page's first line, that's over the break. */
+  .tiptap.paginated .collaboration-carets__label {
+    z-index: 2;
+  }
+
+  /* Focus mode dims the editor's children, but the pages aren't content. */
+  .focus-mode .tiptap > .pagination-pages {
+    opacity: 1;
+  }
+}

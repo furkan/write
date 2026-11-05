@@ -43,6 +43,21 @@ export type WriteConfig = {
   allowedOrigins: string[]
   /** Owner given to documents that predate ownership (the legacy owner). Dev mode defaults it to the dev identity. */
   ownerEmail?: string
+  pdf: PdfSettings
+}
+
+/** Download as PDF (server/pdf.ts). */
+export type PdfSettings = {
+  /** The Chromium headless shell; default: Playwright's own install for this `playwright-core`. */
+  chromium?: string
+  /** Exports printing at once. */
+  maxConcurrent: number
+  /** Exports waiting for a turn; more get 503. */
+  maxQueue: number
+  /** Time for one export, waiting included. */
+  timeoutMs: number
+  /** Largest stored document exported (the page built from it may be `PAGE_FACTOR` times that); larger is 413. */
+  maxBytes: number
 }
 
 export class ConfigError extends Error {
@@ -65,6 +80,11 @@ export const SETTINGS = [
   'WRITE_ACCESS_CERTS_URL',
   'WRITE_OWNER_EMAIL',
   'WRITE_DEV_USER',
+  'WRITE_PDF_CHROMIUM',
+  'WRITE_PDF_MAX_CONCURRENT',
+  'WRITE_PDF_MAX_QUEUE',
+  'WRITE_PDF_TIMEOUT_SECONDS',
+  'WRITE_PDF_MAX_MB',
 ] as const
 
 export type Setting = (typeof SETTINGS)[number]
@@ -90,6 +110,28 @@ function port(env: Env, name: Setting, fallback: number) {
     throw new ConfigError(`${name} must be a port number (1-65535), got "${raw}".`)
   }
   return parsed
+}
+
+/** A number from `min` to `max` (whole when `integer`), or the fallback when unset. */
+function number(env: Env, name: Setting, fallback: number, { min, max, integer = true }: { min: number; max: number; integer?: boolean }) {
+  const raw = value(env, name)
+  if (raw === undefined) return fallback
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max || (integer && !Number.isInteger(parsed))) {
+    throw new ConfigError(`${name} must be ${integer ? 'a whole number' : 'a number'} from ${min} to ${max}, got "${raw}".`)
+  }
+  return parsed
+}
+
+function pdfSettings(env: Env, dir: (raw: string) => string): PdfSettings {
+  const chromium = value(env, 'WRITE_PDF_CHROMIUM')
+  return {
+    chromium: chromium ? dir(chromium) : undefined,
+    maxConcurrent: number(env, 'WRITE_PDF_MAX_CONCURRENT', 2, { min: 1, max: 16 }),
+    maxQueue: number(env, 'WRITE_PDF_MAX_QUEUE', 8, { min: 0, max: 1000 }),
+    timeoutMs: number(env, 'WRITE_PDF_TIMEOUT_SECONDS', 30, { min: 1, max: 600 }) * 1000,
+    maxBytes: Math.round(number(env, 'WRITE_PDF_MAX_MB', 5, { min: 0.01, max: 100, integer: false }) * 1024 * 1024),
+  }
 }
 
 function origin(raw: string) {
@@ -162,6 +204,7 @@ export function resolveConfig(mode: AuthMode, env: Env, root: string): WriteConf
     allowedHosts: list(env, 'WRITE_ALLOWED_HOSTS'),
     allowedOrigins: list(env, 'WRITE_ALLOWED_ORIGINS').map(origin),
     ownerEmail: normalizeEmail(value(env, 'WRITE_OWNER_EMAIL')) || (mode === 'dev' ? devUser : undefined),
+    pdf: pdfSettings(env, (raw) => (isAbsolute(raw) ? raw : resolve(root, raw))),
   }
 }
 

@@ -34,8 +34,9 @@ Group=@USER@
 WorkingDirectory=@CHECKOUT@
 # WRITE_* settings (deploy/pilot.env.example). Mode 0640, owned by root:@USER@.
 EnvironmentFile=/etc/write-pilot/pilot.env
-# Vite must run on Node (22.12 or later): the collaboration server refuses to start under Bun's
-# runtime, which `bun run` falls back to when no `node` is on the PATH. Node goes in
+# Vite must run on Node 22.18 or later: the collaboration server refuses to start under Bun's
+# runtime, which `bun run` falls back to when no `node` is on the PATH, and the PDF page builder
+# is a TypeScript worker thread that Node runs as it is from 22.18. Node goes in
 # /usr/local/bin or /usr/bin, since the service can't see home directories.
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 # Logs the Node version, and fails with "env: 'node': No such file or directory" without one.
@@ -87,8 +88,21 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
+# Download as PDF runs Chromium's headless shell (WRITE_PDF_CHROMIUM) inside this sandbox. Its
+# processes call capset() as they start and crash when it fails; the service has no capabilities
+# (CapabilityBoundingSet= is empty, NoNewPrivileges=yes), so capset() can only drop them. Its
+# profile goes in the private /tmp, and --disable-dev-shm-usage keeps it off /dev/shm.
+#
+# Chromium's own sandbox can't run here, so the server starts it without one (and logs that once):
+# the sandbox needs unprivileged user namespaces, which RestrictNamespaces= forbids, and which
+# Ubuntu 23.10+ also blocks with AppArmor for programs without a profile (its setuid fallback is
+# ruled out by NoNewPrivileges=). Allowing it would mean RestrictNamespaces=user pid net,
+# SystemCallFilter=chroot and an AppArmor profile for the headless shell: more for the whole
+# service to be allowed than the renderer gains. The page Chromium prints has no JavaScript and no
+# network, and this unit is the boundary; see "Download as PDF: security" in README.md.
+SystemCallFilter=capset
 SystemCallErrorNumber=EPERM
-# Not MemoryDenyWriteExecute=: the JavaScript JIT needs writable, executable memory.
+# Not MemoryDenyWriteExecute=: the JavaScript JIT needs writable, executable memory (Node's and Chromium's).
 
 [Install]
 WantedBy=multi-user.target

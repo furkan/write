@@ -2,27 +2,53 @@ import 'katex/dist/katex.min.css'
 import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { yUndoPluginKey } from '@tiptap/y-tiptap'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type RefObject,
+} from 'react'
 import { getDocStatus, libraryUrl, probeSession, restoreOrConfirmOpen, trashUrl, type DocStatus, type Role } from '../api'
 import { ClosedPage } from '../components/ClosedPage'
 import { EditorMenus } from '../components/EditorMenus'
-import { Header, type ViewOptions } from '../components/Header'
-import { SessionBanner } from '../components/SessionBanner'
+import { BarActions, DocumentTitle } from '../components/ribbon/BarItems'
+import { canWrite as canWriteAs, DocumentChromeContext, type DocumentChrome, type ViewOptions } from '../components/ribbon/documentContext'
 import { Ribbon } from '../components/ribbon/Ribbon'
+import { useMediaQuery } from '../components/ribbon/state'
+import { SessionBanner } from '../components/SessionBanner'
+import { Toast } from '../components/Toast'
+import { ShareDialog } from '../components/ShareDialog'
 import { Sidebar } from '../components/Sidebar'
 import { StatusBar } from '../components/StatusBar'
 import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
 import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRetrying } from '../editor/hooks'
+import { pageGeometry, pageRules, trackPageSetupUndo, usePagedView, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
+import { setDocumentScroller } from '../editor/scroller'
+import { fitZoom, useZoomSetting, type ZoomFit } from '../editor/zoom'
 import { accountAction, setSessionExpired, useMe } from '../session'
 import { autoStartTour, setTourContext, startTour } from '../tours'
+import '../layout.css'
 
 /** How long to wait for the collaboration server before opening the editor offline. */
 const SYNC_TIMEOUT_MS = 4000
 /** How long a template waits to learn whether we own the document before opening without it. */
 const OWNER_WAIT_MS = 10_000
+
+/**
+ * Room Print layout needs beside the page for the sidebar: the canvas padding (48), the column
+ * gap (24), the sidebar (320), the workspace padding (32) and a scrollbar (16). Narrower, the
+ * sidebar goes below the document, as it does on narrow screens.
+ */
+const SIDEBAR_ROOM = 48 + 24 + 320 + 32 + 16
 
 /**
  * Waits for the first sync with the collaboration server, so the editor never
@@ -284,13 +310,154 @@ function SyncedDocument({ name, templateId, access }: DocumentPageProps & { acce
   return <Workspace session={session} template={role === 'owner' ? template : undefined} role={role} />
 }
 
+/**
+ * The `@page` rules for printing, kept in a <style> element of its own: the sheet size and
+ * margins follow the document's page setup (see pageRules).
+ */
+function usePrintPageRules(rules: string) {
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.dataset.pageRule = ''
+    style.textContent = rules
+    document.head.append(style)
+    return () => style.remove()
+  }, [rules])
+}
+
+/**
+ * A phone's keyboard: Android resizes the layout for it (`interactive-widget=resizes-content` in
+ * index.html); iOS doesn't, and the shell (100dvh) would run under the keyboard, status bar and
+ * caret included. While the visible viewport is clearly shorter than the window (and not because
+ * of a pinch zoom), the shell takes its height (`--app-height`, see App.css).
+ */
+function useKeyboardHeight() {
+  useEffect(() => {
+    const visual = window.visualViewport
+    if (!visual) return
+    const root = document.documentElement
+    const update = () => {
+      const covered = visual.scale < 1.01 && window.innerHeight - visual.height > 80
+      if (covered) root.style.setProperty('--app-height', `${Math.round(visual.height)}px`)
+      else root.style.removeProperty('--app-height')
+    }
+    update()
+    visual.addEventListener('resize', update)
+    return () => {
+      visual.removeEventListener('resize', update)
+      root.style.removeProperty('--app-height')
+    }
+  }, [])
+}
+
+/** Space the page keeps on screen: the editor's padding around it (see layout.css). */
+const PAGE_PADDING = { x: 48, top: 16, bottom: 16 }
+
+/** Keys that scroll a page, and how far: a fraction of the view's height, or to an end. */
+const SCROLL_KEYS: Record<string, (view: HTMLElement, shift: boolean) => number> = {
+  PageDown: (v) => v.clientHeight * 0.875,
+  PageUp: (v) => -v.clientHeight * 0.875,
+  ' ': (v, shift) => (shift ? -1 : 1) * v.clientHeight * 0.875,
+  ArrowDown: () => 40,
+  ArrowUp: () => -40,
+  End: (v) => v.scrollHeight,
+  Home: (v) => -v.scrollHeight,
+}
+
+/**
+ * Registers the document scroller (see editor/scroller.ts) and publishes its height as
+ * `--doc-view-height`, for the sticky sidebar's own scrolling (see App.css).
+ *
+ * The page itself doesn't scroll, so scrolling keys pressed with nothing focused would do
+ * nothing. The scroller is focusable (tabIndex -1) and takes focus when the page opens with
+ * nothing else focused; keys that still reach the body (after a dialog closes, say) scroll it too.
+ */
+function useDocumentScroller(view: HTMLElement | null) {
+  useLayoutEffect(() => {
+    if (!view) return
+    setDocumentScroller(view)
+    if (!document.activeElement || document.activeElement === document.body) view.focus({ preventScroll: true })
+    const onKey = (event: KeyboardEvent) => {
+      const distance = SCROLL_KEYS[event.key]
+      if (!distance || event.defaultPrevented || event.target !== document.body) return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      event.preventDefault()
+      view.focus({ preventScroll: true })
+      view.scrollBy({ top: distance(view, event.shiftKey) })
+    }
+    window.addEventListener('keydown', onKey)
+    const observer = new ResizeObserver(() => view.style.setProperty('--doc-view-height', `${view.clientHeight}px`))
+    observer.observe(view)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('keydown', onKey)
+      setDocumentScroller(null)
+    }
+  }, [view])
+}
+
+/**
+ * The percentage a fit (Page width, One page) gives, following the window and the sidebar. The
+ * room is the main column's width (which doesn't depend on the zoom while fitting: see the
+ * `--layout-page-width` below) and the document scroller's height.
+ */
+function useFitZoom(
+  fit: ZoomFit | null,
+  pageWidth: number,
+  pageHeight: number,
+  main: RefObject<HTMLElement | null>,
+  view: HTMLElement | null,
+): number | null {
+  const [fitted, setFitted] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const column = main.current
+    if (!fit || !column || !view) return
+    const measure = () => {
+      const width = column.clientWidth - PAGE_PADDING.x
+      const height = view.clientHeight - PAGE_PADDING.top - PAGE_PADDING.bottom
+      setFitted(fitZoom({ fit, pageWidth, pageHeight, width, height }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(column)
+    observer.observe(view)
+    return () => observer.disconnect()
+  }, [fit, pageWidth, pageHeight, main, view])
+  return fit ? fitted : null
+}
+
+/**
+ * Zooming keeps the same place in the document in the middle of the scroller, as Word does,
+ * instead of the same scroll offset. The scroll position is remembered before each change, since
+ * the browser's own scroll anchoring may already have moved it by the time this runs.
+ */
+function useZoomAnchor(zoom: number, editor: Editor, view: HTMLElement | null) {
+  const before = useRef({ zoom, scrollTop: 0 })
+  useEffect(() => {
+    if (!view) return
+    const remember = () => (before.current.scrollTop = view.scrollTop)
+    remember()
+    view.addEventListener('scroll', remember, { passive: true })
+    return () => view.removeEventListener('scroll', remember)
+  }, [view])
+  useLayoutEffect(() => {
+    const previous = before.current
+    if (!view || previous.zoom === zoom) return
+    const middle = view.clientHeight / 2
+    // The editor's top in the scroller's content, which zooming doesn't move.
+    const top = editor.view.dom.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop
+    const offset = (previous.scrollTop + middle - top) / previous.zoom
+    before.current = { zoom, scrollTop: previous.scrollTop }
+    if (offset > 0) view.scrollTo({ top: top + offset * zoom - middle, behavior: 'instant' })
+  }, [zoom, editor, view])
+}
+
 type WorkspaceProps = { session: Session; template: Template | undefined; role: Role | null }
 
 function Workspace({ session, template, role }: WorkspaceProps) {
   const me = useMe()
   const [user] = useState(() => collabUser(me.email))
   // Only owners and editors write. Viewers, and anyone whose role isn't known yet, read.
-  const canWrite = role === 'owner' || role === 'editor'
+  const canWrite = canWriteAs(role)
   const viewer = role === 'viewer'
   const canWriteRef = useRef(canWrite)
   const [toc, setToc] = useState<TableOfContentData>([])
@@ -302,6 +469,15 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   })
 
   const editorRef = useRef<Editor | null>(null)
+  const getEditor = useCallback(() => editorRef.current, [])
+
+  // Print layout shows pages; Web layout, or a screen too narrow for a page, one continuous page.
+  // Printing doesn't use either: the browser paginates with the page setup (see pageRules).
+  const pageSetup = usePageSetup(session)
+  const paged = usePagedView()
+  const pagination = useMemo(() => ({ enabled: paged, ...pageGeometry(pageSetup) }), [paged, pageSetup])
+  usePrintPageRules(pageRules(pageSetup))
+
   const backupTimer = useRef<number | undefined>(undefined)
 
   useEffect(() => {
@@ -313,8 +489,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   useEffect(() => {
     if (role === 'owner') adoptLegacyBackup(me.email, session.name)
   }, [role, me.email, session.name])
-
-  const getEditor = useCallback(() => editorRef.current, [])
 
   // Only people who can change the document take local backups.
   const backup = useCallback(
@@ -331,6 +505,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
       onSave: backup,
       getEditor,
       onTableOfContents: (data) => queueMicrotask(() => setToc(data)),
+      pagination,
     })
     // A brand-new document opened from a template gets its content written to Yjs
     // before the editor binds to it.
@@ -366,9 +541,20 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     }
   }, [editor])
 
+  // Page setup changes are steps in the editor's undo history (see `trackPageSetupUndo`).
+  useEffect(() => {
+    const undoManager = yUndoPluginKey.getState(editor.state)?.undoManager
+    if (undoManager) trackPageSetupUndo(session, undoManager)
+  }, [editor, session])
+
   useEffect(() => {
     editor.commands.showInvisibleCharacters(view.invisibles)
   }, [editor, view.invisibles])
+
+  // Before paint, so switching layouts or page sizes doesn't flash the old one.
+  useLayoutEffect(() => {
+    editor.commands.setPagination(pagination)
+  }, [editor, pagination])
 
   // Tutorial overlays: auto-start once, and `?` replays the welcome tour. They describe what
   // this user can do here.
@@ -474,67 +660,116 @@ function Workspace({ session, template, role }: WorkspaceProps) {
 
   const reconnect = useCallback(() => resume(session), [session])
 
-  const classes = ['app', view.focusMode && 'focus-mode', readOnly && 'read-only', !view.sidebar && 'no-sidebar']
+  const [sharing, setSharing] = useState(false)
+
+  const mainRef = useRef<HTMLElement>(null)
+  // The document's scroller, as state: the menus and the zoom need it once it exists.
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
+  useDocumentScroller(scroller)
+  useKeyboardHeight()
+
+  // Zoom: a percentage, or a fit in Print layout. Printing is always at 100% (print CSS).
+  const zoomSetting = useZoomSetting()
+  const fit = paged ? zoomSetting.fit : null
+  const fitted = useFitZoom(fit, pagination.pageWidth, pagination.pageHeight, mainRef, scroller)
+  const zoom = fit ? (fitted ?? 100) : zoomSetting.percent
+  useZoomAnchor(zoom, editor, scroller)
+  // Room for the sidebar beside the page at 100%. Zoomed in further, the page scrolls sideways in
+  // the document area instead (like a landscape page wider than the window): the contents stay.
+  const sidebarFits = useMediaQuery(`(min-width: ${Math.ceil(pagination.pageWidth) + SIDEBAR_ROOM}px)`)
+
+  const canToggleReadOnly = canWrite && !closedWhileOpen
+  const chrome = useMemo<DocumentChrome>(
+    () => ({
+      role,
+      view: { ...view, readOnly },
+      canToggleReadOnly,
+      setView: (next) => setView((prev) => ({ ...prev, ...next })),
+      backup: () => backup(editor),
+      share: () => setSharing(true),
+      zoom,
+    }),
+    [role, view, readOnly, canToggleReadOnly, backup, editor, zoom],
+  )
+
+  const style = {
+    '--zoom': zoom / 100,
+    // The page's width on screen, which the main column makes room for. Not while fitting: the
+    // page then fits the column by definition, and the column must not follow the page.
+    '--layout-page-width': fit ? '0px' : `${(pagination.pageWidth * zoom) / 100}px`,
+  } as CSSProperties
+
+  const classes = [
+    'app',
+    'doc-shell',
+    view.focusMode && 'focus-mode',
+    readOnly && 'read-only',
+    !view.sidebar && 'no-sidebar',
+    paged && 'layout-print',
+    paged && view.sidebar && !sidebarFits && 'sidebar-below',
+  ]
     .filter(Boolean)
     .join(' ')
 
   return (
-    <div className={classes}>
-      <Header
-        editor={editor}
-        session={session}
-        presence={presence}
-        role={role}
-        view={{ ...view, readOnly }}
-        canToggleReadOnly={canWrite && !closedWhileOpen}
-        onBackup={backup}
-        onViewChange={(next) => setView((prev) => ({ ...prev, ...next }))}
-      />
-      <Ribbon editor={editor} readOnly={readOnly} />
-      {closed && (
-        <div className="deleted-banner" role="alert">
-          {closed === 'trashed'
-            ? 'This document was moved to the trash.'
-            : closed === 'trashed-by-owner'
-              ? 'The owner moved this document to the trash.'
-              : closed === 'deleted'
-                ? 'This document was deleted.'
-                : 'You no longer have access to this document.'}{' '}
-          Your view is read-only and changes are no longer saved.{' '}
-          {closed === 'trashed' && (
-            <>
-              <RestoreButton name={session.name} className="link-button banner-button" /> ·{' '}
-            </>
-          )}
-          <a href={libraryUrl()}>Back to all documents</a>
-        </div>
-      )}
-      {lostEdits && (
-        <div className="deleted-banner lost-edits" role="alert">
-          You can only view this document now, so your latest changes weren’t saved. They’re still on this screen until
-          you reload: copy them, or use File → Export, if you need them.
-        </div>
-      )}
-      {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
-      <div className="workspace">
-        <main className="main">
-          <div className="editor-shell" data-tour="editor">
-            <EditorContent editor={editor} className="editor" />
-            <EditorMenus editor={editor} />
+    <DocumentChromeContext value={chrome}>
+      <div className={classes} style={style}>
+        <Ribbon
+          editor={editor}
+          session={session}
+          readOnly={readOnly}
+          start={<DocumentTitle session={session} />}
+          end={<BarActions presence={presence} />}
+        />
+        {sharing && <ShareDialog docId={session.name} onClose={() => setSharing(false)} />}
+        {closed && (
+          <div className="deleted-banner" role="alert">
+            {closed === 'trashed'
+              ? 'This document was moved to the trash.'
+              : closed === 'trashed-by-owner'
+                ? 'The owner moved this document to the trash.'
+                : closed === 'deleted'
+                  ? 'This document was deleted.'
+                  : 'You no longer have access to this document.'}{' '}
+            Your view is read-only and changes are no longer saved.{' '}
+            {closed === 'trashed' && (
+              <>
+                <RestoreButton name={session.name} className="link-button banner-button" /> ·{' '}
+              </>
+            )}
+            <a href={libraryUrl()}>Back to all documents</a>
           </div>
-        </main>
-        {view.sidebar && <Sidebar editor={editor} toc={toc} />}
+        )}
+        {lostEdits && (
+          <div className="deleted-banner lost-edits" role="alert">
+            You can only view this document now, so your latest changes weren’t saved. They’re still on this screen until
+            you reload: copy them, or export them from the File tab, if you need them.
+          </div>
+        )}
+        {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
+        {/* The only part of the page that scrolls: the ribbon above and the status bar below stay put. */}
+        <div className="doc-scroll" ref={setScroller} tabIndex={-1}>
+          <div className="workspace">
+            <main className="main" ref={mainRef}>
+              <div className="editor-shell" data-tour="editor">
+                <EditorContent editor={editor} className="editor" />
+                <EditorMenus editor={editor} scrollTarget={scroller} />
+              </div>
+            </main>
+            {view.sidebar && <Sidebar editor={editor} toc={toc} />}
+          </div>
+        </div>
+        <Toast />
+        <StatusBar
+          editor={editor}
+          status={status}
+          pending={pending}
+          retrying={retrying}
+          readOnly={view.readOnly && canWrite}
+          role={role}
+          zoom={zoom}
+        />
       </div>
-      <StatusBar
-        editor={editor}
-        documentName={session.name}
-        email={me.email}
-        status={status}
-        pending={pending}
-        retrying={retrying}
-        readOnly={view.readOnly && canWrite}
-        role={role}
-      />
-    </div>
+    </DocumentChromeContext>
   )
 }

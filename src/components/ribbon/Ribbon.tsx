@@ -1,22 +1,45 @@
 import { useEditorState, type Editor } from '@tiptap/react'
 import { ChevronDown, ChevronUp, Redo2, Undo2 } from 'lucide-react'
-import { useEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import type { Session } from '../../editor/collab'
 import { mod } from '../../editor/platform'
 import { CodeTab, TableTab } from './ContextualTabs'
+import { FileTab } from './FileTab'
 import { RibbonButton } from './controls'
 import { keepSelection, selectRibbonState, type TabProps } from './editorState'
 import { HomeTab } from './HomeTab'
 import { InsertTab } from './InsertTab'
+import { LayoutTab } from './LayoutTab'
+import { ViewTab } from './ViewTab'
 import { clickTab, closeFlyout, focusTab, setCollapsed, useRibbonView, type RibbonTab } from './state'
 import './ribbon.css'
 
-type TabDef = { id: RibbonTab; label: string; contextual?: boolean; Panel: (props: TabProps) => ReactNode }
+type TabDef = {
+  id: RibbonTab
+  label: string
+  contextual?: boolean
+  /** File and View work in read-only too (export, print, view options); they disable what they must. */
+  readOnlyToo?: boolean
+  Panel: (props: TabProps) => ReactNode
+}
 
 const tabId = (id: RibbonTab) => `ribbon-tab-${id}`
 const PANEL_ID = 'ribbon-panel'
 
-/** Word-style ribbon: quick access, a tab row, and the selected tab's groups. */
-export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean }) {
+type RibbonProps = {
+  editor: Editor
+  session: Session
+  readOnly: boolean
+  /** The bar's start (logo and title) and end (who's here, Share, theme, account, tours). */
+  start: ReactNode
+  end: ReactNode
+}
+
+/**
+ * Word-style ribbon, the page's whole top bar: the title, quick access, the tab row, the page's
+ * actions, and the selected tab's groups.
+ */
+export function Ribbon({ editor, session, readOnly, start, end }: RibbonProps) {
   const s = useEditorState({ editor, selector: ({ editor: e }) => selectRibbonState(e) })
   const view = useRibbonView()
   const rootRef = useRef<HTMLDivElement>(null)
@@ -24,12 +47,17 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
   // Like Word, contextual tabs appear while the cursor is in a table or code block, but the ribbon
   // doesn't switch to them. They have nothing to offer a reader.
   const tabs: TabDef[] = [
+    { id: 'file', label: 'File', readOnlyToo: true, Panel: FileTab },
     { id: 'home', label: 'Home', Panel: HomeTab },
     { id: 'insert', label: 'Insert', Panel: InsertTab },
+    // Shown to everyone, like Word's; viewers and read-only get it disabled.
+    { id: 'layout', label: 'Layout', Panel: LayoutTab },
+    { id: 'view', label: 'View', readOnlyToo: true, Panel: ViewTab },
     ...(!readOnly && s.table ? [{ id: 'table' as const, label: 'Table', contextual: true, Panel: TableTab }] : []),
     ...(!readOnly && s.codeBlock ? [{ id: 'code' as const, label: 'Code', contextual: true, Panel: CodeTab }] : []),
   ]
-  const current = tabs.find((t) => t.id === view.tab) ?? tabs[0]
+  const current = tabs.find((t) => t.id === view.tab) ?? tabs[1]
+  const disabled = readOnly && !current.readOnlyToo
   const showPanel = !view.collapsed || view.flyout
 
   // A contextual tab that went away hands back to Home for good, so coming back into a table
@@ -38,7 +66,16 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
     if (current.id !== view.tab) focusTab('home')
   }, [current.id, view.tab])
 
-  useStickyOffset(rootRef)
+  // Tabs that don't fit scroll sideways: keep the selected one in view (a tour may select one).
+  useEffect(() => {
+    const tab = document.getElementById(tabId(current.id))
+    const row = tab?.parentElement
+    if (!tab || !row) return
+    const t = tab.getBoundingClientRect()
+    const r = row.getBoundingClientRect()
+    if (t.left < r.left) row.scrollLeft -= r.left - t.left
+    else if (t.right > r.right) row.scrollLeft += t.right - r.right
+  }, [current.id])
 
   // The collapsed ribbon's flyout closes on a click elsewhere (but not on a tour's own popover),
   // and on Escape, which an open menu inside it takes first (Dropdown stops it in the capture
@@ -87,6 +124,7 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
       }}
     >
       <div className="ribbon-bar">
+        {start}
         <div className="ribbon-qat" role="group" aria-label="Quick access" data-tour="history">
           <RibbonButton label="Undo" shortcut={`${mod}+Z`} icon={Undo2} disabled={readOnly || !s.canUndo} onClick={() => chain().undo().run()} />
           <RibbonButton
@@ -110,7 +148,7 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
                 aria-selected={selected}
                 aria-controls={selected && showPanel ? PANEL_ID : undefined}
                 tabIndex={selected ? 0 : -1}
-                data-tour={t.id === 'insert' ? 'insert' : undefined}
+                data-tour={`${t.id}-tab`}
                 onMouseDown={keepSelection}
                 onClick={() => clickTab(t.id)}
               >
@@ -119,6 +157,7 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
             )
           })}
         </div>
+        {end}
         <button
           type="button"
           className="ribbon-btn small ribbon-pin"
@@ -137,27 +176,12 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
             className="ribbon-groups"
             role="toolbar"
             aria-label={current.label}
-            aria-disabled={readOnly}
+            aria-disabled={disabled}
           >
-            <current.Panel editor={editor} s={s} disabled={readOnly} />
+            <current.Panel editor={editor} session={session} s={s} disabled={disabled} />
           </div>
         </div>
       )}
     </div>
   )
-}
-
-/** Publishes the ribbon's height as `--ribbon-height`, so the sticky sidebar and headings clear it. */
-function useStickyOffset(ref: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const element = ref.current
-    if (!element) return
-    const root = document.documentElement
-    const observer = new ResizeObserver(() => root.style.setProperty('--ribbon-height', `${element.offsetHeight}px`))
-    observer.observe(element)
-    return () => {
-      observer.disconnect()
-      root.style.removeProperty('--ribbon-height')
-    }
-  }, [ref])
 }

@@ -21,6 +21,10 @@
   --hl-title: #2563eb;
   --hl-type: #b45309;
   --page-shadow: 0 1px 3px rgba(20, 10, 40, 0.12);
+  /* Print layout: the document's pages and the canvas around them. */
+  --paper: var(--bg);
+  --paper-edge: #dcdae2;
+  --canvas: #e8e7ed;
 
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, 'SF Mono', Consolas, monospace;
@@ -56,6 +60,9 @@
     --hl-title: #93c5fd;
     --hl-type: #fcd34d;
     --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    --paper: var(--surface);
+    --paper-edge: var(--border);
+    --canvas: var(--bg);
     color-scheme: dark;
   }
 }
@@ -82,6 +89,9 @@
   --hl-title: #93c5fd;
   --hl-type: #fcd34d;
   --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --paper: var(--surface);
+  --paper-edge: var(--border);
+  --canvas: var(--bg);
   color-scheme: dark;
 }
 

@@ -1,43 +1,28 @@
-import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
-import { Collaboration, isChangeOrigin } from '@tiptap/extension-collaboration'
+import { Collaboration } from '@tiptap/extension-collaboration'
 import { CollaborationCaret } from '@tiptap/extension-collaboration-caret'
-import { Details, DetailsContent, DetailsSummary } from '@tiptap/extension-details'
-import { Emoji, gitHubEmojis } from '@tiptap/extension-emoji'
 import { FileHandler } from '@tiptap/extension-file-handler'
-import { Highlight } from '@tiptap/extension-highlight'
-import { Image } from '@tiptap/extension-image'
 import { InvisibleCharacters } from '@tiptap/extension-invisible-characters'
-import { TaskItem, TaskList } from '@tiptap/extension-list'
-import { Mathematics } from '@tiptap/extension-mathematics'
-import { Mention } from '@tiptap/extension-mention'
-import { Subscript } from '@tiptap/extension-subscript'
-import { Superscript } from '@tiptap/extension-superscript'
-import { TableKit } from '@tiptap/extension-table'
-import { TableOfContents, type TableOfContentData } from '@tiptap/extension-table-of-contents'
-import { TextAlign } from '@tiptap/extension-text-align'
-import { TextStyleKit } from '@tiptap/extension-text-style'
+import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { Typography } from '@tiptap/extension-typography'
-import { UniqueID } from '@tiptap/extension-unique-id'
-import { Youtube } from '@tiptap/extension-youtube'
 import { CharacterCount, Focus, Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
-import type { Editor, Extensions } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import { common, createLowlight } from 'lowlight'
+import { ReactNodeViewRenderer, type Editor, type Extensions } from '@tiptap/react'
 import { presenceLabel } from '../identity'
 import type { CollabUser, Session } from './collab'
-import { Callout } from './extensions/callout'
+import { PAGE_SETUP_ORIGIN } from './page-setup'
+import { CalloutView } from './extensions/CalloutView'
+import { documentExtensions } from './schema'
+import { Pagination, type PaginationOptions } from './extensions/pagination/Pagination'
+import { ZoomedResize } from './extensions/ZoomedResize'
+import { tocScrollParent } from './scroller'
 import { Shortcuts } from './extensions/shortcuts'
 import { SlashCommand } from './extensions/slash-command'
-import { Spoiler } from './extensions/spoiler'
 import { emojiSuggestion, mentionSuggestion } from './suggestions'
 
-/** Soft limit shown in the status bar. Not enforced: a hard limit would also reject collaborators' changes. */
-export const CHARACTER_LIMIT = 50_000
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']
 
-export const lowlight = createLowlight(common)
+export { lowlight } from './schema'
 
 const readAsDataURL = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -100,21 +85,25 @@ type Options = {
   onSave: (editor: Editor) => void
   getEditor: () => Editor | null
   onTableOfContents: (data: TableOfContentData) => void
+  /** Initial page layout (the gap between pages keeps its default); it changes later through `setPagination`. */
+  pagination: Omit<PaginationOptions, 'pageGap'>
 }
 
-export function buildExtensions({ session, user, onSave, getEditor, onTableOfContents }: Options): Extensions {
+/**
+ * The editor's extensions: the document's schema (`schema.ts`, shared with the server's PDF
+ * export) plus everything interactive: collaboration, suggestions, node views and click handlers.
+ */
+export function buildExtensions({ session, user, onSave, getEditor, onTableOfContents, pagination }: Options): Extensions {
+  const schema = documentExtensions()
   return [
-    StarterKit.configure({
-      // Yjs has its own history; the regular undo/redo would fight it.
-      undoRedo: false,
-      // Replaced by CodeBlockLowlight below.
-      codeBlock: false,
-      link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
-      dropcursor: { color: 'var(--accent)', width: 2 },
-    }),
+    schema.starterKit,
 
     // Collaboration
-    Collaboration.configure({ document: session.ydoc }),
+    Collaboration.configure({
+      document: session.ydoc,
+      // Page setup changes (in `meta`) are undo steps too; see page-setup.ts.
+      yUndoOptions: { trackedOrigins: [PAGE_SETUP_ORIGIN] },
+    }),
     CollaborationCaret.configure({ provider: session.provider, user, render: renderCaret }),
 
     // Small additions
@@ -128,43 +117,28 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
     }),
     CharacterCount,
     Focus.configure({ className: 'has-focus', mode: 'deepest' }),
-    TextAlign.configure({ types: ['heading', 'paragraph'] }),
-    Highlight.configure({ multicolor: true }),
-    TextStyleKit,
-    Subscript,
-    Superscript,
+    schema.textAlign,
+    schema.highlight,
+    schema.textStyle,
+    schema.subscript,
+    schema.superscript,
     Typography,
-    TaskList,
-    TaskItem.configure({ nested: true }),
-    Image.configure({
-      allowBase64: true,
-      resize: {
-        enabled: true,
-        directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
-        minWidth: 80,
-        minHeight: 40,
-        alwaysPreserveAspectRatio: true,
-      },
-    }),
-    TableKit.configure({ table: { resizable: true } }),
-    Details.configure({ persist: true }),
-    DetailsSummary,
-    DetailsContent,
-    Youtube.configure({ nocookie: true, width: 640, height: 360 }),
-    Emoji.configure({ emojis: gitHubEmojis, enableEmoticons: true, suggestion: emojiSuggestion }),
+    schema.taskList,
+    schema.taskItem,
+    schema.image,
+    schema.table,
+    schema.details,
+    schema.detailsSummary,
+    schema.detailsContent,
+    schema.youtube,
+    schema.emoji.configure({ suggestion: emojiSuggestion }),
     InvisibleCharacters.configure({ visible: false }),
-    UniqueID.configure({
-      // TableOfContents already owns the `id` attribute on headings; keep these separate.
-      attributeName: 'uid',
-      types: ['heading', 'paragraph', 'blockquote', 'codeBlock', 'listItem', 'taskItem', 'callout', 'details'],
-      // Don't re-assign IDs for changes that came from other collaborators.
-      filterTransaction: (transaction) => !isChangeOrigin(transaction),
-    }),
+    schema.uniqueId,
 
     // UI & interaction
-    Mention.configure({ HTMLAttributes: { class: 'mention' }, suggestion: mentionSuggestion }),
+    schema.mention.configure({ suggestion: mentionSuggestion }),
     SlashCommand,
-    CodeBlockLowlight.configure({ lowlight, defaultLanguage: 'plaintext' }),
+    schema.codeBlock,
     FileHandler.configure({
       allowedMimeTypes: IMAGE_TYPES,
       onDrop: (editor, files, pos) => void insertImageFiles(editor, files, pos),
@@ -174,20 +148,22 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
         void insertImageFiles(editor, files)
       },
     }),
-    TableOfContents.configure({
+    schema.tableOfContents.configure({
       onUpdate: onTableOfContents,
-      scrollParent: () => window,
+      // The document scrolls in its own element, not the window (see scroller.ts).
+      scrollParent: () => tocScrollParent as unknown as HTMLElement,
     }),
 
     // Content & API
     Markdown,
-    Callout,
-    Spoiler,
+    schema.callout.extend({ addNodeView: () => ReactNodeViewRenderer(CalloutView) }),
+    schema.spoiler,
     Shortcuts.configure({ onSave }),
+    Pagination.configure(pagination),
+    ZoomedResize,
 
     // Bigger lifts
-    Mathematics.configure({
-      katexOptions: { throwOnError: false },
+    schema.mathematics.configure({
       inlineOptions: {
         onClick: (node, pos) => {
           const editor = getEditor()

@@ -1,15 +1,12 @@
 import { useEditorState, type Editor } from '@tiptap/react'
-import { useEffect, useMemo, useState } from 'react'
+import { FileText, Globe, type LucideIcon } from 'lucide-react'
 import type { Role } from '../api'
-import { BACKUP_EVENT, loadBackup, type Backup } from '../editor/backup'
-import { CHARACTER_LIMIT } from '../editor/extensions'
 import type { ConnectionStatus } from '../editor/hooks'
+import { setLayoutMode, useLayoutMode, useNarrowScreen, type LayoutMode } from '../editor/page-setup'
+import { ZoomSlider } from './ZoomControls'
 
 type StatusBarProps = {
   editor: Editor
-  documentName: string
-  /** The signed-in User, whose local backup is shown. */
-  email: string
   status: ConnectionStatus
   /** Changes the server hasn't confirmed for a while (see `usePendingChanges`). */
   pending: boolean
@@ -17,8 +14,45 @@ type StatusBarProps = {
   retrying: boolean
   /** The Read-only view preference (owners and editors). */
   readOnly: boolean
-  /** Viewers see "View only"; only owners and editors take backups. `null` while unknown. */
+  /** Viewers see "View only". `null` while unknown. */
   role: Role | null
+  /** The zoom shown now, in percent. */
+  zoom: number
+}
+
+const LAYOUTS: { mode: LayoutMode; label: string; icon: LucideIcon }[] = [
+  { mode: 'print', label: 'Print layout', icon: FileText },
+  { mode: 'web', label: 'Web layout', icon: Globe },
+]
+
+/**
+ * Word's view buttons: Print layout (pages) or Web layout (one continuous page), your own
+ * preference. A narrow window always shows the document continuous, so they are off there and
+ * say why (aria-disabled rather than disabled, so the tooltip still shows).
+ */
+function LayoutToggles() {
+  const mode = useLayoutMode()
+  const narrow = useNarrowScreen()
+  return (
+    <span className="status-item layout-toggles" role="group" aria-label="Layout" data-tour="layout-toggles">
+      {LAYOUTS.map(({ mode: m, label, icon: Icon }) => (
+        <button
+          key={m}
+          type="button"
+          className={`status-toggle${mode === m && !narrow ? ' active' : ''}`}
+          aria-pressed={narrow ? undefined : mode === m}
+          aria-disabled={narrow || undefined}
+          aria-label={label}
+          title={narrow ? 'Narrow screens use continuous layout' : label}
+          onClick={() => {
+            if (!narrow) setLayoutMode(m)
+          }}
+        >
+          <Icon aria-hidden size={14} />
+        </button>
+      ))}
+    </span>
+  )
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -27,32 +61,19 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   disconnected: 'Offline: changes will sync when you reconnect',
 }
 
-export function StatusBar({ editor, documentName, email, status, pending, retrying, readOnly, role }: StatusBarProps) {
+/**
+ * Like Word's status bar: the word count (characters in its tooltip), whether you can edit, the
+ * sync status, the layout buttons and the zoom. Nothing about the editor's internals.
+ */
+export function StatusBar({ editor, status, pending, retrying, readOnly, role, zoom }: StatusBarProps) {
   const viewer = role === 'viewer'
-  const canWrite = role === 'owner' || role === 'editor'
-  const info = useEditorState({
+  const counts = useEditorState({
     editor,
-    selector: ({ editor: e }) => {
-      const { $from, from, to } = e.state.selection
-      return {
-        words: e.storage.characterCount.words(),
-        characters: e.storage.characterCount.characters(),
-        node: $from.parent.type.name,
-        from,
-        to,
-      }
-    },
+    selector: ({ editor: e }) => ({
+      words: e.storage.characterCount.words() as number,
+      characters: e.storage.characterCount.characters() as number,
+    }),
   })
-
-  const stored = useMemo(() => loadBackup(email, documentName)?.savedAt ?? null, [email, documentName])
-  const [newest, setSavedAt] = useState<number | null>(null)
-  const savedAt = newest ?? stored
-
-  useEffect(() => {
-    const onSaved = (event: Event) => setSavedAt((event as CustomEvent<Backup>).detail.savedAt)
-    window.addEventListener(BACKUP_EVENT, onSaved)
-    return () => window.removeEventListener(BACKUP_EVENT, onSaved)
-  }, [])
 
   // "Synced" only when the server has also confirmed our changes, not just when connected.
   const unsaved = !retrying && status === 'connected' && pending
@@ -63,35 +84,19 @@ export function StatusBar({ editor, documentName, email, status, pending, retryi
         ? 'Not saved: view only'
         : 'Saving…'
       : STATUS_LABEL[status]
-  const percent = Math.min(100, Math.round((info.characters / CHARACTER_LIMIT) * 100))
-
   return (
     <footer className="status-bar" data-tour="status">
-      <span
-        className={`status-item${info.characters > CHARACTER_LIMIT ? ' over-limit' : ''}`}
-        title={`${info.characters} characters (soft limit ${CHARACTER_LIMIT})`}
-      >
-        <span className="meter" aria-hidden>
-          <span style={{ width: `${percent}%` }} />
-        </span>
-        {info.words.toLocaleString()} words · {info.characters.toLocaleString()} / {CHARACTER_LIMIT.toLocaleString()}
-      </span>
-      <span className="status-item muted" title="Updated on every selection change">
-        {info.node} @ {info.from === info.to ? info.from : `${info.from}–${info.to}`}
+      <span className="status-item" title={`${counts.characters.toLocaleString()} ${counts.characters === 1 ? 'character' : 'characters'}`}>
+        {counts.words.toLocaleString()} {counts.words === 1 ? 'word' : 'words'}
       </span>
       {viewer ? (
-        <span className="status-item badge" title="Your share lets you read, copy and export this document">
+        <span className="status-item badge" data-tour="view-only" title="Your share lets you read, copy and export this document">
           View only
         </span>
       ) : (
         readOnly && <span className="status-item badge">Read-only</span>
       )}
       <span className="status-spacer" />
-      {canWrite && (
-        <span className="status-item muted">
-          {savedAt ? `Backup ${new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'No backup yet'}
-        </span>
-      )}
       <span
         className={`status-item connection ${retrying ? 'connecting' : status}${unsaved ? ' unsaved' : ''}`}
         data-tour="connection"
@@ -101,6 +106,8 @@ export function StatusBar({ editor, documentName, email, status, pending, retryi
         <span className="dot" aria-hidden />
         {label}
       </span>
+      <LayoutToggles />
+      <ZoomSlider zoom={zoom} />
     </footer>
   )
 }

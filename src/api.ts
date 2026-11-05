@@ -30,7 +30,11 @@ export type TrashedDoc = DocMeta & {
   purgeAt: number
 }
 
-async function request<T>(path: string, init?: RequestInit, base = '/api/docs'): Promise<T> {
+/**
+ * Sends an API request and returns the response if it succeeded. A Session expired (401, or an
+ * Access redirect) and any other failure throw an `ApiError`.
+ */
+async function send(path: string, init?: RequestInit, base = '/api/docs'): Promise<Response> {
   // `manual`: when the Access session has expired, Access redirects to its login page. Followed,
   // that would be a CORS failure indistinguishable from a network drop; unfollowed, it is an
   // `opaqueredirect` response we can recognise.
@@ -44,10 +48,19 @@ async function request<T>(path: string, init?: RequestInit, base = '/api/docs'):
     throw new ApiError(401, 'session expired')
   }
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: unknown } | null
-    throw new ApiError(response.status, typeof body?.error === 'string' ? body.error : undefined)
+    const body = (await response.json().catch(() => null)) as { error?: unknown; message?: unknown } | null
+    throw new ApiError(
+      response.status,
+      typeof body?.error === 'string' ? body.error : undefined,
+      typeof body?.message === 'string' ? body.message : undefined,
+    )
   }
   setSessionExpired(false)
+  return response
+}
+
+async function request<T>(path: string, init?: RequestInit, base = '/api/docs'): Promise<T> {
+  const response = await send(path, init, base)
   return (response.status === 204 ? undefined : await response.json()) as T
 }
 
@@ -55,10 +68,13 @@ export class ApiError extends Error {
   status: number
   /** The server's `error` text, if any. */
   error?: string
-  constructor(status: number, error?: string) {
+  /** The server's explanation for people (`message`), if any. */
+  detail?: string
+  constructor(status: number, error?: string, detail?: string) {
     super(`Request failed (${status}${error ? `: ${error}` : ''})`)
     this.status = status
     this.error = error
+    this.detail = detail
   }
 }
 
@@ -155,6 +171,31 @@ export async function restoreOrConfirmOpen(id: string): Promise<void> {
     if (status && status.access === 'owner' && !status.trashed) return
     throw error
   }
+}
+
+/** The file name in a `Content-Disposition` header: `filename*` (UTF-8) first, then `filename`. */
+export function dispositionFilename(header: string | null): string | undefined {
+  if (!header) return undefined
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.trim())
+    } catch {
+      // fall back to the plain name
+    }
+  }
+  return /filename="([^"]*)"/i.exec(header)?.[1] || undefined
+}
+
+/**
+ * Download as PDF: the document as the server prints it (its stored state, with its page setup).
+ * 503 when the server has no Chromium or too many PDFs are being made (`detail` says which),
+ * 413 for a document too large to print.
+ */
+export async function fetchPdf(id: string): Promise<{ blob: Blob; filename: string }> {
+  const response = await send(`/${encodeURIComponent(id)}/pdf`)
+  const blob = await response.blob()
+  return { blob, filename: dispositionFilename(response.headers.get('Content-Disposition')) ?? 'document.pdf' }
 }
 
 /** URL of a document; `template` seeds a brand-new document on first open. */

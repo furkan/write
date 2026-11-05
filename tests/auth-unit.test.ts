@@ -23,7 +23,31 @@ describe('resolveConfig', () => {
       allowedHosts: [],
       allowedOrigins: [],
       ownerEmail: 'dev@localhost',
+      pdf: { chromium: undefined, maxConcurrent: 2, maxQueue: 8, timeoutMs: 30_000, maxBytes: 5 * 1024 * 1024 },
     })
+  })
+
+  test('PDF settings', () => {
+    const config = resolveConfig(
+      'dev',
+      {
+        WRITE_PDF_CHROMIUM: 'chrome/headless-shell',
+        WRITE_PDF_MAX_CONCURRENT: '1',
+        WRITE_PDF_MAX_QUEUE: '0',
+        WRITE_PDF_TIMEOUT_SECONDS: '5',
+        WRITE_PDF_MAX_MB: '0.5',
+      },
+      ROOT,
+    )
+    expect(config.pdf).toEqual({
+      chromium: '/srv/write/chrome/headless-shell',
+      maxConcurrent: 1,
+      maxQueue: 0,
+      timeoutMs: 5000,
+      maxBytes: 512 * 1024,
+    })
+    expect(() => resolveConfig('dev', { WRITE_PDF_MAX_CONCURRENT: '0' }, ROOT)).toThrow('WRITE_PDF_MAX_CONCURRENT must be')
+    expect(() => resolveConfig('dev', { WRITE_PDF_TIMEOUT_SECONDS: 'soon' }, ROOT)).toThrow('WRITE_PDF_TIMEOUT_SECONDS must be')
   })
 
   test('Access mode defaults bind to loopback and derive the certs URL', () => {

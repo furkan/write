@@ -14,13 +14,8 @@ const legacyKeyFor = (documentName: string) => `write:backup:${documentName}`
 
 export type Backup = { savedAt: number; content: JSONContent }
 
-export const BACKUP_EVENT = 'write:backup-saved'
-
-function storeBackup(email: string, documentName: string, backup: Backup): boolean {
-  const ok = writeStorage(keyFor(email, documentName), JSON.stringify(backup))
-  if (ok) window.dispatchEvent(new CustomEvent<Backup>(BACKUP_EVENT, { detail: backup }))
-  return ok
-}
+const storeBackup = (email: string, documentName: string, backup: Backup): boolean =>
+  writeStorage(keyFor(email, documentName), JSON.stringify(backup))
 
 export const saveBackup = (editor: Editor, email: string, documentName: string): boolean =>
   storeBackup(email, documentName, { savedAt: Date.now(), content: editor.getJSON() })

@@ -4,7 +4,8 @@
  * `journalctl -u <unit> | grep '"audit"'`.
  *
  * Events: `auth_fail`; `create` (including duplicates, with `from`); `share`, `role_change` and
- * `unshare` (with the target `email`; `self` for Remove from my list); `trash`, `restore` and
+ * `unshare` (with the target `email`; `self` for Remove from my list); `export` (a PDF download,
+ * with `format` and `bytes`); `trash`, `restore` and
  * `purge` (`actor: "expiry"` for the 30-day cleanup); `migration` (the one-time index upgrade).
  */
 
@@ -14,6 +15,7 @@ export type AuditEvent =
   | 'share'
   | 'unshare'
   | 'role_change'
+  | 'export'
   | 'trash'
   | 'restore'
   | 'purge'
