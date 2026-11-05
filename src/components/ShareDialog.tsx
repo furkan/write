@@ -1,14 +1,15 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ApiError, displayTitle, docUrl, getDoc, shareDoc, unshareDoc, type DocMeta, type Role, type ShareRole, type Shares } from '../api'
-import { colorFor, initialOf, isValidEmail, normalizeEmail } from '../identity'
+import { isValidEmail, MAX_SHARES, normalizeEmail } from '../identity'
 import { useMe } from '../session'
-
-/** The server's cap (`MAX_SHARES` in `server/roles.ts`). */
-const MAX_SHARES = 50
+import { Avatar } from './Avatar'
 
 type SharedDoc = DocMeta & { shares: Shares }
 
 const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' }
+
+/** "an editor" or "a viewer". */
+const withArticle = (role: ShareRole) => (role === 'editor' ? 'an editor' : 'a viewer')
 
 /** What went wrong, in words, for a failed share request. */
 function shareError(error: unknown, isSelf: boolean): string {
@@ -106,13 +107,13 @@ export function ShareDialog({ docId, onClose, onChange }: ShareDialogProps) {
       return setError(target === me.email ? 'You own this document, so you already have access.' : 'That’s the owner: they already have access.')
     }
     const existing = doc.shares[target]
-    if (existing === role) return setError(`${target} is already a${role === 'editor' ? 'n editor' : ' viewer'}.`)
+    if (existing === role) return setError(`${target} is already ${withArticle(role)}.`)
     if (!existing && people.length >= MAX_SHARES) {
       return setError(`A document can be shared with at most ${MAX_SHARES} people. Remove someone first.`)
     }
     const ok = await apply(
       () => shareDoc(docId, target, role),
-      existing ? `${target} is now ${role === 'editor' ? 'an editor' : 'a viewer'}.` : `Shared with ${target}.`,
+      existing ? `${target} is now ${withArticle(role)}.` : `Shared with ${target}.`,
     )
     if (ok) setEmail('')
   }
@@ -206,7 +207,7 @@ export function ShareDialog({ docId, onClose, onChange }: ShareDialogProps) {
                         disabled={busy}
                         onChange={(e) => {
                           const next = e.target.value as ShareRole
-                          void apply(() => shareDoc(docId, person, next), `${person} is now ${next === 'editor' ? 'an editor' : 'a viewer'}.`)
+                          void apply(() => shareDoc(docId, person, next), `${person} is now ${withArticle(next)}.`)
                         }}
                       >
                         <option value="editor">Editor</option>
@@ -250,9 +251,7 @@ export function ShareDialog({ docId, onClose, onChange }: ShareDialogProps) {
 function Person({ email, me, children }: { email: string; me: string; children: ReactNode }) {
   return (
     <li className="share-person">
-      <span className="account-avatar" style={{ background: colorFor(email) }} aria-hidden>
-        {initialOf(email)}
-      </span>
+      <Avatar email={email} />
       <span className="share-person-email" title={email}>
         {email}
         {email === me && <span className="muted"> (you)</span>}

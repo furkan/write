@@ -28,11 +28,18 @@ export function colorFor(email: string): string {
 /** One letter for an avatar. */
 export const initialOf = (email: string) => (localPart(email).trim()[0] ?? '?').toUpperCase()
 
+// The share rules come from the server's own module (pure, no Node imports), so the client's
+// checks can't drift from what the server enforces.
+export { isValidEmail, MAX_SHARES } from '../server/roles.ts'
+
 /**
- * The share dialog's client-side check, the same rule as the server's `isValidEmail`
- * (`server/roles.ts`): one `@`, no whitespace or address-list punctuation, at most 254 characters.
+ * The Caret label for a presence entry. Presence is client-reported: the label is derived from
+ * the sender's `email` when there is one (so it follows the local-part rule whatever `name` a
+ * client sends), else its `name`, else empty.
  */
-export const isValidEmail = (email: string) =>
-  email.length <= 254 && /^[^\s@,;:<>()[\]"'\\/]+@[^\s@,;:<>()[\]"'\\/]+$/.test(email)
+export function presenceLabel(user: { email?: unknown; name?: unknown } | undefined): string {
+  if (typeof user?.email === 'string' && user.email) return localPart(user.email)
+  return typeof user?.name === 'string' ? user.name : ''
+}
 
 export const normalizeEmail = (email: string) => email.trim().toLowerCase()

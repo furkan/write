@@ -24,7 +24,7 @@ import { Markdown } from '@tiptap/markdown'
 import type { Editor, Extensions } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { common, createLowlight } from 'lowlight'
-import { localPart } from '../identity'
+import { presenceLabel } from '../identity'
 import type { CollabUser, Session } from './collab'
 import { Callout } from './extensions/callout'
 import { Shortcuts } from './extensions/shortcuts'
@@ -80,7 +80,7 @@ function editMath(editor: Editor, kind: 'inline' | 'block', latex: string, pos: 
  */
 function renderCaret(user: Record<string, unknown>): HTMLElement {
   const email = typeof user.email === 'string' ? user.email : ''
-  const name = email ? localPart(email) : typeof user.name === 'string' ? user.name : ''
+  const name = presenceLabel(user)
   const color = typeof user.color === 'string' ? user.color : 'transparent'
   const caret = document.createElement('span')
   caret.classList.add('collaboration-carets__caret')

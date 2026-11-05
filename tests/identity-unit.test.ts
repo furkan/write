@@ -1,7 +1,7 @@
-/** Unit tests for the client's identity helpers (`src/identity.ts`): Caret label, colour, email check. */
+/** Unit tests for the client's identity helpers (`src/identity.ts`): Caret label, colour, share rules. */
 import { describe, expect, test } from 'bun:test'
-import { isValidEmail as serverIsValidEmail } from '../server/roles.ts'
-import { colorFor, initialOf, isValidEmail, localPart, USER_COLORS } from '../src/identity.ts'
+import { isValidEmail as serverIsValidEmail, MAX_SHARES as SERVER_MAX_SHARES } from '../server/roles.ts'
+import { colorFor, initialOf, isValidEmail, localPart, MAX_SHARES, presenceLabel, USER_COLORS } from '../src/identity.ts'
 
 describe('localPart', () => {
   test('is the text before the @', () => {
@@ -40,9 +40,21 @@ describe('initialOf', () => {
   })
 })
 
-describe('isValidEmail', () => {
-  test('agrees with the server', () => {
-    const samples = ['a@b.c', 'dev@localhost', 'not-an-email', 'two@@x.com', 'a b@x.com', 'a@x.com,b@x.com', '<a@x.com>', `${'a'.repeat(250)}@x.com`]
-    for (const email of samples) expect(isValidEmail(email)).toBe(serverIsValidEmail(email))
+describe('presenceLabel', () => {
+  test('follows the email when a client sends one, whatever its name', () => {
+    expect(presenceLabel({ email: 'bob@example.com', name: 'Anonymous Otter' })).toBe('bob')
+  })
+
+  test('falls back to the name, then to nothing, and ignores non-strings', () => {
+    expect(presenceLabel({ name: 'Old client' })).toBe('Old client')
+    expect(presenceLabel({ email: 42, name: { evil: true } })).toBe('')
+    expect(presenceLabel(undefined)).toBe('')
+  })
+})
+
+describe('share rules', () => {
+  test('are the server’s own', () => {
+    expect(isValidEmail).toBe(serverIsValidEmail)
+    expect(MAX_SHARES).toBe(SERVER_MAX_SHARES)
   })
 })
