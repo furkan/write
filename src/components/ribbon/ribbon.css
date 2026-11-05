@@ -398,8 +398,8 @@
   cursor: default;
 }
 
-/* Working (Preparing PDF…): disabled, but not faded, with a spinning icon. */
-.ribbon-btn[aria-busy='true']:disabled {
+/* Working (Preparing PDF…): aria-disabled (it keeps focus), not faded, with a spinning icon. */
+.ribbon-btn[aria-busy='true'] {
   opacity: 1;
   cursor: progress;
 }

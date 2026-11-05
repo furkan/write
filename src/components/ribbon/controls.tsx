@@ -34,7 +34,7 @@ type ButtonProps = {
   /** For toggles: whether it is on. Leave undefined for plain commands. */
   active?: boolean
   disabled?: boolean
-  /** Working on it: a spinner instead of the icon, and the button is disabled. */
+  /** Working on it: a spinner instead of the icon; clicks are ignored, but the button keeps focus (aria-disabled). */
   busy?: boolean
   /** `danger` for destructive actions (Move to trash). */
   tone?: 'danger'
@@ -53,9 +53,10 @@ export function RibbonButton({ label, title, shortcut, icon, glyph, size = 'smal
       aria-label={tooltip(label, shortcut)}
       aria-pressed={active}
       aria-busy={busy || undefined}
-      disabled={disabled || busy}
+      aria-disabled={busy || undefined}
+      disabled={disabled}
       onMouseDown={keepSelection}
-      onClick={onClick}
+      onClick={busy ? undefined : onClick}
     >
       {(!busy && glyph) ||
         (Icon && <Icon aria-hidden className={busy ? 'ribbon-spin' : undefined} size={size === 'large' ? 24 : 16} strokeWidth={size === 'large' ? 1.6 : 2} />)}
