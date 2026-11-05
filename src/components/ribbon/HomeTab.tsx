@@ -31,6 +31,7 @@ import { Dropdown, MenuItem } from '../Dropdown'
 import { ColorSplitButton, RibbonButton, RibbonGroup } from './controls'
 import { HEADING_LEVELS, keepSelection, tooltip, type TabProps } from './editorState'
 import { FONT_SIZES, parseFontSize, stepFontSize } from './fontSize'
+import { useMediaQuery } from './state'
 
 const FONT_FAMILIES = [
   { label: 'Default', value: '' },
@@ -146,7 +147,7 @@ export function HomeTab({ editor, s, disabled }: TabProps) {
               label="Font colour"
               glyph={<span className="color-letter">A</span>}
               colors={TEXT_COLORS}
-              initial="#e11d48"
+              kind="text"
               clearLabel="Automatic"
               disabled={disabled}
               onApply={(color) => chain().setColor(color).run()}
@@ -157,7 +158,7 @@ export function HomeTab({ editor, s, disabled }: TabProps) {
               shortcut={`${mod}+Shift+H`}
               glyph={<Highlighter size={15} />}
               colors={HIGHLIGHTS}
-              initial="#fef08a"
+              kind="highlight"
               clearLabel="No highlight"
               disabled={disabled}
               onApply={(color) => chain().setHighlight({ color }).run()}
@@ -362,8 +363,10 @@ function FontSize({ editor, size, disabled }: { editor: Editor; size: number | n
   )
 }
 
-function StyleTiles({ editor, current, disabled, onPicked }: { editor: Editor; current: number; disabled: boolean; onPicked?: () => void }) {
-  return STYLES.map(({ level, name }) => (
+type StyleTilesProps = { editor: Editor; current: number; disabled: boolean; count?: number; onPicked?: () => void }
+
+function StyleTiles({ editor, current, disabled, count = STYLES.length, onPicked }: StyleTilesProps) {
+  return STYLES.slice(0, count).map(({ level, name }) => (
     <button
       key={level}
       type="button"
@@ -387,12 +390,13 @@ function StyleTiles({ editor, current, disabled, onPicked }: { editor: Editor; c
   ))
 }
 
-/** The styles that fit in one row, and a button that shows them all. */
+/** A row of styles (fewer on phones), and a button that shows them all. */
 function StyleGallery({ editor, current, disabled }: { editor: Editor; current: number; disabled: boolean }) {
+  const narrow = useMediaQuery('(max-width: 700px)')
   return (
     <div className="style-gallery">
       <div className="style-row">
-        <StyleTiles editor={editor} current={current} disabled={disabled} />
+        <StyleTiles editor={editor} current={current} disabled={disabled} count={narrow ? 4 : STYLES.length} />
       </div>
       <Dropdown
         fixed

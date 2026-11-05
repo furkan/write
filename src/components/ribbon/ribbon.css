@@ -417,13 +417,9 @@
 .style-row {
   display: flex;
   flex: none;
-  flex-wrap: wrap;
   gap: 2px;
-  align-content: flex-start;
-  width: calc(7 * 78px + 16px);
   height: 100%;
   padding: 2px;
-  overflow: hidden;
 }
 
 .style-tile {
@@ -594,7 +590,7 @@
   border-radius: 4px;
 }
 
-/* Narrow screens: tighter spacing, and a shorter styles gallery (More shows them all). */
+/* Narrow screens: tighter spacing. The styles gallery shows four tiles (see StyleGallery). */
 @media (max-width: 700px) {
   .ribbon {
     padding: 0 6px 6px;
@@ -602,10 +598,6 @@
 
   .ribbon-group {
     padding: 0 8px;
-  }
-
-  .style-row {
-    width: calc(4 * 78px + 8px);
   }
 
   .ribbon-tab {

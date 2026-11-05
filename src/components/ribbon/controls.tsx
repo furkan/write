@@ -1,8 +1,9 @@
 import type { LucideIcon } from 'lucide-react'
 import { ChevronDown } from 'lucide-react'
-import { useId, useState, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Dropdown } from '../Dropdown'
 import { keepSelection, tooltip } from './editorState'
+import { setLastColor, useLastColor, type ColorKind } from './state'
 
 /** A labelled group of controls, with its name centred underneath. */
 export function RibbonGroup({ label, tour, children }: { label: string; tour?: string; children: ReactNode }) {
@@ -94,7 +95,8 @@ type ColorSplitProps = {
   /** What the main part shows above the colour bar. */
   glyph: ReactNode
   colors: Swatch[]
-  initial: string
+  /** Which last-used colour the main part applies. */
+  kind: ColorKind
   clearLabel: string
   disabled?: boolean
   onApply: (color: string) => void
@@ -105,8 +107,8 @@ type ColorSplitProps = {
  * Word's colour split button: the main part applies the last colour picked, the arrow opens the
  * swatches.
  */
-export function ColorSplitButton({ label, shortcut, glyph, colors, initial, clearLabel, disabled, onApply, onClear }: ColorSplitProps) {
-  const [last, setLast] = useState(initial)
+export function ColorSplitButton({ label, shortcut, glyph, colors, kind, clearLabel, disabled, onApply, onClear }: ColorSplitProps) {
+  const last = useLastColor(kind)
   const lastName = colors.find((c) => c.color === last)?.name ?? last
   const title = `${label}: ${lastName}`
   return (
@@ -139,7 +141,7 @@ export function ColorSplitButton({ label, shortcut, glyph, colors, initial, clea
                   aria-label={`${label}: ${name}`}
                   onMouseDown={keepSelection}
                   onClick={() => {
-                    setLast(color)
+                    setLastColor(kind, color)
                     onApply(color)
                     close()
                   }}
