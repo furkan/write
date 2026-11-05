@@ -205,12 +205,52 @@ function renderVideos(root: El, document: Window['document']) {
   }
 }
 
-function renderMath(root: El) {
+/** Longer formulas print as their LaTeX source: KaTeX's output is about 80 times its input. */
+export const MAX_FORMULA_CHARS = 4000
+/** LaTeX rendered per document; formulas after that print as their source. */
+const MATH_BUDGET_CHARS = 100_000
+const KATEX_LIMITS = { maxSize: 20, maxExpand: 500 }
+
+/** A formula that isn't rendered: its LaTeX, as text the reader can still use. */
+function mathSource(element: El, latex: string, document: Window['document']) {
+  const source = document.createElement('code')
+  source.className = 'math-source'
+  source.textContent = latex
+  element.textContent = ''
+  element.append(source)
+}
+
+/**
+ * Math by KaTeX. Block math is laid out like display math (`\displaystyle`), but in KaTeX's
+ * inline mode, so a formula wider than the text wraps at its operators instead of running off the
+ * page. A formula KaTeX can't render (e.g. a stack overflow on deep nesting: `throwOnError` only
+ * covers parse errors), or one over the size limits, prints as its source.
+ */
+function renderMath(root: El, document: Window['document']) {
+  let budget = MATH_BUDGET_CHARS
   for (const element of root.querySelectorAll('[data-type="inline-math"], [data-type="block-math"]')) {
     const latex = element.getAttribute('data-latex') ?? ''
-    const displayMode = element.getAttribute('data-type') === 'block-math'
-    // KaTeX escapes its input; `trust` stays off, so \href, \url and friends render as text.
-    element.innerHTML = katex.renderToString(latex, { ...KATEX_OPTIONS, displayMode, output: 'html', strict: 'ignore', trust: false })
+    const block = element.getAttribute('data-type') === 'block-math'
+    // The rendered formula (or its source) is all the page needs: don't print the LaTeX twice.
+    element.removeAttribute('data-latex')
+    if (latex.length > MAX_FORMULA_CHARS || latex.length > budget) {
+      mathSource(element, latex, document)
+      continue
+    }
+    budget -= latex.length
+    try {
+      // KaTeX escapes its input; `trust` stays off, so \href, \url and friends render as text.
+      element.innerHTML = katex.renderToString(block ? `\\displaystyle ${latex}` : latex, {
+        ...KATEX_OPTIONS,
+        ...KATEX_LIMITS,
+        displayMode: false,
+        output: 'html',
+        strict: 'ignore',
+        trust: false,
+      })
+    } catch {
+      mathSource(element, latex, document)
+    }
   }
 }
 
@@ -229,12 +269,23 @@ function appendHast(parent: El, nodes: HastNode[], document: Window['document'])
   }
 }
 
-/** Syntax highlighting as the editor's CodeBlockLowlight does it: the block's language, else a guess. */
+/** Code blocks larger than this print without highlighting. */
+export const MAX_HIGHLIGHT_CHARS = 100_000
+/** Code highlighted per document; blocks after that print plain. */
+const HIGHLIGHT_BUDGET_CHARS = 400_000
+
+/**
+ * Syntax highlighting for the block's language. Unlike the editor, a block with no or an unknown
+ * language isn't guessed (`highlightAuto` runs every grammar over it), and large blocks print plain.
+ */
 function renderCode(root: El, document: Window['document']) {
+  let budget = HIGHLIGHT_BUDGET_CHARS
   for (const code of root.querySelectorAll('pre > code')) {
     const text = code.textContent ?? ''
-    const language = /(?:^|\s)language-(\S+)/.exec(code.getAttribute('class') ?? '')?.[1] ?? 'plaintext'
-    const tree = lowlight.registered(language) ? lowlight.highlight(language, text) : lowlight.highlightAuto(text)
+    const language = /(?:^|\s)language-(\S+)/.exec(code.getAttribute('class') ?? '')?.[1]
+    if (!language || !lowlight.registered(language) || text.length > MAX_HIGHLIGHT_CHARS || text.length > budget) continue
+    budget -= text.length
+    const tree = lowlight.highlight(language, text)
     code.textContent = ''
     appendHast(code, tree.children as HastNode[], document)
   }
@@ -361,7 +412,7 @@ export function documentPage(state: Uint8Array | null): PdfPage {
     renderCallouts(main, document)
     renderTasks(main, document)
     const hasMath = main.querySelector('[data-type="inline-math"], [data-type="block-math"]') !== null
-    renderMath(main)
+    renderMath(main, document)
     const html = [
       '<!doctype html>',
       '<html lang="en">',

@@ -393,8 +393,28 @@ details[open] > summary::before {
 }
 
 /* Math (KaTeX, rendered on the server) */
+/* Block math is KaTeX's inline layout with \displaystyle, so a wide formula wraps at its operators. */
 [data-type='block-math'] {
+  display: block;
   padding: 8px 0;
   text-align: center;
   break-inside: avoid;
+}
+
+[data-type='block-math'] > .katex {
+  max-width: 100%;
+  white-space: normal;
+}
+
+/* A formula too large or too deep to render: its LaTeX source. */
+.math-source {
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+[data-type='block-math'] > .math-source {
+  display: block;
+  padding: 8px 12px;
+  text-align: left;
 }
