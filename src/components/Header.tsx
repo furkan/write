@@ -114,7 +114,7 @@ export function Header({ editor, session, presence, role, view, canToggleReadOnl
   }
 
   const restoreBackup = () => {
-    const backup = loadBackup(me.email, session.name, isOwner)
+    const backup = loadBackup(me.email, session.name)
     if (!backup) {
       window.alert('No local backup found yet. Backups are saved automatically as you type.')
       return

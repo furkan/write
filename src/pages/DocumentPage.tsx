@@ -11,7 +11,7 @@ import { SessionBanner } from '../components/SessionBanner'
 import { Sidebar, type EditorEvent } from '../components/Sidebar'
 import { StatusBar } from '../components/StatusBar'
 import { Toolbar } from '../components/Toolbar'
-import { saveBackup } from '../editor/backup'
+import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
 import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence } from '../editor/hooks'
@@ -313,6 +313,11 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     if (!canWrite) window.clearTimeout(backupTimer.current)
   }, [canWrite])
 
+  // A backup made in this browser before documents had owners belongs to the owner.
+  useEffect(() => {
+    if (role === 'owner') adoptLegacyBackup(me.email, session.name)
+  }, [role, me.email, session.name])
+
   // Editor callbacks can fire while React is rendering (immediatelyRender), so
   // defer state updates to a microtask.
   const logEvent = useCallback((type: string, detail = '') => {
@@ -361,8 +366,10 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     onUpdate: ({ editor: e, transaction }) => {
       const origin = isChangeOrigin(transaction) ? 'remote' : 'local'
       logEvent('update', `${origin} · ${transaction.steps.length} step(s) · size ${e.state.doc.content.size}`)
-      // Back up your own edits only, so a collaborator wiping the doc can't overwrite your backup.
-      if (origin === 'remote' || !canWriteRef.current) return
+      // Back up your own changes only, so a collaborator wiping the doc can't overwrite your
+      // backup: not what arrives through Yjs (a collaborator's edit, the content loading), and
+      // not transactions that change nothing (opening a document dispatches one).
+      if (origin === 'remote' || !transaction.docChanged || !canWriteRef.current) return
       window.clearTimeout(backupTimer.current)
       backupTimer.current = window.setTimeout(() => backup(e), 1000)
     },

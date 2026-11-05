@@ -16,27 +16,38 @@ export type Backup = { savedAt: number; content: JSONContent }
 
 export const BACKUP_EVENT = 'write:backup-saved'
 
-export function saveBackup(editor: Editor, email: string, documentName: string): boolean {
-  const backup: Backup = { savedAt: Date.now(), content: editor.getJSON() }
+function storeBackup(email: string, documentName: string, backup: Backup): boolean {
   const ok = writeStorage(keyFor(email, documentName), JSON.stringify(backup))
   if (ok) window.dispatchEvent(new CustomEvent<Backup>(BACKUP_EVENT, { detail: backup }))
   return ok
 }
 
+export const saveBackup = (editor: Editor, email: string, documentName: string): boolean =>
+  storeBackup(email, documentName, { savedAt: Date.now(), content: editor.getJSON() })
+
 function readBackup(key: string): Backup | null {
   try {
     const backup = JSON.parse(readStorage(key) ?? 'null') as Backup | null
-    return backup?.content ? backup : null
+    return backup?.content && typeof backup.savedAt === 'number' ? backup : null
   } catch {
     return null
   }
 }
 
+/** Your backup of a document. */
+export const loadBackup = (email: string, documentName: string): Backup | null => readBackup(keyFor(email, documentName))
+
 /**
- * Your backup of a document. `isOwner` also looks under the pre-ownership key: those backups
- * were made in this browser before documents had owners, and the migration gave every such
- * document to the Legacy owner, so only the owner gets them (never a collaborator).
+ * For the document's owner: copies a backup made under the pre-ownership key to the owner's
+ * key. Those backups were made in this browser before documents had owners, and the migration
+ * gave every such document to the Legacy owner, so only the owner gets them (never a
+ * collaborator). Never replaces a backup that is as new or newer, so it copies at most once.
+ * The old key is left as it was.
  */
-export function loadBackup(email: string, documentName: string, isOwner = false): Backup | null {
-  return readBackup(keyFor(email, documentName)) ?? (isOwner ? readBackup(legacyKeyFor(documentName)) : null)
+export function adoptLegacyBackup(email: string, documentName: string): boolean {
+  const legacy = readBackup(legacyKeyFor(documentName))
+  if (!legacy) return false
+  const current = loadBackup(email, documentName)
+  if (current && current.savedAt >= legacy.savedAt) return false
+  return storeBackup(email, documentName, legacy)
 }

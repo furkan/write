@@ -42,8 +42,7 @@ export function StatusBar({ editor, documentName, email, status, pending, readOn
     },
   })
 
-  const isOwner = role === 'owner'
-  const stored = useMemo(() => loadBackup(email, documentName, isOwner)?.savedAt ?? null, [email, documentName, isOwner])
+  const stored = useMemo(() => loadBackup(email, documentName)?.savedAt ?? null, [email, documentName])
   const [newest, setSavedAt] = useState<number | null>(null)
   const savedAt = newest ?? stored
 
