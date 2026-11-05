@@ -1,0 +1,108 @@
+# Write pilot: `bun run preview` (Access mode) from its own checkout, on 127.0.0.1, behind
+# cloudflared and Cloudflare Access. See "Running the pilot" in README.md.
+#
+# A system service with a dedicated User=, not a user service:
+# - It starts at boot without lingering on anyone's login.
+# - The sandbox below (ProtectSystem=, ProtectHome=, ...) needs the system manager; a user
+#   manager skips most of it.
+# - The account has no login shell. It can read the checkout but not write to it, and it owns
+#   only /var/lib/write-pilot (StateDirectory=).
+# You keep owning the checkout, so upgrades are `git pull && bun install && bun run build`
+# without sudo.
+#
+# Placeholders, filled in when installing (README step 4):
+#   @USER@      the service account, e.g. write-pilot
+#   @CHECKOUT@  the pilot's checkout, e.g. /opt/write-pilot (not your dev checkout, not in /home)
+#   @BUN@       bun outside /home, e.g. /usr/local/bin/bun
+#
+#   sed -e 's|@USER@|write-pilot|g' -e 's|@CHECKOUT@|/opt/write-pilot|g' \
+#       -e 's|@BUN@|/usr/local/bin/bun|g' deploy/write-pilot.service \
+#     | sudo tee /etc/systemd/system/write-pilot.service
+
+[Unit]
+Description=Write pilot (Access mode, behind cloudflared)
+Documentation=file://@CHECKOUT@/README.md
+After=network.target
+# Stop retrying after 5 failed starts in 2 minutes (e.g. a missing setting): the log says why.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@CHECKOUT@
+# WRITE_* settings (deploy/pilot.env.example). Mode 0640, owned by root:@USER@.
+EnvironmentFile=/etc/write-pilot/pilot.env
+# Vite must run on Node 22.18 or later: the collaboration server refuses to start under Bun's
+# runtime, which `bun run` falls back to when no `node` is on the PATH, and the PDF page builder
+# is a TypeScript worker thread that Node runs as it is from 22.18. Node goes in
+# /usr/local/bin or /usr/bin, since the service can't see home directories.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Logs the Node version, and fails with "env: 'node': No such file or directory" without one.
+ExecStartPre=/usr/bin/env node --version
+ExecStart=@BUN@ run preview
+Restart=on-failure
+RestartSec=5s
+# On SIGTERM, Vite stores open documents, writes the index, then exits with 143 (128 + 15).
+SuccessExitStatus=143
+TimeoutStopSec=20s
+# stdout and stderr (the startup mode line, audit lines) go to journald: journalctl -u write-pilot
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=write-pilot
+
+# /var/lib/write-pilot, owned by @USER@: WRITE_DATA_DIR and WRITE_BACKUP_DIR live under it.
+# vite-temp is where Vite compiles vite.config.ts at startup (see BindPaths= below).
+StateDirectory=write-pilot write-pilot/vite-temp
+StateDirectoryMode=0700
+UMask=0077
+
+# Sandbox. The whole file system is read-only except /var/lib/write-pilot and a private /tmp.
+ProtectSystem=strict
+# Backups on another disk? Make it writable too, e.g.: ReadWritePaths=/mnt/backup/write-pilot
+# Vite writes the compiled config to <checkout>/node_modules/.vite-temp, which belongs to you
+# and is read-only here. The service sees its own folder there instead. (`bun run build`
+# creates node_modules/.vite-temp, so build before the first start.)
+BindPaths=/var/lib/write-pilot/vite-temp:@CHECKOUT@/node_modules/.vite-temp
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RemoveIPC=yes
+# AF_NETLINK: Node and Bun list network interfaces at startup.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# Download as PDF runs Chromium's headless shell (WRITE_PDF_CHROMIUM) inside this sandbox. Its
+# processes call capset() as they start and crash when it fails; the service has no capabilities
+# (CapabilityBoundingSet= is empty, NoNewPrivileges=yes), so capset() can only drop them. Its
+# profile goes in the private /tmp, and --disable-dev-shm-usage keeps it off /dev/shm.
+#
+# Chromium's own sandbox can't run here, so the server starts it without one (and logs that once):
+# the sandbox needs unprivileged user namespaces, which RestrictNamespaces= forbids, and which
+# Ubuntu 23.10+ also blocks with AppArmor for programs without a profile (its setuid fallback is
+# ruled out by NoNewPrivileges=). Allowing it would mean RestrictNamespaces=user pid net,
+# SystemCallFilter=chroot and an AppArmor profile for the headless shell: more for the whole
+# service to be allowed than the renderer gains. The page Chromium prints has no JavaScript and no
+# network, and this unit is the boundary; see "Download as PDF: security" in README.md.
+SystemCallFilter=capset
+SystemCallErrorNumber=EPERM
+# Not MemoryDenyWriteExecute=: the JavaScript JIT needs writable, executable memory (Node's and Chromium's).
+
+[Install]
+WantedBy=multi-user.target

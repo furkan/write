@@ -1,0 +1,873 @@
+/* ---------- Ribbon (Word-style toolbar) ---------- */
+
+.ribbon {
+  /* The top of the app shell (see .doc-shell). Above the document and the status bar (20), so
+     its flyout and menus paint over them. */
+  position: relative;
+  z-index: 30;
+  padding: 0 8px 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.ribbon.collapsed {
+  padding-bottom: 0;
+}
+
+/*
+ * The bar: ✍️ and the title, quick access, the tabs, then who's here, Share, theme, account, tours
+ * and collapse. It is the page's whole top bar, and all that is left when the ribbon is collapsed.
+ */
+
+.ribbon-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: 46px;
+}
+
+.ribbon-brand {
+  display: flex;
+  flex: 0 100 auto;
+  gap: 2px;
+  align-items: center;
+  min-width: 0;
+}
+
+.ribbon-brand .logo-link {
+  flex: none;
+  width: 34px;
+  height: 34px;
+}
+
+.ribbon-brand .title-input {
+  flex: 0 1 auto;
+  min-width: 72px;
+  max-width: 320px;
+  height: 32px;
+  font-size: 0.98rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ribbon-brand .view-only-badge {
+  margin-left: 2px;
+}
+
+.ribbon-qat {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 0 6px;
+  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+/* Who's here, Share, theme, account, tours. */
+.ribbon-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+}
+
+.ribbon-actions .presence {
+  margin-right: 2px;
+}
+
+.ribbon-share {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px 0 12px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ribbon-share:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--text));
+}
+
+.ribbon .ribbon-actions > .dropdown > button {
+  width: 32px;
+  height: 32px;
+}
+
+.ribbon .ribbon-actions > .account > button,
+.ribbon .ribbon-actions > .help > button {
+  border-radius: 50%;
+}
+
+.ribbon .ribbon-more > button {
+  width: 34px;
+}
+
+/* The "⋯" popover on narrow screens. */
+.overflow-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 248px;
+  max-width: min(320px, calc(100vw - 32px));
+}
+
+.overflow-heading {
+  margin: 6px 10px 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.overflow-heading strong {
+  color: var(--text);
+}
+
+.overflow-presence {
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 0 0 6px;
+  padding: 0 10px 0 16px;
+}
+
+.theme-buttons {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tabs that don't fit scroll sideways, with a fade on the side that has more. */
+.ribbon-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  overscroll-behavior-x: contain;
+  gap: 2px;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background:
+    linear-gradient(to right, var(--surface) 40%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--surface) 40%, transparent) right / 24px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--text) 16%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in srgb, var(--text) 16%, transparent), transparent) right / 12px 100% no-repeat scroll;
+}
+
+.ribbon-tab {
+  position: relative;
+  flex: none;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ribbon-tab:hover {
+  background: var(--surface-2);
+}
+
+.ribbon-tab[aria-selected='true'] {
+  color: var(--accent);
+}
+
+.ribbon-tab[aria-selected='true']::after {
+  position: absolute;
+  right: 14px;
+  bottom: 2px;
+  left: 14px;
+  height: 3px;
+  content: '';
+  background: currentColor;
+  border-radius: 3px;
+}
+
+/* Contextual tabs (Table, Code): tinted, after a divider, like Word's. */
+.ribbon-tab.contextual {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.ribbon-tab:not(.contextual) + .ribbon-tab.contextual {
+  margin-left: 8px;
+}
+
+.ribbon-tab:not(.contextual) + .ribbon-tab.contextual::before {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: -6px;
+  width: 1px;
+  content: '';
+  background: var(--border);
+}
+
+.ribbon-pin {
+  flex: none;
+}
+
+/* Panel and groups. */
+
+.ribbon-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(20, 10, 40, 0.05);
+}
+
+/* Collapsed: a tab opens its panel over the document. */
+.ribbon-panel.flyout {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 8px;
+  left: 8px;
+  box-shadow: var(--shadow);
+}
+
+/*
+ * Wider than the screen, the panel scrolls sideways (at any width): groups and controls keep their
+ * size. Edge shadows show there is more; they are covered while scrolled to that end.
+ */
+.ribbon-groups {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  height: 94px;
+  padding: 4px 4px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 40%, transparent) right / 28px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--text) 14%, transparent), transparent) left / 14px 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in srgb, var(--text) 14%, transparent), transparent) right / 14px 100% no-repeat scroll;
+  border-radius: 8px;
+}
+
+.ribbon-group {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  padding: 0 10px;
+}
+
+.ribbon-group + .ribbon-group::before {
+  position: absolute;
+  top: 6px;
+  bottom: 10px;
+  left: 0;
+  width: 1px;
+  content: '';
+  background: var(--border);
+}
+
+.ribbon-group-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 0;
+}
+
+.ribbon-group-label {
+  align-self: stretch;
+  height: 20px;
+  font-size: 0.7rem;
+  line-height: 18px;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.ribbon-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.ribbon-row > *,
+.ribbon-cluster > *,
+.ribbon-stack > * {
+  flex-shrink: 0;
+}
+
+.ribbon-cluster {
+  display: flex;
+  gap: 1px;
+  align-items: center;
+}
+
+.ribbon-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Buttons. */
+
+.ribbon-btn,
+.ribbon .dropdown > button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ribbon-btn.small {
+  width: 28px;
+}
+
+.ribbon-btn.medium {
+  justify-content: flex-start;
+  height: 24px;
+  padding: 0 8px 0 4px;
+  white-space: nowrap;
+}
+
+.ribbon-btn.large,
+.ribbon .ribbon-menu-button > button {
+  flex-direction: column;
+  gap: 4px;
+  justify-content: flex-start;
+  min-width: 52px;
+  max-width: 68px;
+  height: 68px;
+  padding: 7px 6px 4px;
+  font-size: 0.74rem;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.ribbon-btn.large svg,
+.ribbon-menu-button > button > svg:first-child {
+  flex: none;
+  color: var(--accent);
+}
+
+.ribbon .ribbon-menu-button > button > .ribbon-menu-chevron {
+  margin-top: -3px;
+  color: var(--muted);
+}
+
+.ribbon-btn:hover:not(:disabled),
+.ribbon .dropdown > button:hover:not(:disabled),
+.ribbon .dropdown > button[aria-expanded='true'] {
+  background: var(--surface-2);
+}
+
+.ribbon-btn.active {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.ribbon-btn.active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.ribbon-btn:disabled,
+.ribbon .dropdown > button:disabled,
+.ribbon input:disabled,
+.ribbon select:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Working (Preparing PDF…): aria-disabled (it keeps focus), not faded, with a spinning icon. */
+.ribbon-btn[aria-busy='true'] {
+  opacity: 1;
+  cursor: progress;
+}
+
+.ribbon-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ribbon-spin {
+    animation-duration: 3s;
+  }
+}
+
+/* Focus rings stay inside the scrolling panel. */
+.ribbon-groups :focus-visible {
+  outline-offset: -2px;
+}
+
+/* Font name and size boxes. */
+
+.ribbon-combo {
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.ribbon-combo:hover:not(:has(:disabled)) {
+  border-color: color-mix(in srgb, var(--muted) 60%, var(--border));
+}
+
+.ribbon-combo:focus-within {
+  border-color: var(--accent);
+}
+
+.ribbon .font-picker > button {
+  justify-content: space-between;
+  width: 136px;
+  height: 26px;
+  padding: 0 6px 0 8px;
+  font-size: 0.85rem;
+  border: none;
+}
+
+.ribbon .font-picker,
+.ribbon .font-size {
+  flex: none;
+}
+
+.combo-value {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.font-sample {
+  font-size: 1rem;
+}
+
+.font-size input {
+  width: 38px;
+  padding: 0 0 0 8px;
+  font-size: 0.85rem;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.ribbon .combo-arrow > button {
+  width: 18px;
+  height: 26px;
+  border: none;
+  border-radius: 0 3px 3px 0;
+}
+
+/* Colour split buttons: the main part applies the last colour, the arrow picks one. */
+
+.ribbon-split {
+  display: inline-flex;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.ribbon-split:hover:not(:has(:disabled)) {
+  border-color: var(--border);
+}
+
+.ribbon-split > .ribbon-btn {
+  border: none;
+  border-radius: 3px 0 0 3px;
+}
+
+.ribbon .ribbon-split-arrow > button {
+  width: 14px;
+  height: 28px;
+  border: none;
+  border-radius: 0 3px 3px 0;
+}
+
+.color-glyph {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+}
+
+.color-letter {
+  font: 700 15px/1 var(--sans);
+}
+
+.color-bar {
+  width: 16px;
+  height: 4px;
+  border-radius: 1px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.swatch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.swatch.current {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Styles gallery. */
+
+.style-gallery {
+  display: flex;
+  max-width: 100%;
+  height: 68px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.style-row {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  height: 100%;
+  padding: 2px;
+}
+
+.style-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 62px;
+  padding: 0 4px;
+  color: var(--text);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.style-tile:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.style-tile.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+
+.style-tile:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.style-sample {
+  max-width: 100%;
+  overflow: hidden;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.style-sample.level-0 {
+  font-size: 14px;
+}
+.style-sample.level-1 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.style-sample.level-2 {
+  font-size: 16px;
+  font-weight: 700;
+}
+.style-sample.level-3 {
+  font-size: 15px;
+  font-weight: 700;
+}
+.style-sample.level-4 {
+  font-size: 14px;
+  font-weight: 700;
+}
+.style-sample.level-5 {
+  font-size: 13px;
+  font-weight: 700;
+}
+.style-sample.level-6 {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.style-name {
+  font-size: 0.68rem;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.style-tile.active .style-name {
+  color: var(--accent);
+}
+
+.ribbon .style-more > button {
+  width: 20px;
+  height: 100%;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 76px);
+  gap: 2px;
+}
+
+/* Insert: table grid and emoji. */
+
+.table-picker-grid {
+  display: grid;
+  gap: 3px;
+}
+
+.table-picker-grid button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.table-picker-grid button.on {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+
+.table-picker-caption {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.emoji-panel {
+  max-width: 232px;
+}
+
+.emoji-panel p {
+  margin: 6px 4px 0;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 36px);
+  gap: 2px;
+}
+
+.emoji-grid button {
+  height: 34px;
+  padding: 0;
+  font-size: 1.25rem;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.emoji-grid button:hover {
+  background: var(--surface-2);
+}
+
+/* Code tab: a labelled language picker. */
+
+.ribbon-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.ribbon-field select {
+  height: 28px;
+  min-width: 160px;
+  padding: 0 6px;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* Narrow screens: tighter spacing. The styles gallery shows four tiles (see StyleGallery). */
+@media (max-width: 700px) {
+  .ribbon {
+    padding: 0 6px 6px;
+  }
+
+  .ribbon-bar {
+    gap: 4px;
+  }
+
+  .ribbon-brand .logo-link {
+    width: 28px;
+  }
+
+  .ribbon-brand .title-input {
+    padding: 3px 4px;
+    font-size: 0.9rem;
+  }
+
+  .ribbon-qat {
+    gap: 0;
+    padding: 0 3px;
+  }
+
+  .ribbon-group {
+    padding: 0 8px;
+  }
+
+  .ribbon-tab {
+    padding: 0 10px;
+  }
+
+  .ribbon-tab[aria-selected='true']::after {
+    right: 10px;
+    left: 10px;
+  }
+}
+
+/* Layout tab: page setup menus (a check, a small page to scale, the name and its values). */
+
+.page-option {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 190px;
+}
+
+.page-option-check {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  color: var(--accent);
+}
+
+.page-option-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.page-option-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.menu-item.active .page-option-name {
+  color: var(--accent);
+}
+
+.page-option-detail {
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.page-icon {
+  flex: none;
+}
+
+.page-icon-paper {
+  fill: var(--paper);
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.page-icon-text {
+  stroke: color-mix(in srgb, var(--muted) 70%, transparent);
+  stroke-width: 1;
+}
+
+.page-icon-margin {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 2 1.5;
+}
+
+/* File tab: Move to trash in the danger colour. */
+.ribbon-btn.danger,
+.ribbon-btn.large.danger svg {
+  color: var(--danger);
+}
+
+/* View tab: the 100% button's glyph, drawn like an icon. */
+.zoom-glyph {
+  display: inline-grid;
+  place-items: center;
+  height: 24px;
+  padding: 0 3px;
+  font: 700 11px/1 var(--sans);
+  color: var(--accent);
+  border: 1.6px solid currentColor;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Phones: two rows. The title, quick access and "⋯" on the first; the tabs and the collapse
+ * button on the second, so every tab has room.
+ */
+@media (max-width: 560px) {
+  .ribbon-bar {
+    flex-wrap: wrap;
+    row-gap: 0;
+    height: auto;
+  }
+
+  .ribbon-brand {
+    flex: 1 1 0;
+    height: 42px;
+  }
+
+  .ribbon-brand .title-input {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  .ribbon-qat {
+    border-right: none;
+  }
+
+  .ribbon-tabs {
+    flex: 1 1 calc(100% - 40px);
+    order: 1;
+    height: 38px;
+    margin-left: -4px;
+  }
+
+  .ribbon-pin {
+    order: 2;
+  }
+}

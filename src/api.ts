@@ -1,5 +1,13 @@
 /** Client for the document library API served by `server/collab.ts`. */
 
+import { setOtherUser, setSessionExpired } from './session'
+
+export type ShareRole = 'editor' | 'viewer'
+/** The caller's role on a document; `owner` is never granted by a share. */
+export type Role = 'owner' | ShareRole
+/** Shares keyed by lowercased email. */
+export type Shares = Record<string, ShareRole>
+
 export type DocMeta = {
   id: string
   title: string
@@ -7,6 +15,12 @@ export type DocMeta = {
   words: number
   createdAt: number
   updatedAt: number
+  /** The owner's email. */
+  owner: string
+  /** The caller's role. */
+  role: Role
+  /** Who the document is shared with: on list items only for the owner, always from `getDoc`. */
+  shares?: Shares
 }
 
 export type TrashedDoc = DocMeta & {
@@ -16,28 +30,93 @@ export type TrashedDoc = DocMeta & {
   purgeAt: number
 }
 
-async function request<T>(path: string, init?: RequestInit, base = '/api/docs'): Promise<T> {
+/**
+ * Sends an API request and returns the response if it succeeded. A Session expired (401, or an
+ * Access redirect) and any other failure throw an `ApiError`.
+ */
+async function send(path: string, init?: RequestInit, base = '/api/docs'): Promise<Response> {
+  // `manual`: when the Access session has expired, Access redirects to its login page. Followed,
+  // that would be a CORS failure indistinguishable from a network drop; unfollowed, it is an
+  // `opaqueredirect` response we can recognise.
   const response = await fetch(`${base}${path}`, {
     ...init,
+    redirect: 'manual',
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   })
-  if (!response.ok) throw new ApiError(response.status)
+  if (response.type === 'opaqueredirect' || response.status === 401) {
+    setSessionExpired(true)
+    throw new ApiError(401, 'session expired')
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: unknown; message?: unknown } | null
+    throw new ApiError(
+      response.status,
+      typeof body?.error === 'string' ? body.error : undefined,
+      typeof body?.message === 'string' ? body.message : undefined,
+    )
+  }
+  setSessionExpired(false)
+  return response
+}
+
+async function request<T>(path: string, init?: RequestInit, base = '/api/docs'): Promise<T> {
+  const response = await send(path, init, base)
   return (response.status === 204 ? undefined : await response.json()) as T
 }
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number) {
-    super(`Request failed (${status})`)
+  /** The server's `error` text, if any. */
+  error?: string
+  /** The server's explanation for people (`message`), if any. */
+  detail?: string
+  constructor(status: number, error?: string, detail?: string) {
+    super(`Request failed (${status}${error ? `: ${error}` : ''})`)
     this.status = status
+    this.error = error
+    this.detail = detail
   }
 }
 
+/** True for the failure a Session expired gives (401, or an Access redirect). */
+export const isSessionError = (error: unknown) => error instanceof ApiError && error.status === 401
+
+export type Me = { email: string; mode: 'access' | 'dev' }
+
+/** The signed-in user and the auth mode. */
+export const getMe = () => request<Me>('', undefined, '/api/me')
+
+/**
+ * Asks the server who we are, to tell a Session expired apart from a network drop:
+ * `expired` for a 401 or an Access redirect, `unreachable` for anything else that failed.
+ * With `expected` (the User this tab loaded as), a different answer is `other-user`, and is
+ * recorded so the page can say so instead of carrying on as the wrong person.
+ */
+export async function probeSession(expected?: string): Promise<'ok' | 'expired' | 'unreachable' | 'other-user'> {
+  let me: Me
+  try {
+    me = await getMe()
+  } catch (error) {
+    return isSessionError(error) ? 'expired' : 'unreachable'
+  }
+  if (expected === undefined) return 'ok'
+  setOtherUser(me.email === expected ? null : me.email)
+  return me.email === expected ? 'ok' : 'other-user'
+}
+
+/** My documents plus Shared with me: every open document the caller owns or has a share on. */
 export const listDocs = () => request<{ docs: DocMeta[] }>('').then((r) => r.docs)
 
-export const getDoc = (id: string) => request<DocMeta>(`/${encodeURIComponent(id)}`)
+/** One document, with its owner and shares (everyone with access sees who has access). 404 for No access. */
+export const getDoc = (id: string) => request<DocMeta & { shares: Shares }>(`/${encodeURIComponent(id)}`)
 
-export type DocStatus = { deleted: boolean; trashed: boolean; exists: boolean }
+/**
+ * `access` is the caller's role, or `none` (No access, which reveals nothing more). Only people
+ * who had a role learn why a document closed: the owner of a trashed document gets
+ * `{ access: 'owner', trashed: true }`, a collaborator on one `{ access: 'none', trashed: true }`,
+ * and the former owner of a purged one `{ access: 'none', deleted: true }`.
+ */
+export type DocStatus = { access: Role | 'none'; trashed: boolean; deleted: boolean }
 
 export const getDocStatus = (id: string) => request<DocStatus>(`/${encodeURIComponent(id)}/status`)
 
@@ -49,7 +128,23 @@ export const renameDoc = (id: string, title: string) =>
 /** Moves a document to the Trash; it can be restored for 30 days. */
 export const trashDoc = (id: string) => request<void>(`/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
+/** Copies a document (any role may); the copy is the caller's, with no shares. */
 export const duplicateDoc = (id: string) => request<DocMeta>(`/${encodeURIComponent(id)}/duplicate`, { method: 'POST' })
+
+const sharePath = (id: string, email: string) => `/${encodeURIComponent(id)}/shares/${encodeURIComponent(email)}`
+
+/**
+ * Shares a document with `email`, or changes their role (owner only). Fails with 400 for an
+ * invalid email or the owner's own, and 409 past 50 shares. Resolves to the document with its shares.
+ */
+export const shareDoc = (id: string, email: string, role: ShareRole) =>
+  request<DocMeta & { shares: Shares }>(sharePath(id, email), { method: 'PUT', body: JSON.stringify({ role }) })
+
+/** Removes someone's share (owner only). */
+export const unshareDoc = (id: string, email: string) => request<void>(sharePath(id, email), { method: 'DELETE' })
+
+/** Remove from my list: a collaborator deletes their own share. */
+export const removeFromMyList = (id: string, myEmail: string) => unshareDoc(id, myEmail)
 
 const trash = <T>(path: string, init?: RequestInit) => request<T>(path, init, '/api/trash')
 
@@ -73,9 +168,34 @@ export async function restoreOrConfirmOpen(id: string): Promise<void> {
     await restoreDoc(id)
   } catch (error) {
     const status = await getDocStatus(id).catch(() => null)
-    if (status && status.exists && !status.trashed && !status.deleted) return
+    if (status && status.access === 'owner' && !status.trashed) return
     throw error
   }
+}
+
+/** The file name in a `Content-Disposition` header: `filename*` (UTF-8) first, then `filename`. */
+export function dispositionFilename(header: string | null): string | undefined {
+  if (!header) return undefined
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.trim())
+    } catch {
+      // fall back to the plain name
+    }
+  }
+  return /filename="([^"]*)"/i.exec(header)?.[1] || undefined
+}
+
+/**
+ * Download as PDF: the document as the server prints it (its stored state, with its page setup).
+ * 503 when the server has no Chromium or too many PDFs are being made (`detail` says which),
+ * 413 for a document too large to print.
+ */
+export async function fetchPdf(id: string): Promise<{ blob: Blob; filename: string }> {
+  const response = await send(`/${encodeURIComponent(id)}/pdf`)
+  const blob = await response.blob()
+  return { blob, filename: dispositionFilename(response.headers.get('Content-Disposition')) ?? 'document.pdf' }
 }
 
 /** URL of a document; `template` seeds a brand-new document on first open. */

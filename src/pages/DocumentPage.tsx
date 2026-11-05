@@ -2,51 +2,74 @@ import 'katex/dist/katex.min.css'
 import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { getDocStatus, libraryUrl, restoreOrConfirmOpen, trashUrl } from '../api'
-import { EditorMenus } from '../components/EditorMenus'
-import { Header, type ViewOptions } from '../components/Header'
-import { Sidebar, type EditorEvent } from '../components/Sidebar'
-import { StatusBar } from '../components/StatusBar'
-import { Toolbar } from '../components/Toolbar'
-import { saveBackup } from '../editor/backup'
+import { yUndoPluginKey } from '@tiptap/y-tiptap'
 import {
-  getSession,
-  getTitle,
-  isDocEmpty,
-  loadUser,
-  saveUser,
-  seedDoc,
-  setTitle,
-  type CollabUser,
-  type Session,
-} from '../editor/collab'
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type RefObject,
+} from 'react'
+import { getDocStatus, libraryUrl, probeSession, restoreOrConfirmOpen, trashUrl, type DocStatus, type Role } from '../api'
+import { ClosedPage } from '../components/ClosedPage'
+import { EditorMenus } from '../components/EditorMenus'
+import { BarActions, DocumentTitle } from '../components/ribbon/BarItems'
+import { canWrite as canWriteAs, DocumentChromeContext, type DocumentChrome, type ViewOptions } from '../components/ribbon/documentContext'
+import { Ribbon } from '../components/ribbon/Ribbon'
+import { useMediaQuery } from '../components/ribbon/state'
+import { SessionBanner } from '../components/SessionBanner'
+import { Toast } from '../components/Toast'
+import { ShareDialog } from '../components/ShareDialog'
+import { Sidebar } from '../components/Sidebar'
+import { StatusBar } from '../components/StatusBar'
+import { adoptLegacyBackup, saveBackup } from '../editor/backup'
+import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
-import { useConnectionStatus, useDocTitle, usePresence } from '../editor/hooks'
+import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRetrying } from '../editor/hooks'
+import { pageGeometry, pageRules, trackPageSetupUndo, usePagedView, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
-import { autoStartTour, startTour } from '../tours'
+import { setDocumentScroller } from '../editor/scroller'
+import { fitZoom, useZoomSetting, type ZoomFit } from '../editor/zoom'
+import { accountAction, setSessionExpired, useMe } from '../session'
+import { autoStartTour, setTourContext, startTour } from '../tours'
+import '../layout.css'
 
 /** How long to wait for the collaboration server before opening the editor offline. */
 const SYNC_TIMEOUT_MS = 4000
+/** How long a template waits to learn whether we own the document before opening without it. */
+const OWNER_WAIT_MS = 10_000
+
+/**
+ * Room Print layout needs beside the page for the sidebar: the canvas padding (48), the column
+ * gap (24), the sidebar (320), the workspace padding (32) and a scrollbar (16). Narrower, the
+ * sidebar goes below the document, as it does on narrow screens.
+ */
+const SIDEBAR_ROOM = 48 + 24 + 320 + 32 + 16
 
 /**
  * Waits for the first sync with the collaboration server, so the editor never
  * writes its own empty document into the shared one before seeing the real content.
  */
-function useInitialSync(session: Session): { ready: boolean; empty: boolean } {
+function useInitialSync(session: Session): { ready: boolean; empty: boolean; synced: boolean } {
   const { provider } = session
   const [state, setState] = useState(() =>
-    provider.isSynced ? { ready: true, empty: isDocEmpty(session) } : { ready: false, empty: false },
+    provider.isSynced
+      ? { ready: true, empty: isDocEmpty(session), synced: true }
+      : { ready: false, empty: false, synced: false },
   )
 
   useEffect(() => {
     if (state.ready) return
     const onSynced = ({ state: synced }: { state: boolean }) => {
-      if (synced) setState({ ready: true, empty: isDocEmpty(session) })
+      if (synced) setState({ ready: true, empty: isDocEmpty(session), synced: true })
     }
     // Offline: open the editor anyway; edits merge once the server is reachable.
     // Never seed in this case, or the demo content would be duplicated on reconnect.
-    const timer = window.setTimeout(() => setState({ ready: true, empty: false }), SYNC_TIMEOUT_MS)
+    const timer = window.setTimeout(() => setState({ ready: true, empty: false, synced: false }), SYNC_TIMEOUT_MS)
     provider.on('synced', onSynced)
     return () => {
       window.clearTimeout(timer)
@@ -57,26 +80,99 @@ function useInitialSync(session: Session): { ready: boolean; empty: boolean } {
   return state
 }
 
-/** Trashed and deleted documents are closed: the server refuses to sync them. */
-type Closed = 'trashed' | 'deleted'
+/**
+ * Closed documents: the server refuses to sync them. `trashed` is the owner's own document in
+ * the Trash (they can restore it); `trashed-by-owner` is one a collaborator had a share on.
+ */
+type Closed = 'trashed' | 'trashed-by-owner' | 'deleted' | 'none'
 
-const closedState = (status: { deleted: boolean; trashed: boolean }): Closed | null =>
-  status.deleted ? 'deleted' : status.trashed ? 'trashed' : null
+const closedState = (status: DocStatus): Closed | null =>
+  status.deleted
+    ? 'deleted'
+    : status.trashed
+      ? status.access === 'owner'
+        ? 'trashed'
+        : 'trashed-by-owner'
+      : status.access === 'none'
+        ? 'none'
+        : null
 
-/** Whether the document is open, in the Trash, or deleted forever. */
-function useClosed(name: string): Closed | 'open' | undefined {
-  const [state, setState] = useState<Closed | 'open' | undefined>(undefined)
+/** `access` is `null` when `/status` couldn't be read at open; the socket's scope then decides. */
+type Opened = { state: Closed | 'open'; access: Role | null }
+
+/** Whether the document is open (and with which role), in the Trash, or deleted forever. */
+function useOpened(name: string): Opened | undefined {
+  const [opened, setOpened] = useState<Opened | undefined>(undefined)
   useEffect(() => {
     let cancelled = false
     getDocStatus(name)
-      .then((status) => !cancelled && setState(closedState(status) ?? 'open'))
-      // Server unreachable: try to open the document anyway (it works offline).
-      .catch(() => !cancelled && setState('open'))
+      .then((status) => {
+        const closed = closedState(status)
+        if (!cancelled) setOpened(closed ? { state: closed, access: null } : { state: 'open', access: status.access as Role })
+      })
+      // Server unreachable: try to open the document anyway (it works offline, read-only until
+      // the socket says what we may do).
+      .catch(() => !cancelled && setOpened({ state: 'open', access: null }))
     return () => {
       cancelled = true
     }
   }, [name])
-  return state
+  return opened
+}
+
+type RoleState = {
+  /** `null` while unknown: nothing has said yet whether we may write, so treat as read-only. */
+  role: Role | null
+  /** Whether we know if we're the owner (for template seeding and owner-only actions). */
+  ownerKnown: boolean
+}
+
+/**
+ * The caller's role, from the socket first: the server's `authenticated` message carries the
+ * scope it enforces (`readonly` for viewers), on every (re)connect, so a promotion or demotion
+ * applies the moment the socket reconnects. Owner versus editor comes from `/status`; ownership
+ * never changes, so it is asked until known. Before the socket has authenticated, `/status` at
+ * open is the best guess.
+ */
+function useRole(session: Session, initialAccess: Role | null): RoleState {
+  const { provider } = session
+  // The provider keeps the last scope across disconnects, which is what we want: a dropped
+  // connection doesn't change what we may do.
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      provider.on('authenticated', onChange)
+      return () => void provider.off('authenticated', onChange)
+    },
+    [provider],
+  )
+  const scope = useSyncExternalStore(subscribe, () => provider.authorizedScope)
+  const [owner, setOwner] = useState<boolean | null>(initialAccess === null ? null : initialAccess === 'owner')
+
+  useEffect(() => {
+    if (owner !== null || scope !== 'read-write') return
+    let cancelled = false
+    let timer: number | undefined
+    const ask = () =>
+      getDocStatus(session.name).then(
+        (status) => {
+          if (cancelled) return
+          if (status.access === 'none') return // closed: the Workspace's own check handles it
+          setOwner(status.access === 'owner')
+        },
+        () => {
+          if (!cancelled) timer = window.setTimeout(ask, 3000)
+        },
+      )
+    void ask()
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [owner, scope, session.name])
+
+  const role: Role | null =
+    scope === 'readonly' ? 'viewer' : scope === 'read-write' ? (owner ? 'owner' : 'editor') : initialAccess
+  return { role, ownerKnown: owner !== null }
 }
 
 /** Restores the document from the Trash and reloads the page to reconnect. */
@@ -99,37 +195,69 @@ function RestoreButton({ name, className }: { name: string; className?: string }
   )
 }
 
+const backLink = (
+  <a className="primary-button" href={libraryUrl()}>
+    Back to all documents
+  </a>
+)
+
 type DocumentPageProps = { name: string; templateId: string | null }
 
 export function DocumentPage({ name, templateId }: DocumentPageProps) {
-  const state = useClosed(name)
+  const opened = useOpened(name)
 
-  if (state === undefined) return <Loading text="Opening document…" />
-  if (state === 'trashed') {
-    return (
-      <div className="loading deleted" role="alert">
-        <p className="deleted-title">This document is in the trash.</p>
-        <p className="muted">Restore it to keep editing.</p>
-        <div className="closed-actions">
-          <RestoreButton name={name} className="primary-button" />
-          <a className="secondary-button" href={trashUrl()}>
-            Open the trash
-          </a>
-        </div>
-      </div>
-    )
+  if (opened === undefined) return <Loading text="Opening document…" />
+  switch (opened.state) {
+    case 'trashed':
+      return (
+        <ClosedPage
+          title="This document is in the trash."
+          actions={
+            <>
+              <RestoreButton name={name} className="primary-button" />
+              <a className="secondary-button" href={trashUrl()}>
+                Open the trash
+              </a>
+            </>
+          }
+        >
+          Restore it to keep editing.
+        </ClosedPage>
+      )
+    case 'trashed-by-owner':
+      return (
+        <ClosedPage title="The owner moved this document to the trash." actions={backLink}>
+          You’ll have access again if they restore it.
+        </ClosedPage>
+      )
+    case 'none':
+      return <NoAccess />
+    case 'deleted':
+      return <ClosedPage title="This document was deleted." actions={backLink} />
+    default:
+      return <SyncedDocument name={name} templateId={templateId} access={opened.access} />
   }
-  if (state === 'deleted') {
-    return (
-      <div className="loading deleted" role="alert">
-        <p className="deleted-title">This document was deleted.</p>
-        <a className="primary-button" href={libraryUrl()}>
-          Back to all documents
-        </a>
-      </div>
-    )
-  }
-  return <SyncedDocument name={name} templateId={templateId} />
+}
+
+/** No access: the same page whether the document never existed, is someone else's or was purged. */
+function NoAccess() {
+  const me = useMe()
+  const action = accountAction(me)
+  return (
+    <ClosedPage
+      title="This document doesn’t exist or hasn’t been shared with you."
+      actions={
+        <>
+          {backLink}
+          <button type="button" className="secondary-button" onClick={action.run}>
+            {action.label}
+          </button>
+        </>
+      }
+    >
+      Signed in as <strong data-testid="signed-in-as">{me.email}</strong>.
+    </ClosedPage>
+  )
 }
 
 function Loading({ text }: { text: string }) {
@@ -141,30 +269,198 @@ function Loading({ text }: { text: string }) {
   )
 }
 
-function SyncedDocument({ name, templateId }: DocumentPageProps) {
-  const [session] = useState(() => getSession(name))
-  const { ready, empty } = useInitialSync(session)
+function SyncedDocument({ name, templateId, access }: DocumentPageProps & { access: Role | null }) {
+  const me = useMe()
+  const [session] = useState(() =>
+    getSession(name, async () => {
+      // Before anything syncs on a (re)opened socket: are we still who this tab loaded as?
+      if ((await probeSession(me.email)) === 'other-user') throw new Error('signed in as someone else')
+    }),
+  )
+  const { ready, empty, synced } = useInitialSync(session)
+  const { role, ownerKnown } = useRole(session, access)
 
-  // The template only applies to the first open; drop it from the URL afterwards.
+  // Only the owner seeds a template, and only into a brand-new, empty document: anyone else's
+  // seed would be local edits (a viewer's are dropped by the server). If we can't tell yet
+  // whether we're the owner, wait for it rather than drop the template.
+  const template = templateId && empty ? findTemplate(templateId) : undefined
+  const waitingForOwner = ready && !!template && !ownerKnown
+  // If the server can't say for a while, open without the template; `?template=` stays in the
+  // URL, so a reload tries again.
+  const [gaveUp, setGaveUp] = useState(false)
   useEffect(() => {
-    if (!ready || !templateId) return
+    if (!waitingForOwner) return
+    const timer = window.setTimeout(() => setGaveUp(true), OWNER_WAIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [waitingForOwner])
+  const decided = ready && (!waitingForOwner || gaveUp)
+
+  // The template only applies to the first open; drop it from the URL once it has been applied,
+  // or once we know it won't be (the document isn't empty, or we aren't its owner). Not when
+  // we opened offline or gave up: a reload should try again.
+  const settled = synced && (!template || ownerKnown)
+  useEffect(() => {
+    if (!settled || !templateId) return
     const url = new URL(window.location.href)
     url.searchParams.delete('template')
     window.history.replaceState(null, '', url)
-  }, [ready, templateId])
+  }, [settled, templateId])
 
-  if (!ready) return <Loading text="Connecting to the shared document…" />
-
-  const template = empty ? findTemplate(templateId) : undefined
-  return <Workspace session={session} template={template} />
+  if (!decided) return <Loading text="Connecting to the shared document…" />
+  return <Workspace session={session} template={role === 'owner' ? template : undefined} role={role} />
 }
 
-const MAX_EVENTS = 50
+/**
+ * The `@page` rules for printing, kept in a <style> element of its own: the sheet size and
+ * margins follow the document's page setup (see pageRules).
+ */
+function usePrintPageRules(rules: string) {
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.dataset.pageRule = ''
+    style.textContent = rules
+    document.head.append(style)
+    return () => style.remove()
+  }, [rules])
+}
 
-function Workspace({ session, template }: { session: Session; template: Template | undefined }) {
-  const [user, setUser] = useState<CollabUser>(loadUser)
+/**
+ * A phone's keyboard: Android resizes the layout for it (`interactive-widget=resizes-content` in
+ * index.html); iOS doesn't, and the shell (100dvh) would run under the keyboard, status bar and
+ * caret included. While the visible viewport is clearly shorter than the window (and not because
+ * of a pinch zoom), the shell takes its height (`--app-height`, see App.css).
+ */
+function useKeyboardHeight() {
+  useEffect(() => {
+    const visual = window.visualViewport
+    if (!visual) return
+    const root = document.documentElement
+    const update = () => {
+      const covered = visual.scale < 1.01 && window.innerHeight - visual.height > 80
+      if (covered) root.style.setProperty('--app-height', `${Math.round(visual.height)}px`)
+      else root.style.removeProperty('--app-height')
+    }
+    update()
+    visual.addEventListener('resize', update)
+    return () => {
+      visual.removeEventListener('resize', update)
+      root.style.removeProperty('--app-height')
+    }
+  }, [])
+}
+
+/** Space the page keeps on screen: the editor's padding around it (see layout.css). */
+const PAGE_PADDING = { x: 48, top: 16, bottom: 16 }
+
+/** Keys that scroll a page, and how far: a fraction of the view's height, or to an end. */
+const SCROLL_KEYS: Record<string, (view: HTMLElement, shift: boolean) => number> = {
+  PageDown: (v) => v.clientHeight * 0.875,
+  PageUp: (v) => -v.clientHeight * 0.875,
+  ' ': (v, shift) => (shift ? -1 : 1) * v.clientHeight * 0.875,
+  ArrowDown: () => 40,
+  ArrowUp: () => -40,
+  End: (v) => v.scrollHeight,
+  Home: (v) => -v.scrollHeight,
+}
+
+/**
+ * Registers the document scroller (see editor/scroller.ts) and publishes its height as
+ * `--doc-view-height`, for the sticky sidebar's own scrolling (see App.css).
+ *
+ * The page itself doesn't scroll, so scrolling keys pressed with nothing focused would do
+ * nothing. The scroller is focusable (tabIndex -1) and takes focus when the page opens with
+ * nothing else focused; keys that still reach the body (after a dialog closes, say) scroll it too.
+ */
+function useDocumentScroller(view: HTMLElement | null) {
+  useLayoutEffect(() => {
+    if (!view) return
+    setDocumentScroller(view)
+    if (!document.activeElement || document.activeElement === document.body) view.focus({ preventScroll: true })
+    const onKey = (event: KeyboardEvent) => {
+      const distance = SCROLL_KEYS[event.key]
+      if (!distance || event.defaultPrevented || event.target !== document.body) return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      event.preventDefault()
+      view.focus({ preventScroll: true })
+      view.scrollBy({ top: distance(view, event.shiftKey) })
+    }
+    window.addEventListener('keydown', onKey)
+    const observer = new ResizeObserver(() => view.style.setProperty('--doc-view-height', `${view.clientHeight}px`))
+    observer.observe(view)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('keydown', onKey)
+      setDocumentScroller(null)
+    }
+  }, [view])
+}
+
+/**
+ * The percentage a fit (Page width, One page) gives, following the window and the sidebar. The
+ * room is the main column's width (which doesn't depend on the zoom while fitting: see the
+ * `--layout-page-width` below) and the document scroller's height.
+ */
+function useFitZoom(
+  fit: ZoomFit | null,
+  pageWidth: number,
+  pageHeight: number,
+  main: RefObject<HTMLElement | null>,
+  view: HTMLElement | null,
+): number | null {
+  const [fitted, setFitted] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const column = main.current
+    if (!fit || !column || !view) return
+    const measure = () => {
+      const width = column.clientWidth - PAGE_PADDING.x
+      const height = view.clientHeight - PAGE_PADDING.top - PAGE_PADDING.bottom
+      setFitted(fitZoom({ fit, pageWidth, pageHeight, width, height }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(column)
+    observer.observe(view)
+    return () => observer.disconnect()
+  }, [fit, pageWidth, pageHeight, main, view])
+  return fit ? fitted : null
+}
+
+/**
+ * Zooming keeps the same place in the document in the middle of the scroller, as Word does,
+ * instead of the same scroll offset. The scroll position is remembered before each change, since
+ * the browser's own scroll anchoring may already have moved it by the time this runs.
+ */
+function useZoomAnchor(zoom: number, editor: Editor, view: HTMLElement | null) {
+  const before = useRef({ zoom, scrollTop: 0 })
+  useEffect(() => {
+    if (!view) return
+    const remember = () => (before.current.scrollTop = view.scrollTop)
+    remember()
+    view.addEventListener('scroll', remember, { passive: true })
+    return () => view.removeEventListener('scroll', remember)
+  }, [view])
+  useLayoutEffect(() => {
+    const previous = before.current
+    if (!view || previous.zoom === zoom) return
+    const middle = view.clientHeight / 2
+    // The editor's top in the scroller's content, which zooming doesn't move.
+    const top = editor.view.dom.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop
+    const offset = (previous.scrollTop + middle - top) / previous.zoom
+    before.current = { zoom, scrollTop: previous.scrollTop }
+    if (offset > 0) view.scrollTo({ top: top + offset * zoom - middle, behavior: 'instant' })
+  }, [zoom, editor, view])
+}
+
+type WorkspaceProps = { session: Session; template: Template | undefined; role: Role | null }
+
+function Workspace({ session, template, role }: WorkspaceProps) {
+  const me = useMe()
+  const [user] = useState(() => collabUser(me.email))
+  // Only owners and editors write. Viewers, and anyone whose role isn't known yet, read.
+  const canWrite = canWriteAs(role)
+  const viewer = role === 'viewer'
+  const canWriteRef = useRef(canWrite)
   const [toc, setToc] = useState<TableOfContentData>([])
-  const [events, setEvents] = useState<EditorEvent[]>([])
   const [view, setView] = useState<ViewOptions>({
     readOnly: false,
     invisibles: false,
@@ -173,30 +469,43 @@ function Workspace({ session, template }: { session: Session; template: Template
   })
 
   const editorRef = useRef<Editor | null>(null)
-  const eventId = useRef(0)
-  const backupTimer = useRef<number | undefined>(undefined)
-
-  // Editor callbacks can fire while React is rendering (immediatelyRender), so
-  // defer state updates to a microtask.
-  const logEvent = useCallback((type: string, detail = '') => {
-    queueMicrotask(() => {
-      eventId.current += 1
-      const event = { id: eventId.current, type, detail, at: Date.now() }
-      setEvents((prev) => [event, ...prev].slice(0, MAX_EVENTS))
-    })
-  }, [])
-
   const getEditor = useCallback(() => editorRef.current, [])
 
-  // `getEditor` is only called later from click handlers, never during render.
+  // Print layout shows pages; Web layout, or a screen too narrow for a page, one continuous page.
+  // Printing doesn't use either: the browser paginates with the page setup (see pageRules).
+  const pageSetup = usePageSetup(session)
+  const paged = usePagedView()
+  const pagination = useMemo(() => ({ enabled: paged, ...pageGeometry(pageSetup) }), [paged, pageSetup])
+  usePrintPageRules(pageRules(pageSetup))
+
+  const backupTimer = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    canWriteRef.current = canWrite
+    if (!canWrite) window.clearTimeout(backupTimer.current)
+  }, [canWrite])
+
+  // A backup made in this browser before documents had owners belongs to the owner.
+  useEffect(() => {
+    if (role === 'owner') adoptLegacyBackup(me.email, session.name)
+  }, [role, me.email, session.name])
+
+  // Only people who can change the document take local backups.
+  const backup = useCallback(
+    (e: Editor) => canWriteRef.current && saveBackup(e, me.email, session.name),
+    [me.email, session.name],
+  )
+
+  // `getEditor` and `backup` are only called later from handlers, never during render.
   // oxlint-disable-next-line react/refs
   const [extensions] = useState(() => {
     const list = buildExtensions({
       session,
       user,
-      onSave: (e) => saveBackup(e, session.name),
+      onSave: backup,
       getEditor,
       onTableOfContents: (data) => queueMicrotask(() => setToc(data)),
+      pagination,
     })
     // A brand-new document opened from a template gets its content written to Yjs
     // before the editor binds to it.
@@ -210,24 +519,18 @@ function Workspace({ session, template }: { session: Session; template: Template
   const editor = useEditor({
     extensions,
     immediatelyRender: true,
+    editable: canWrite,
     editorProps: {
       attributes: { 'aria-label': 'Document', spellcheck: 'true' },
     },
-    onCreate: () => logEvent('create', 'editor ready'),
     onUpdate: ({ editor: e, transaction }) => {
-      const origin = isChangeOrigin(transaction) ? 'remote' : 'local'
-      logEvent('update', `${origin} · ${transaction.steps.length} step(s) · size ${e.state.doc.content.size}`)
-      // Back up your own edits only, so a collaborator wiping the doc can't overwrite your backup.
-      if (origin === 'remote') return
+      // Back up your own changes only, so a collaborator wiping the doc can't overwrite your
+      // backup: not what arrives through Yjs (a collaborator's edit, the content loading), and
+      // not transactions that change nothing (opening a document dispatches one).
+      if (isChangeOrigin(transaction) || !transaction.docChanged || !canWriteRef.current) return
       window.clearTimeout(backupTimer.current)
-      backupTimer.current = window.setTimeout(() => saveBackup(e, session.name), 1000)
+      backupTimer.current = window.setTimeout(() => backup(e), 1000)
     },
-    onSelectionUpdate: ({ editor: e }) => {
-      const { from, to } = e.state.selection
-      logEvent('selectionUpdate', from === to ? `cursor at ${from}` : `selected ${from}–${to}`)
-    },
-    onFocus: () => logEvent('focus'),
-    onBlur: () => logEvent('blur'),
   })
 
   useEffect(() => {
@@ -238,12 +541,26 @@ function Workspace({ session, template }: { session: Session; template: Template
     }
   }, [editor])
 
+  // Page setup changes are steps in the editor's undo history (see `trackPageSetupUndo`).
+  useEffect(() => {
+    const undoManager = yUndoPluginKey.getState(editor.state)?.undoManager
+    if (undoManager) trackPageSetupUndo(session, undoManager)
+  }, [editor, session])
 
   useEffect(() => {
     editor.commands.showInvisibleCharacters(view.invisibles)
   }, [editor, view.invisibles])
 
-  // Tutorial overlays: auto-start once, and `?` replays the welcome tour.
+  // Before paint, so switching layouts or page sizes doesn't flash the old one.
+  useLayoutEffect(() => {
+    editor.commands.setPagination(pagination)
+  }, [editor, pagination])
+
+  // Tutorial overlays: auto-start once, and `?` replays the welcome tour. They describe what
+  // this user can do here.
+  useEffect(() => {
+    setTourContext({ role, mode: me.mode })
+  }, [role, me.mode])
   useEffect(() => {
     const cancelAutoStart = autoStartTour('welcome', 700)
     const onKey = (event: KeyboardEvent) => {
@@ -261,95 +578,198 @@ function Workspace({ session, template }: { session: Session; template: Template
     }
   }, [])
 
-  const presence = usePresence(session.provider)
-  const status = useConnectionStatus(session.provider)
+  const { provider } = session
+  const presence = usePresence(provider)
+  const status = useConnectionStatus(provider)
+  const pending = usePendingChanges(provider)
+  const retrying = useRetrying(session)
 
-  // If the server stops accepting this document, check whether it was moved to the trash
-  // or deleted (by someone else, or in another tab) rather than showing "Offline" forever.
+  // Demoted to viewer: lock the editor in the same tick the socket says so, before the next
+  // keystroke, rather than after React re-renders.
+  useEffect(() => {
+    const onAuthenticated = ({ scope }: { scope: string }) => {
+      setSessionExpired(false)
+      if (scope === 'readonly') editorRef.current?.setEditable(false)
+    }
+    provider.on('authenticated', onAuthenticated)
+    return () => {
+      provider.off('authenticated', onAuthenticated)
+    }
+  }, [provider])
+
+  // When the socket closes or is refused, find out why instead of showing "Offline" forever:
+  // first whether the session expired (Access redirects `/api/me`; the banner then offers to
+  // sign in again while the editor stays editable) or now belongs to someone else, then
+  // whether the document was moved to the trash, deleted, or unshared.
   const [closed, setClosed] = useState<Closed | null>(null)
   const closedWhileOpen = closed !== null
   useEffect(() => {
-    const { provider } = session
     let cancelled = false
     let lastCheck = 0
-    // The provider retries rejected connections in a loop; check at most every 3 s.
-    const onClose = () => {
-      if (Date.now() - lastCheck < 3000) return
+    let pending: number | undefined
+    // The provider retries refused connections in a loop; check at most every 3 s. A refusal
+    // within 3 s of the last check is checked when they are up, not dropped: a socket refused
+    // for this document stays open without retrying, so there may be no later event.
+    const onRefused = () => {
+      const wait = lastCheck + 3000 - Date.now()
+      if (wait > 0) {
+        pending ??= window.setTimeout(() => {
+          pending = undefined
+          onRefused()
+        }, wait)
+        return
+      }
       lastCheck = Date.now()
-      getDocStatus(session.name)
-        .then((s) => {
-          const next = closedState(s)
-          if (!cancelled && next) setClosed(next)
-        })
-        .catch(() => undefined)
+      void probeSession(me.email).then(async (result) => {
+        if (cancelled || result !== 'ok') return
+        const next = closedState(await getDocStatus(session.name))
+        if (!cancelled && next) setClosed(next)
+      }).catch(() => undefined)
     }
-    provider.on('close', onClose)
+    provider.on('close', onRefused)
+    provider.on('authenticationFailed', onRefused)
     return () => {
       cancelled = true
-      provider.off('close', onClose)
+      window.clearTimeout(pending)
+      provider.off('close', onRefused)
+      provider.off('authenticationFailed', onRefused)
     }
-  }, [session])
+  }, [provider, session.name, me.email])
 
   useEffect(() => {
     if (!closedWhileOpen) return
-    session.provider.destroy()
+    provider.destroy()
     editor.setEditable(false)
-  }, [closedWhileOpen, editor, session.provider])
+  }, [closedWhileOpen, editor, provider])
 
+  // Viewers (and an unknown role) are always read-only; for owners and editors, Read-only is a
+  // view preference.
+  const readOnly = view.readOnly || closedWhileOpen || !canWrite
   useEffect(() => {
-    editor.setEditable(!view.readOnly && !closedWhileOpen)
-  }, [editor, view.readOnly, closedWhileOpen])
+    editor.setEditable(!readOnly)
+  }, [editor, readOnly])
   const title = useDocTitle(session)
 
   useEffect(() => {
     document.title = `${title || 'Untitled document'} – Write`
   }, [title])
 
-  const rename = () => {
-    const name = window.prompt('Your name (shown to collaborators)', user.name)?.trim()
-    if (!name) return
-    const next = { ...user, name: name.slice(0, 40) }
-    setUser(next)
-    saveUser(next)
-    editor.commands.updateUser(next)
-  }
+  // Edits the server refused: typed just before a demotion took effect. They stay on screen
+  // here but are not in the shared document, so say so.
+  const lostEdits = viewer && pending && status === 'connected' && !closedWhileOpen
 
-  const classes = ['app', view.focusMode && 'focus-mode', view.readOnly && 'read-only', !view.sidebar && 'no-sidebar']
+  const reconnect = useCallback(() => resume(session), [session])
+
+  const [sharing, setSharing] = useState(false)
+
+  const mainRef = useRef<HTMLElement>(null)
+  // The document's scroller, as state: the menus and the zoom need it once it exists.
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
+  useDocumentScroller(scroller)
+  useKeyboardHeight()
+
+  // Zoom: a percentage, or a fit in Print layout. Printing is always at 100% (print CSS).
+  const zoomSetting = useZoomSetting()
+  const fit = paged ? zoomSetting.fit : null
+  const fitted = useFitZoom(fit, pagination.pageWidth, pagination.pageHeight, mainRef, scroller)
+  const zoom = fit ? (fitted ?? 100) : zoomSetting.percent
+  useZoomAnchor(zoom, editor, scroller)
+  // Room for the sidebar beside the page at 100%. Zoomed in further, the page scrolls sideways in
+  // the document area instead (like a landscape page wider than the window): the contents stay.
+  const sidebarFits = useMediaQuery(`(min-width: ${Math.ceil(pagination.pageWidth) + SIDEBAR_ROOM}px)`)
+
+  const canToggleReadOnly = canWrite && !closedWhileOpen
+  const chrome = useMemo<DocumentChrome>(
+    () => ({
+      role,
+      view: { ...view, readOnly },
+      canToggleReadOnly,
+      setView: (next) => setView((prev) => ({ ...prev, ...next })),
+      backup: () => backup(editor),
+      share: () => setSharing(true),
+      zoom,
+    }),
+    [role, view, readOnly, canToggleReadOnly, backup, editor, zoom],
+  )
+
+  const style = {
+    '--zoom': zoom / 100,
+    // The page's width on screen, which the main column makes room for. Not while fitting: the
+    // page then fits the column by definition, and the column must not follow the page.
+    '--layout-page-width': fit ? '0px' : `${(pagination.pageWidth * zoom) / 100}px`,
+  } as CSSProperties
+
+  const classes = [
+    'app',
+    'doc-shell',
+    view.focusMode && 'focus-mode',
+    readOnly && 'read-only',
+    !view.sidebar && 'no-sidebar',
+    paged && 'layout-print',
+    paged && view.sidebar && !sidebarFits && 'sidebar-below',
+  ]
     .filter(Boolean)
     .join(' ')
 
   return (
-    <div className={classes}>
-      <Header
-        editor={editor}
-        session={session}
-        presence={presence}
-        view={closedWhileOpen ? { ...view, readOnly: true } : view}
-        onViewChange={(next) => setView((prev) => ({ ...prev, ...next }))}
-      />
-      {closed && (
-        <div className="deleted-banner" role="alert">
-          {closed === 'trashed' ? 'This document was moved to the trash.' : 'This document was deleted.'} Your view
-          is read-only and changes are no longer saved.{' '}
-          {closed === 'trashed' && (
-            <>
-              <RestoreButton name={session.name} className="link-button banner-button" /> ·{' '}
-            </>
-          )}
-          <a href={libraryUrl()}>Back to all documents</a>
-        </div>
-      )}
-      <div className="workspace">
-        <main className="main">
-          <Toolbar editor={editor} readOnly={view.readOnly || closedWhileOpen} />
-          <div className="editor-shell" data-tour="editor">
-            <EditorContent editor={editor} className="editor" />
-            <EditorMenus editor={editor} />
+    <DocumentChromeContext value={chrome}>
+      <div className={classes} style={style}>
+        <Ribbon
+          editor={editor}
+          session={session}
+          readOnly={readOnly}
+          start={<DocumentTitle session={session} />}
+          end={<BarActions presence={presence} />}
+        />
+        {sharing && <ShareDialog docId={session.name} onClose={() => setSharing(false)} />}
+        {closed && (
+          <div className="deleted-banner" role="alert">
+            {closed === 'trashed'
+              ? 'This document was moved to the trash.'
+              : closed === 'trashed-by-owner'
+                ? 'The owner moved this document to the trash.'
+                : closed === 'deleted'
+                  ? 'This document was deleted.'
+                  : 'You no longer have access to this document.'}{' '}
+            Your view is read-only and changes are no longer saved.{' '}
+            {closed === 'trashed' && (
+              <>
+                <RestoreButton name={session.name} className="link-button banner-button" /> ·{' '}
+              </>
+            )}
+            <a href={libraryUrl()}>Back to all documents</a>
           </div>
-        </main>
-        {view.sidebar && <Sidebar editor={editor} toc={toc} events={events} onClearEvents={() => setEvents([])} />}
+        )}
+        {lostEdits && (
+          <div className="deleted-banner lost-edits" role="alert">
+            You can only view this document now, so your latest changes weren’t saved. They’re still on this screen until
+            you reload: copy them, or export them from the File tab, if you need them.
+          </div>
+        )}
+        {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
+        {/* The only part of the page that scrolls: the ribbon above and the status bar below stay put. */}
+        <div className="doc-scroll" ref={setScroller} tabIndex={-1}>
+          <div className="workspace">
+            <main className="main" ref={mainRef}>
+              <div className="editor-shell" data-tour="editor">
+                <EditorContent editor={editor} className="editor" />
+                <EditorMenus editor={editor} scrollTarget={scroller} />
+              </div>
+            </main>
+            {view.sidebar && <Sidebar editor={editor} toc={toc} />}
+          </div>
+        </div>
+        <Toast />
+        <StatusBar
+          editor={editor}
+          status={status}
+          pending={pending}
+          retrying={retrying}
+          readOnly={view.readOnly && canWrite}
+          role={role}
+          zoom={zoom}
+        />
       </div>
-      <StatusBar editor={editor} documentName={session.name} user={user} onRename={rename} status={status} readOnly={view.readOnly} />
-    </div>
+    </DocumentChromeContext>
   )
 }

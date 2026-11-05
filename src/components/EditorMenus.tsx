@@ -8,8 +8,11 @@ import { mod } from '../editor/platform'
 
 const QUICK_BLOCKS = ['h1', 'h2', 'bullet', 'task', 'quote', 'code', 'table', 'image', 'callout-info', 'math-block']
 
-/** Bubble menu (on text selection), floating "+" menu (on empty lines) and the block drag handle. */
-export function EditorMenus({ editor }: { editor: Editor }) {
+/**
+ * Bubble menu (on text selection), floating "+" menu (on empty lines) and the block drag handle.
+ * `scrollTarget`: what scrolls the document (the page's scroller), so the menus follow it.
+ */
+export function EditorMenus({ editor, scrollTarget }: { editor: Editor; scrollTarget: HTMLElement | null }) {
   const s = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -32,7 +35,7 @@ export function EditorMenus({ editor }: { editor: Editor }) {
       <BubbleMenu
         editor={editor}
         className="bubble-menu"
-        options={{ placement: 'top', offset: 8 }}
+        options={{ placement: 'top', offset: 8, scrollTarget: scrollTarget ?? window }}
         shouldShow={({ editor: e, state, view }) =>
           e.isEditable &&
           view.hasFocus() &&
@@ -72,7 +75,7 @@ export function EditorMenus({ editor }: { editor: Editor }) {
         </ToolButton>
       </BubbleMenu>
 
-      <FloatingMenu editor={editor} className="floating-menu" options={{ placement: 'bottom-start', offset: 4 }}>
+      <FloatingMenu editor={editor} className="floating-menu" options={{ placement: 'bottom-start', offset: 4, scrollTarget: scrollTarget ?? window }}>
         <span className="floating-plus" aria-hidden>
           ＋
         </span>

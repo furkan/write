@@ -1,0 +1,290 @@
+/* ---------- Print layout: pages on a canvas (see editor/extensions/pagination) ---------- */
+
+.app.layout-print {
+  background: var(--canvas);
+}
+
+/* Wide enough for the page; a page wider than the window (landscape) scrolls sideways, like Word. */
+.layout-print .workspace,
+.layout-print.no-sidebar .workspace {
+  grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr) 320px;
+  max-width: none;
+}
+
+.layout-print.no-sidebar .workspace {
+  grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
+}
+
+/* No room for the sidebar beside the page (see SIDEBAR_ROOM): it goes below, as on narrow screens. */
+.layout-print.sidebar-below .workspace {
+  grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
+}
+
+@media (max-width: 1000px) {
+  .layout-print .workspace {
+    grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
+  }
+}
+
+.layout-print .editor-shell {
+  padding: 16px 24px 120px;
+}
+
+/* Status bar: Print layout and Web layout, like Word's view buttons. */
+.layout-toggles {
+  gap: 2px;
+}
+
+.status-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.status-toggle:hover:not([aria-disabled='true']) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.status-toggle.active {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.status-toggle[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Status bar: Word's zoom slider, with the percentage opening the presets. */
+.zoom-control {
+  gap: 2px;
+}
+
+.zoom-control .status-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* A thin track with a round thumb, like Word's. */
+.zoom-range {
+  width: 104px;
+  height: 18px;
+  margin: 0 2px;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+
+.zoom-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  border-radius: 1px;
+}
+
+.zoom-range::-moz-range-track {
+  height: 2px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  border-radius: 1px;
+}
+
+.zoom-range::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--accent);
+  appearance: none;
+}
+
+.zoom-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.zoom-range:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Narrow windows: a shorter zoom slider keeps the status bar on as few rows as it can. */
+@media (max-width: 560px) {
+  .zoom-range {
+    width: 72px;
+  }
+}
+
+.status-bar .zoom-percent > button {
+  min-width: 46px;
+  height: 22px;
+  padding: 0 4px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.status-bar .zoom-percent > button:hover {
+  background: var(--surface-2);
+}
+
+/* ---------- Printing: only the document, on sheets that match its page setup ---------- */
+
+@media print {
+  /* Paper is white whatever the theme. Specific enough to beat both dark theme rules. */
+  :root:not([data-print-a]):not([data-print-b]) {
+    --text: #1f1d24;
+    --muted: #6b6375;
+    --bg: #ffffff;
+    --surface: #f6f5f8;
+    --surface-2: #eeedf2;
+    --border: #e5e4e7;
+    --accent: #7c3aed;
+    --accent-bg: rgba(124, 58, 237, 0.12);
+    --code-bg: #f4f3ec;
+    --danger: #dc2626;
+    --success: #16a34a;
+    --warning: #ca8a04;
+    --info: #2563eb;
+    --hl-keyword: #7c3aed;
+    --hl-string: #15803d;
+    --hl-number: #c2410c;
+    --hl-title: #2563eb;
+    --hl-type: #b45309;
+    --paper: #ffffff;
+    --canvas: #ffffff;
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  .app,
+  .app.layout-print {
+    min-height: 0;
+    background: #ffffff;
+  }
+
+  /* The app shell goes back to normal flow, so every page prints, not one screenful. */
+  html:has(.doc-shell),
+  html:has(.doc-shell) body,
+  .app.doc-shell,
+  .doc-scroll {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Everything but the document: banners, ribbon, sidebar, status bar, menus, tours. */
+  .app > :not(.doc-scroll),
+  .doc-scroll > :not(.workspace),
+  .workspace > :not(.main),
+  .main > :not(.editor-shell),
+  .editor-shell > :not(.editor),
+  .editor > :not(.tiptap),
+  .driver-popover,
+  .driver-overlay,
+  .collaboration-carets__caret,
+  .collaboration-carets__label {
+    display: none !important;
+  }
+
+  .workspace,
+  .layout-print .workspace {
+    display: block;
+    max-width: none;
+    padding: 0;
+  }
+
+  .editor-shell,
+  .layout-print .editor-shell {
+    padding: 0;
+  }
+
+  /*
+   * One print path for both layouts: the browser splits the document into sheets with the page
+   * setup's size and margins (@page, see pageRules), so the sheet's margins are the only margins
+   * and Print layout's on-screen pages (pagination.css is screen-only) aren't printed.
+   */
+  .editor .tiptap {
+    min-height: 0;
+    padding: 0;
+    /* Paper is always at 100%, whatever the zoom on screen. */
+    zoom: 1 !important;
+  }
+
+  .tiptap > .pagination-pages {
+    display: none !important;
+  }
+
+  /* The text starts at the sheet's top margin. */
+  .tiptap > :first-child,
+  .tiptap > .pagination-pages + * {
+    margin-top: 0;
+  }
+
+  /* What the on-screen pages used to look after: nothing is cut at a sheet's edge. */
+  .tiptap :is(h1, h2, h3, h4, h5, h6) {
+    break-after: avoid;
+  }
+
+  .tiptap tr {
+    break-inside: avoid;
+  }
+
+  .tiptap thead {
+    display: table-header-group;
+  }
+
+  .tiptap .tableWrapper,
+  .tiptap [data-type='block-math'] {
+    overflow: visible;
+  }
+
+  .tiptap pre {
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .tiptap pre code {
+    white-space: inherit;
+  }
+
+  .tiptap :is(img, iframe) {
+    max-width: 100%;
+    max-height: var(--print-content-height, 9in);
+    object-fit: contain;
+    break-inside: avoid;
+  }
+
+  /* No placeholders, focus dimming or selection on paper. */
+  .tiptap .is-empty::before {
+    content: none !important;
+  }
+
+  .focus-mode .tiptap > * {
+    opacity: 1 !important;
+  }
+
+  .tiptap ::selection {
+    background: transparent;
+  }
+}

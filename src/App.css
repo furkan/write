@@ -5,7 +5,7 @@
   gap: 12px;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  min-height: 100dvh;
   color: var(--muted);
 }
 
@@ -27,25 +27,45 @@
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+/*
+ * The document page is an app shell: the ribbon at the top and the status bar at the bottom stay
+ * put, and only the document area (.doc-scroll) scrolls. The page itself never scrolls or
+ * bounces, so there is nothing to pull past the ribbon (no pull-to-refresh) or the status bar.
+ * The library scrolls as a normal page and keeps pull-to-refresh.
+ */
+html:has(.doc-shell),
+html:has(.doc-shell) body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
-.brand {
+/* --app-height: the visible height while a phone's keyboard is open (see useKeyboardHeight). */
+.app.doc-shell {
+  height: var(--app-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.doc-shell > :not(.doc-scroll) {
+  flex: none;
+}
+
+.doc-scroll {
   display: flex;
-  flex: 1 1 200px;
-  gap: 6px;
-  align-items: center;
-  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* Focusable only so the scrolling keys work before a click (see useDocumentScroller). */
+.doc-scroll:focus {
+  outline: none;
 }
 
 .logo {
@@ -162,6 +182,235 @@
 
 .loading.deleted {
   flex-direction: column;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.closed-text {
+  max-width: 32rem;
+  margin: 0;
+}
+
+/* Session expired: the editor keeps working, so this is a notice rather than an error. */
+.session-banner {
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  text-align: center;
+  color: var(--text);
+  background: color-mix(in srgb, var(--warning) 16%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+}
+
+.session-banner .banner-button {
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+}
+
+.view-only-badge {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: 999px;
+}
+
+/* ---------- Account menu ---------- */
+
+.account-avatar {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  border-radius: 50%;
+}
+
+:is(.header-actions, .ribbon-actions) > .account > button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  max-width: 280px;
+  margin: 0;
+  padding: 6px 10px 2px;
+}
+
+.account-email {
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Share dialog ---------- */
+
+.share-dialog {
+  width: min(520px, calc(100vw - 24px));
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.share-dialog::backdrop {
+  background: rgba(10, 5, 20, 0.45);
+}
+
+.share-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+}
+
+.share-title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 1.1rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.share-subtitle {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.share-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share-form input,
+.share-form select,
+.share-person select {
+  height: 36px;
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.share-person select {
+  height: 30px;
+  padding: 0 6px;
+  font-size: 0.85rem;
+}
+
+.share-form input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.share-form input:focus,
+.share-form select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.share-form input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.share-error,
+.share-notice,
+.share-note {
+  margin: 0;
+}
+
+.share-error {
+  font-size: 0.85rem;
+  color: var(--danger);
+}
+
+.share-notice {
+  font-size: 0.85rem;
+  color: var(--success);
+}
+
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 40vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.share-person {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 40px;
+  padding: 2px 0;
+}
+
+.share-person-email {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.share-person-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  align-items: center;
+}
+
+.share-role {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.share-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 8px;
 }
 
 .deleted-title {
@@ -189,19 +438,6 @@
   letter-spacing: -0.01em;
 }
 
-.doc-name {
-  overflow: hidden;
-  max-width: 40vw;
-  padding: 1px 8px;
-  font: 0.8rem var(--mono);
-  color: var(--muted);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-}
-
 .header-actions {
   display: flex;
   flex-wrap: wrap;
@@ -209,8 +445,7 @@
   align-items: center;
 }
 
-.header-actions > .dropdown > button,
-.header-button {
+.header-actions > .dropdown > button {
   height: 32px;
   padding: 0 12px;
   font-size: 0.9rem;
@@ -220,8 +455,7 @@
   cursor: pointer;
 }
 
-.header-actions > .dropdown > button:hover,
-.header-button:hover {
+.header-actions > .dropdown > button:hover {
   background: var(--surface-2);
 }
 
@@ -289,64 +523,22 @@
   }
 }
 
+/*
+ * Phones: the workspace is the screen's width, so anything poking past it (a collaborator's caret
+ * label at the end of a line) would scroll the whole page sideways. Clip it instead.
+ */
+@media (max-width: 700px) {
+  .workspace {
+    overflow-x: clip;
+  }
+}
+
 .main {
   min-width: 0;
 }
 
-/* ---------- Toolbar ---------- */
+/* ---------- Menu buttons ---------- */
 
-.toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  padding: 10px 0 8px;
-  background: var(--bg);
-}
-
-.toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.toolbar-row + .toolbar-row {
-  margin-top: 6px;
-}
-
-.toolbar-row.contextual {
-  background: var(--accent-bg);
-  border-color: transparent;
-}
-
-.contextual-label {
-  padding: 0 8px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  align-items: center;
-  padding-right: 6px;
-  margin-right: 2px;
-  border-right: 1px solid var(--border);
-}
-
-.group:last-child {
-  border-right: none;
-}
-
-.toolbar button,
 .bubble-menu button,
 .floating-menu button,
 .dropdown > button {
@@ -363,33 +555,20 @@
   cursor: pointer;
 }
 
-.toolbar button:hover:not(:disabled),
 .bubble-menu button:hover:not(:disabled),
 .floating-menu button:hover:not(:disabled),
 .dropdown > button:hover:not(:disabled) {
   background: var(--surface-2);
 }
 
-.toolbar button.active,
 .bubble-menu button.active {
   color: var(--accent);
   background: var(--accent-bg);
 }
 
-.toolbar button:disabled,
-.toolbar select:disabled,
 .dropdown > button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.toolbar select {
-  height: 32px;
-  padding: 0 6px;
-  font-size: 0.85rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
 }
 
 .swatch-label {
@@ -436,6 +615,15 @@
 
 .dropdown-menu.align-end {
   right: 0;
+}
+
+/* Positioned by Floating UI (see Dropdown's `fixed`); hidden until it has been placed. */
+.dropdown-menu.fixed {
+  position: fixed;
+  top: 0;
+  right: auto;
+  left: 0;
+  visibility: hidden;
 }
 
 .dropdown-menu hr {
@@ -511,11 +699,6 @@
   transform: scale(1.1);
 }
 
-.swatch-clear {
-  color: var(--muted);
-  background: var(--bg);
-}
-
 /* ---------- Editor content ---------- */
 
 .editor-shell {
@@ -528,6 +711,11 @@
   padding: 16px 8px 16px 40px;
   outline: none;
   word-wrap: break-word;
+  /*
+   * The viewer's zoom (src/editor/zoom.ts). In Print layout the page grows or shrinks; in one
+   * continuous page the width stays the column's, so the text reflows at its new size.
+   */
+  zoom: var(--zoom, 1);
 }
 
 @media (max-width: 640px) {
@@ -555,9 +743,9 @@
   font-size: 2rem;
 }
 
-/* Keep headings clear of the sticky toolbar when jumping from the table of contents. */
+/* A little room above a heading jumped to from the table of contents. */
 .tiptap :is(h1, h2, h3, h4, h5, h6) {
-  scroll-margin-top: 140px;
+  scroll-margin-top: 16px;
 }
 
 .tiptap h2 {
@@ -1057,6 +1245,9 @@
   white-space: nowrap;
   border-radius: 3px 3px 3px 0;
   user-select: none;
+  /* Hovering the label shows the collaborator's full email. */
+  pointer-events: auto;
+  cursor: default;
 }
 
 /* Read-only */
@@ -1195,7 +1386,7 @@
     position: sticky;
     top: 0;
     align-self: start;
-    max-height: 100vh;
+    max-height: var(--doc-view-height, 100%);
     overflow-y: auto;
   }
 }
@@ -1207,15 +1398,6 @@
   border-radius: var(--radius);
 }
 
-.panel-header,
-.panel-footer,
-.events-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .panel-title {
   margin: 0 0 8px;
   font-size: 0.75rem;
@@ -1223,14 +1405,6 @@
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-}
-
-.panel-header .panel-title {
-  margin: 0;
-}
-
-.panel-footer {
-  margin-top: 8px;
 }
 
 .link-button {
@@ -1282,96 +1456,10 @@
   border-left-color: var(--accent);
 }
 
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin: 10px 0 8px;
-  padding: 2px;
-  background: var(--surface-2);
-  border-radius: 8px;
-}
-
-.tabs button {
-  flex: 1 1 auto;
-  padding: 4px 6px;
-  font-size: 0.78rem;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.tabs button.active {
-  background: var(--bg);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-}
-
-.output {
-  max-height: 340px;
-  margin: 0;
-  padding: 10px;
-  overflow: auto;
-  font: 0.72rem/1.5 var(--mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.events ul {
-  max-height: 300px;
-  margin: 6px 0 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-
-.events li {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 8px;
-  align-items: baseline;
-  padding: 3px 0;
-  font-size: 0.75rem;
-  border-bottom: 1px dashed var(--border);
-}
-
-.event-type {
-  padding: 0 4px;
-  font: 0.7rem var(--mono);
-  background: var(--surface-2);
-  border-radius: 3px;
-}
-
-.event-update {
-  color: var(--success);
-}
-
-.event-selectionUpdate {
-  color: var(--info);
-}
-
-.event-create {
-  color: var(--accent);
-}
-
-.event-detail {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.events time {
-  font-size: 0.7rem;
-}
-
 /* ---------- Status bar ---------- */
 
 .status-bar {
-  position: sticky;
-  bottom: 0;
+  position: relative;
   z-index: 20;
   display: flex;
   flex-wrap: wrap;
@@ -1392,29 +1480,6 @@
 
 .status-spacer {
   flex: 1;
-}
-
-.meter {
-  display: inline-block;
-  width: 48px;
-  height: 4px;
-  overflow: hidden;
-  background: var(--surface-2);
-  border-radius: 2px;
-}
-
-.over-limit {
-  color: var(--danger);
-}
-
-.over-limit .meter > span {
-  background: var(--danger);
-}
-
-.meter > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
 }
 
 .badge {
@@ -1446,18 +1511,6 @@
 
 .connection.disconnected .dot {
   background: var(--danger);
-}
-
-.user-chip {
-  padding: 2px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.user-chip:hover {
-  border-color: var(--accent);
 }
 
 @media (max-width: 640px) {
@@ -1541,4 +1594,54 @@
 
 .driver-popover.write-tour .driver-popover-arrow-side-bottom {
   border-bottom-color: var(--bg);
+}
+
+/* Changes the server hasn't confirmed: "Saving…", or "Not saved" after a demotion to viewer. */
+.connection.unsaved .dot {
+  background: var(--warning);
+}
+
+/* ---------- Toast (document page) ---------- */
+
+/* Above the status bar, centred; inverted colours like the library's toast. */
+.doc-toast {
+  position: fixed;
+  bottom: 48px;
+  left: 50%;
+  z-index: 150;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 10px 8px 10px 16px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--bg);
+  background: var(--text);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.doc-toast.error {
+  border-left: 4px solid var(--danger);
+}
+
+.doc-toast-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.doc-toast-close:hover {
+  background: color-mix(in srgb, var(--bg) 18%, transparent);
 }

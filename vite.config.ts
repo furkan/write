@@ -1,14 +1,7 @@
 import react from '@vitejs/plugin-react'
-import { createLogger, defineConfig } from 'vite'
+import { createLogger, defineConfig, loadEnv } from 'vite'
 import { collabServer } from './server/collab.ts'
-
-const COLLAB_PORT = 1234
-
-// Browsers connect to `ws(s)://<host>/collab`, which Vite forwards to the local
-// Hocuspocus server — so collaboration works over Tailscale on the same port.
-const proxy = {
-  '/collab': { target: `ws://127.0.0.1:${COLLAB_PORT}`, ws: true },
-}
+import { resolveConfig } from './server/config.ts'
 
 // A WebSocket that closes abruptly (a tab closed, a laptop sleeping, a deleted document's
 // connections being dropped) makes Vite's proxy log a full stack trace. Those are expected,
@@ -44,27 +37,42 @@ const vendorChunks = [
 ]
 
 // https://vite.dev/config/
-export default defineConfig({
-  customLogger: logger,
-  plugins: [react(), collabServer({ port: COLLAB_PORT })],
-  build: {
-    rolldownOptions: {
-      output: { codeSplitting: { groups: vendorChunks } },
+export default defineConfig(({ command, mode, isPreview }) => {
+  // `vite dev` is Dev mode and `vite preview` is Access mode (ADR 0002). `vite build` starts no
+  // server, so it never needs the Access settings. WRITE_* variables come from the environment
+  // (the pilot's systemd EnvironmentFile=) or from .env files; see .env.example.
+  const env = { ...loadEnv(mode, import.meta.dirname, 'WRITE_'), ...process.env }
+  const config = command === 'serve' ? resolveConfig(isPreview ? 'access' : 'dev', env, import.meta.dirname) : null
+
+  // Dev listens on all interfaces by default so it is reachable over Tailscale; preview (the
+  // pilot) on loopback only, so nothing can reach it without going through Access.
+  const listen = config
+    ? {
+        host: config.host,
+        port: config.port,
+        // Fail instead of quietly moving to the next port: the pilot and the dev server may share a machine.
+        strictPort: true,
+        // Tailscale MagicDNS hostnames (e.g. aldomini.<tailnet>.ts.net), plus e.g. the pilot's Access hostname.
+        allowedHosts: ['.ts.net', ...config.allowedHosts],
+        // Browsers connect to `ws(s)://<host>/collab`, which Vite forwards to the local Hocuspocus
+        // server, so collaboration uses the app's port. The proxy keeps the browser's Host,
+        // Origin, cookies and Access JWT, which the collaboration server checks itself.
+        proxy: { '/collab': { target: `ws://127.0.0.1:${config.collabPort}`, ws: true } },
+      }
+    : undefined
+
+  return {
+    customLogger: logger,
+    plugins: [react(), config && collabServer(config)],
+    build: {
+      rolldownOptions: {
+        output: { codeSplitting: { groups: vendorChunks } },
+      },
+      // vendor-editor (Tiptap, ProseMirror and its extensions, ~730 kB) is the largest chunk and
+      // is needed as a whole to open a document; the library page never loads it.
+      chunkSizeWarningLimit: 800,
     },
-    // vendor-editor (Tiptap, ProseMirror and its extensions, ~730 kB) is the largest chunk and
-    // is needed as a whole to open a document; the library page never loads it.
-    chunkSizeWarningLimit: 800,
-  },
-  server: {
-    // Listen on all interfaces so the dev server is reachable over Tailscale.
-    host: true,
-    // Allow Tailscale MagicDNS hostnames (e.g. aldomini.<tailnet>.ts.net).
-    allowedHosts: ['.ts.net'],
-    proxy,
-  },
-  preview: {
-    host: true,
-    allowedHosts: ['.ts.net'],
-    proxy,
-  },
+    server: listen,
+    preview: listen,
+  }
 })
