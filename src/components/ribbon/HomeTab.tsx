@@ -30,6 +30,7 @@ import { mod } from '../../editor/platform'
 import { Dropdown, MenuItem } from '../Dropdown'
 import { ColorSplitButton, RibbonButton, RibbonGroup } from './controls'
 import { HEADING_LEVELS, keepSelection, tooltip, type TabProps } from './editorState'
+import { FONT_SIZES, parseFontSize, stepFontSize } from './fontSize'
 
 const FONT_FAMILIES = [
   { label: 'Default', value: '' },
@@ -38,10 +39,6 @@ const FONT_FAMILIES = [
   { label: 'Rounded', value: '"Trebuchet MS", "Segoe UI", sans-serif' },
   { label: 'Handwriting', value: '"Comic Sans MS", "Comic Neue", cursive' },
 ]
-
-const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72]
-/** The size each block type renders at without a font size of its own (see App.css). */
-const BLOCK_SIZE: Record<number, number> = { 0: 16, 1: 32, 2: 24, 3: 19, 4: 16, 5: 13, 6: 11 }
 
 const TEXT_COLORS = [
   { color: '#e11d48', name: 'Red' },
@@ -70,27 +67,25 @@ const STYLES = [
 
 export function HomeTab({ editor, s, disabled }: TabProps) {
   const chain = () => editor.chain().focus()
-  const size = s.fontSize ? parseFloat(s.fontSize) : BLOCK_SIZE[s.heading]
-  const setSize = (px: number) => chain().setFontSize(`${px}px`).run()
 
   return (
     <>
       <RibbonGroup label="Font" tour="font">
         <div className="ribbon-row">
           <FontPicker editor={editor} value={s.fontFamily} disabled={disabled} />
-          <FontSize editor={editor} size={size} disabled={disabled} />
+          <FontSize editor={editor} size={s.fontSize} disabled={disabled} />
           <div className="ribbon-cluster">
             <RibbonButton
               label="Grow font"
               icon={AArrowUp}
               disabled={disabled}
-              onClick={() => setSize(FONT_SIZES.find((n) => n > size) ?? size)}
+              onClick={() => stepFontSize(editor, 1)}
             />
             <RibbonButton
               label="Shrink font"
               icon={AArrowDown}
               disabled={disabled}
-              onClick={() => setSize(FONT_SIZES.findLast((n) => n < size) ?? size)}
+              onClick={() => stepFontSize(editor, -1)}
             />
             <RibbonButton
               label="Clear formatting"
@@ -307,8 +302,8 @@ function FontPicker({ editor, value, disabled }: { editor: Editor; value: string
   )
 }
 
-/** Editable font size in px: type a number and press Enter, or pick a preset. */
-function FontSize({ editor, size, disabled }: { editor: Editor; size: number; disabled: boolean }) {
+/** Editable font size in px: type a number and press Enter, or pick a preset. Empty for mixed sizes. */
+function FontSize({ editor, size, disabled }: { editor: Editor; size: number | null; disabled: boolean }) {
   const [draft, setDraft] = useState<string | null>(null)
   const apply = (px: number) => {
     setDraft(null)
@@ -321,16 +316,16 @@ function FontSize({ editor, size, disabled }: { editor: Editor; size: number; di
         title="Font size (px): type a size and press Enter"
         inputMode="decimal"
         disabled={disabled}
-        value={draft ?? String(Math.round(size * 10) / 10)}
+        value={draft ?? (size === null ? '' : String(size))}
         onFocus={(e) => e.currentTarget.select()}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => setDraft(null)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault()
-            const px = Number.parseFloat(draft ?? '')
-            if (px >= 1 && px <= 400) apply(px)
-            else setDraft(null)
+            const px = draft === null ? null : parseFontSize(draft)
+            if (px === null) setDraft(null)
+            else apply(px)
           } else if (e.key === 'Escape') {
             setDraft(null)
             editor.commands.focus()

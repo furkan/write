@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/react'
+import { selectionFontSize } from './fontSize'
 
 export const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const
 export type HeadingLevel = (typeof HEADING_LEVELS)[number]
@@ -20,7 +21,8 @@ export const selectRibbonState = (e: Editor) => {
     link: e.isActive('link'),
     heading: HEADING_LEVELS.find((level) => e.isActive('heading', { level })) ?? 0,
     fontFamily: (textStyle.fontFamily as string | undefined) ?? '',
-    fontSize: (textStyle.fontSize as string | undefined) ?? '',
+    /** In rendered px; `null` for a selection that mixes sizes. */
+    fontSize: selectionFontSize(e.state),
     align: ALIGNMENTS.find((a) => e.isActive({ textAlign: a })) ?? 'left',
     bulletList: e.isActive('bulletList'),
     orderedList: e.isActive('orderedList'),
