@@ -1,4 +1,4 @@
-import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, hide, offset, shift, size } from '@floating-ui/dom'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 type DropdownProps = {
@@ -25,8 +25,12 @@ type DropdownProps = {
 export function Dropdown({ label, title, children, align = 'start', className, tour, disabled, kind = 'menu', fixed }: DropdownProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuId = useId()
+
+  // Disabled while open (say, a demotion to viewer): close, so its items can't run.
+  if (disabled && open) setOpen(false)
 
   useLayoutEffect(() => {
     const root = rootRef.current
@@ -36,8 +40,22 @@ export function Dropdown({ label, title, children, align = 'start', className, t
       void computePosition(root, menu, {
         strategy: 'fixed',
         placement: align === 'end' ? 'bottom-end' : 'bottom-start',
-        middleware: [offset(4), flip({ padding: 8 }), shift({ padding: 8 })],
-      }).then(({ x, y }) => Object.assign(menu.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' }))
+        middleware: [
+          offset(4),
+          flip({ padding: 8 }),
+          shift({ padding: 8 }),
+          // Never taller than the room left on screen; it scrolls instead.
+          size({ padding: 8, apply: ({ availableHeight }) => void (menu.style.maxHeight = `${Math.max(120, Math.min(480, availableHeight))}px`) }),
+          // Hidden while its trigger is scrolled out of view (in the ribbon panel, say).
+          hide(),
+        ],
+      }).then(({ x, y, middlewareData }) =>
+        Object.assign(menu.style, {
+          left: `${x}px`,
+          top: `${y}px`,
+          visibility: middlewareData.hide?.referenceHidden ? 'hidden' : 'visible',
+        }),
+      )
     })
   }, [open, fixed, align])
 
@@ -46,20 +64,27 @@ export function Dropdown({ label, title, children, align = 'start', className, t
     const onPointer = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
     }
+    // Capture phase, so this Escape closes only the menu, not what contains it (the ribbon's
+    // flyout). Focus inside the menu goes back to its button.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      if (rootRef.current?.contains(document.activeElement)) buttonRef.current?.focus()
+      setOpen(false)
     }
     document.addEventListener('pointerdown', onPointer)
-    document.addEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKey, true)
     return () => {
       document.removeEventListener('pointerdown', onPointer)
-      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('keydown', onKey, true)
     }
   }, [open])
 
   return (
     <div className={`dropdown ${className ?? ''}`} ref={rootRef} data-tour={tour}>
       <button
+        ref={buttonRef}
         type="button"
         title={title}
         aria-label={title}
