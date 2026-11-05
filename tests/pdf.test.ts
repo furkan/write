@@ -397,7 +397,9 @@ describe('Without Chromium', () => {
     expect(server.output()).toContain('no Chromium at /nonexistent/chrome-headless-shell (WRITE_PDF_CHROMIUM)')
     const { response, json } = await getPdf(server, 'plan')
     expect(response.status).toBe(503)
-    expect(json()).toEqual({ error: 'pdf unavailable', message: expect.stringContaining('PDF download is off') })
+    // People are told it isn't set up; the path and how to install it stay in the server's log.
+    expect(json()).toEqual({ error: 'pdf unavailable', message: expect.stringContaining('isn’t set up on this server') })
+    expect(JSON.stringify(json())).not.toContain('/nonexistent')
     // Access is still checked first, and everything else works.
     expect((await getPdf(server, 'plan', MALLORY)).response.status).toBe(404)
     expect((await api(server, '/api/docs', { headers: cookie(ALICE) })).status).toBe(200)

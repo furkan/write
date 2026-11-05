@@ -1106,6 +1106,9 @@ export function pdfDisposition(title: string) {
   return `attachment; filename="${ascii}.pdf"; filename*=UTF-8''${encodeURIComponent(`${name}.pdf`)}`
 }
 
+/** What people see when the server can't make PDFs (no Chromium); the details are in the server's log. */
+const PDF_UNAVAILABLE = 'PDF download isn’t set up on this server yet. Ask whoever runs Write to install Chromium for it (see the server log).'
+
 /**
  * `GET /api/docs/:id/pdf`: the document as a PDF, with its page setup and page numbers and no
  * browser headers (server/pdf.ts). The caller has a role; it is checked again after the state is
@@ -1117,7 +1120,9 @@ async function pdfRoute(
   { id, server, user, runtime }: { id: string; server: Server; user: User; runtime: Runtime },
 ) {
   const { pdf, config } = runtime
-  if (pdf.unavailable) return send(res, 503, { error: 'pdf unavailable', message: pdf.unavailable })
+  // The reason (a path, how to install) is for whoever runs the server: it is in the log.
+  const unavailable = () => send(res, 503, { error: 'pdf unavailable', message: PDF_UNAVAILABLE })
+  if (pdf.unavailable) return unavailable()
   const tooLarge = () => send(res, 413, { error: 'document too large for a PDF' })
   const state = await currentState(server, id)
   if (!roleFor(id, user)) return notFound(res)
@@ -1132,7 +1137,7 @@ async function pdfRoute(
       res.setHeader('Retry-After', '5')
       return send(res, 503, { error: 'busy', message: 'Too many PDF downloads at once. Try again in a moment.' })
     }
-    if (error instanceof PdfUnavailable) return send(res, 503, { error: 'pdf unavailable', message: error.message })
+    if (error instanceof PdfUnavailable) return unavailable()
     console.error(`[write] PDF export of ${id} failed:`, error)
     return send(res, 503, { error: 'pdf failed', message: 'The PDF could not be made. Try again in a moment.' })
   }
