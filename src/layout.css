@@ -25,14 +25,38 @@
   padding: 16px 24px 120px;
 }
 
-/* Menu section labels (the temporary page setup in the View menu). */
-.menu-label {
-  padding: 6px 10px 2px;
-  font-size: 0.72rem;
-  font-weight: 600;
+/* Status bar: Print layout and Web layout, like Word's view buttons. */
+.layout-toggles {
+  gap: 2px;
+}
+
+.status-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.status-toggle:hover:not([aria-disabled='true']) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.status-toggle.active {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.status-toggle[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ---------- Printing: only the document, on sheets that match its page setup ---------- */

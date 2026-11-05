@@ -118,14 +118,17 @@ type MenuItemProps = {
   hint?: string
   disabled?: boolean
   active?: boolean
+  /** One choice of several (a radio item): whether it is the current one. Implies `active`. */
+  checked?: boolean
 }
 
-export function MenuItem({ onSelect, children, hint, disabled, active }: MenuItemProps) {
+export function MenuItem({ onSelect, children, hint, disabled, active, checked }: MenuItemProps) {
   return (
     <button
       type="button"
-      role="menuitem"
-      className={`menu-item${active ? ' active' : ''}`}
+      role={checked === undefined ? 'menuitem' : 'menuitemradio'}
+      aria-checked={checked}
+      className={`menu-item${active || checked ? ' active' : ''}`}
       disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onSelect}

@@ -529,7 +529,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
         onBackup={backup}
         onViewChange={(next) => setView((prev) => ({ ...prev, ...next }))}
       />
-      <Ribbon editor={editor} readOnly={readOnly} />
+      <Ribbon editor={editor} session={session} readOnly={readOnly} />
       {closed && (
         <div className="deleted-banner" role="alert">
           {closed === 'trashed'

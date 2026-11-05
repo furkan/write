@@ -5,17 +5,7 @@ import { loadBackup } from '../editor/backup'
 import { setTitle, type Session } from '../editor/collab'
 import { initialContent } from '../editor/content'
 import { useDocTitle, type Presence } from '../editor/hooks'
-import {
-  MARGIN_PRESETS,
-  ORIENTATIONS,
-  PAPER_SIZES,
-  setLayoutMode,
-  setPageSetup,
-  useLayoutMode,
-  useNarrowScreen,
-  usePageSetup,
-  type PageSetup,
-} from '../editor/page-setup'
+import { setLayoutMode, useLayoutMode, useNarrowScreen } from '../editor/page-setup'
 import { mod } from '../editor/platform'
 import { initialOf } from '../identity'
 import { useMe } from '../session'
@@ -46,59 +36,19 @@ type HeaderProps = {
   onViewChange: (next: Partial<ViewOptions>) => void
 }
 
-const entries = <K extends string, V>(record: Record<K, V>) => Object.entries(record) as [K, V][]
-
-/**
- * Print or Web layout (yours) and the page setup (the document's, so only for people who can
- * edit it). Temporary home: these move to the ribbon's Layout tab.
- */
-function LayoutMenuItems({ session, canEdit }: { session: Session; canEdit: boolean }) {
+/** Print or Web layout: how you look at the document (yours only). Also in the status bar. */
+function LayoutModeItems() {
   const mode = useLayoutMode()
   const narrow = useNarrowScreen()
-  const setup = usePageSetup(session)
-  const choose = (change: Partial<PageSetup>) => setPageSetup(session, change)
   return (
     <>
       <hr />
-      <MenuItem active={mode === 'print'} onSelect={() => setLayoutMode('print')}>
-        {mode === 'print' ? '✓ ' : ''}Print layout{narrow ? ' (wider window)' : ''}
+      <MenuItem checked={mode === 'print'} disabled={narrow} onSelect={() => setLayoutMode('print')}>
+        {mode === 'print' ? '✓ ' : ''}Print layout{narrow ? ' (needs a wider window)' : ''}
       </MenuItem>
-      <MenuItem active={mode === 'web'} onSelect={() => setLayoutMode('web')}>
+      <MenuItem checked={mode === 'web'} disabled={narrow} onSelect={() => setLayoutMode('web')}>
         {mode === 'web' ? '✓ ' : ''}Web layout
       </MenuItem>
-      <hr />
-      <div className="menu-label">Page size</div>
-      {entries(PAPER_SIZES).map(([size, paper]) => (
-        <MenuItem key={size} active={setup.size === size} disabled={!canEdit} hint={paper.detail} onSelect={() => choose({ size })}>
-          {setup.size === size ? '✓ ' : ''}
-          {paper.label}
-        </MenuItem>
-      ))}
-      <div className="menu-label">Orientation</div>
-      {entries(ORIENTATIONS).map(([orientation, { label }]) => (
-        <MenuItem
-          key={orientation}
-          active={setup.orientation === orientation}
-          disabled={!canEdit}
-          onSelect={() => choose({ orientation })}
-        >
-          {setup.orientation === orientation ? '✓ ' : ''}
-          {label}
-        </MenuItem>
-      ))}
-      <div className="menu-label">Margins</div>
-      {entries(MARGIN_PRESETS).map(([margins, preset]) => (
-        <MenuItem
-          key={margins}
-          active={setup.margins === margins}
-          disabled={!canEdit}
-          hint={preset.detail}
-          onSelect={() => choose({ margins })}
-        >
-          {setup.margins === margins ? '✓ ' : ''}
-          {preset.label}
-        </MenuItem>
-      ))}
     </>
   )
 }
@@ -385,7 +335,7 @@ export function Header({ editor, session, presence, role, view, canToggleReadOnl
               <MenuItem active={view.sidebar} onSelect={() => onViewChange({ sidebar: !view.sidebar })}>
                 {view.sidebar ? '✓ ' : ''}Sidebar
               </MenuItem>
-              <LayoutMenuItems session={session} canEdit={canWrite && !view.readOnly} />
+              <LayoutModeItems />
             </>
           )}
         </Dropdown>

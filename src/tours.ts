@@ -188,7 +188,16 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Ribbon',
           description:
-            '<b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow on the right collapses the ribbon to its tabs.',
+            '<b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow on the right collapses the ribbon to its tabs.',
+          side: 'bottom',
+        },
+      },
+      {
+        element: '[data-tour="layout"]',
+        popover: {
+          title: 'Layout',
+          description:
+            'Margins, orientation and paper size (A4, Letter, Legal, A5) for this document. They belong to the document, so everyone sees the same pages, and only the owner and editors can change them. The page number is in each page’s footer.',
           side: 'bottom',
         },
       },
@@ -220,7 +229,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Status bar',
           description:
-            'Word and character counts (with a limit), the block your cursor is in, when the local backup was last saved, and the connection status.',
+            'Word and character counts (with a limit), the block your cursor is in, when the local backup was last saved, and the connection status. The two buttons on the right switch between <b>Print layout</b> (pages) and <b>Web layout</b> (one long page), just for you; a narrow window always shows one long page.',
           side: 'top',
         },
       },
@@ -432,7 +441,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'View options',
           description:
-            '<b>Read-only</b> calls <code>setEditable(false)</code>. <b>Invisible characters</b> shows spaces, line breaks and paragraph marks. <b>Focus mode</b> dims every block except the one you are in, using the Focus extension.',
+            '<b>Read-only</b> calls <code>setEditable(false)</code>. <b>Invisible characters</b> shows spaces, line breaks and paragraph marks. <b>Focus mode</b> dims every block except the one you are in, using the Focus extension. <b>Print layout</b> and <b>Web layout</b> switch between pages and one long page.',
           side: 'bottom',
         },
       },
@@ -444,6 +453,7 @@ export const TOURS: Record<TourId, Tour> = {
             <li><b>Spoiler</b>: a custom mark with input and paste rules for <code>||text||</code>, and Markdown support.</li>
             <li><b>Shortcuts</b>: commands and shortcuts such as <code>insertDate()</code>, ${k(`${mod}+Shift+D`)}, <code>!today</code> and <code>!shrug</code>.</li>
             <li><b>SlashCommand</b>: built on <code>@tiptap/suggestion</code>.</li>
+            <li><b>Pagination</b>: Print layout's pages, drawn with decorations only (floats in one widget), so the shared document never changes. Trimmed from <code>tiptap-pagination-plus</code>.</li>
           </ul>
           The source is in <code>src/editor/extensions/</code>.`,
         },

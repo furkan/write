@@ -1,12 +1,14 @@
 import { useEditorState, type Editor } from '@tiptap/react'
 import { ChevronDown, ChevronUp, Redo2, Undo2 } from 'lucide-react'
 import { useEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import type { Session } from '../../editor/collab'
 import { mod } from '../../editor/platform'
 import { CodeTab, TableTab } from './ContextualTabs'
 import { RibbonButton } from './controls'
 import { keepSelection, selectRibbonState, type TabProps } from './editorState'
 import { HomeTab } from './HomeTab'
 import { InsertTab } from './InsertTab'
+import { LayoutTab } from './LayoutTab'
 import { clickTab, closeFlyout, focusTab, setCollapsed, useRibbonView, type RibbonTab } from './state'
 import './ribbon.css'
 
@@ -16,7 +18,7 @@ const tabId = (id: RibbonTab) => `ribbon-tab-${id}`
 const PANEL_ID = 'ribbon-panel'
 
 /** Word-style ribbon: quick access, a tab row, and the selected tab's groups. */
-export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean }) {
+export function Ribbon({ editor, session, readOnly }: { editor: Editor; session: Session; readOnly: boolean }) {
   const s = useEditorState({ editor, selector: ({ editor: e }) => selectRibbonState(e) })
   const view = useRibbonView()
   const rootRef = useRef<HTMLDivElement>(null)
@@ -26,6 +28,8 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
   const tabs: TabDef[] = [
     { id: 'home', label: 'Home', Panel: HomeTab },
     { id: 'insert', label: 'Insert', Panel: InsertTab },
+    // Shown to everyone, like Word's; viewers and read-only get it disabled.
+    { id: 'layout', label: 'Layout', Panel: LayoutTab },
     ...(!readOnly && s.table ? [{ id: 'table' as const, label: 'Table', contextual: true, Panel: TableTab }] : []),
     ...(!readOnly && s.codeBlock ? [{ id: 'code' as const, label: 'Code', contextual: true, Panel: CodeTab }] : []),
   ]
@@ -110,7 +114,7 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
                 aria-selected={selected}
                 aria-controls={selected && showPanel ? PANEL_ID : undefined}
                 tabIndex={selected ? 0 : -1}
-                data-tour={t.id === 'insert' ? 'insert' : undefined}
+                data-tour={t.id === 'insert' || t.id === 'layout' ? t.id : undefined}
                 onMouseDown={keepSelection}
                 onClick={() => clickTab(t.id)}
               >
@@ -139,7 +143,7 @@ export function Ribbon({ editor, readOnly }: { editor: Editor; readOnly: boolean
             aria-label={current.label}
             aria-disabled={readOnly}
           >
-            <current.Panel editor={editor} s={s} disabled={readOnly} />
+            <current.Panel editor={editor} session={session} s={s} disabled={readOnly} />
           </div>
         </div>
       )}

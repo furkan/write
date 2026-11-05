@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/react'
+import type { Session } from '../../editor/collab'
 import { selectionFontSize } from './fontSize'
 
 export const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const
@@ -49,8 +50,8 @@ export const selectRibbonState = (e: Editor) => {
 
 export type RibbonState = ReturnType<typeof selectRibbonState>
 
-/** Props every tab gets. */
-export type TabProps = { editor: Editor; s: RibbonState; disabled: boolean }
+/** Props every tab gets. `session` is the shared document, for settings kept in it (page setup). */
+export type TabProps = { editor: Editor; session: Session; s: RibbonState; disabled: boolean }
 
 /** Keeps the editor's selection: ribbon controls never take focus on mousedown. */
 export const keepSelection = (event: { preventDefault: () => void }) => event.preventDefault()

@@ -2,7 +2,7 @@ import { readStorage, writeStorage } from '../../editor/storage'
 import { useCallback, useSyncExternalStore } from 'react'
 import { createStore, useStore } from '../../store'
 
-export type RibbonTab = 'home' | 'insert' | 'table' | 'code'
+export type RibbonTab = 'home' | 'insert' | 'layout' | 'table' | 'code'
 
 const COLLAPSED_KEY = 'write:ribbon-collapsed'
 

@@ -609,3 +609,62 @@
     left: 10px;
   }
 }
+
+/* Layout tab: page setup menus (a check, a small page to scale, the name and its values). */
+
+.page-option {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 190px;
+}
+
+.page-option-check {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  color: var(--accent);
+}
+
+.page-option-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.page-option-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.menu-item.active .page-option-name {
+  color: var(--accent);
+}
+
+.page-option-detail {
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.page-icon {
+  flex: none;
+}
+
+.page-icon-paper {
+  fill: var(--paper);
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.page-icon-text {
+  stroke: color-mix(in srgb, var(--muted) 70%, transparent);
+  stroke-width: 1;
+}
+
+.page-icon-margin {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 2 1.5;
+}

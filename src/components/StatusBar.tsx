@@ -1,9 +1,11 @@
 import { useEditorState, type Editor } from '@tiptap/react'
+import { FileText, Globe, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Role } from '../api'
 import { BACKUP_EVENT, loadBackup, type Backup } from '../editor/backup'
 import { CHARACTER_LIMIT } from '../editor/extensions'
 import type { ConnectionStatus } from '../editor/hooks'
+import { setLayoutMode, useLayoutMode, useNarrowScreen, type LayoutMode } from '../editor/page-setup'
 
 type StatusBarProps = {
   editor: Editor
@@ -19,6 +21,41 @@ type StatusBarProps = {
   readOnly: boolean
   /** Viewers see "View only"; only owners and editors take backups. `null` while unknown. */
   role: Role | null
+}
+
+const LAYOUTS: { mode: LayoutMode; label: string; icon: LucideIcon }[] = [
+  { mode: 'print', label: 'Print layout', icon: FileText },
+  { mode: 'web', label: 'Web layout', icon: Globe },
+]
+
+/**
+ * Word's view buttons: Print layout (pages) or Web layout (one continuous page), your own
+ * preference. A narrow window always shows the document continuous, so they are off there and
+ * say why (aria-disabled rather than disabled, so the tooltip still shows).
+ */
+function LayoutToggles() {
+  const mode = useLayoutMode()
+  const narrow = useNarrowScreen()
+  return (
+    <span className="status-item layout-toggles" role="group" aria-label="Layout" data-tour="layout-toggles">
+      {LAYOUTS.map(({ mode: m, label, icon: Icon }) => (
+        <button
+          key={m}
+          type="button"
+          className={`status-toggle${mode === m && !narrow ? ' active' : ''}`}
+          aria-pressed={narrow ? undefined : mode === m}
+          aria-disabled={narrow || undefined}
+          aria-label={label}
+          title={narrow ? 'Narrow screens use continuous layout' : label}
+          onClick={() => {
+            if (!narrow) setLayoutMode(m)
+          }}
+        >
+          <Icon aria-hidden size={14} />
+        </button>
+      ))}
+    </span>
+  )
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -101,6 +138,7 @@ export function StatusBar({ editor, documentName, email, status, pending, retryi
         <span className="dot" aria-hidden />
         {label}
       </span>
+      <LayoutToggles />
     </footer>
   )
 }
