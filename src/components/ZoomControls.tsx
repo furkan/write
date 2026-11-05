@@ -32,6 +32,8 @@ export function ZoomMenuItems({ zoom, onDone }: { zoom: number; onDone: () => vo
   )
 }
 
+const STEP_KEYS: Record<string, 1 | -1> = { ArrowRight: 1, ArrowUp: 1, PageUp: 1, ArrowLeft: -1, ArrowDown: -1, PageDown: -1 }
+
 /**
  * Word's status-bar zoom: out, a slider, in, and the percentage (which opens the presets). The
  * slider is a range input, so the arrow keys, Page Up/Down, Home and End work on it.
@@ -60,6 +62,14 @@ export function ZoomSlider({ zoom }: { zoom: number }) {
         aria-valuetext={`${zoom}%`}
         title={`Zoom: ${zoom}%`}
         onChange={(e) => setZoom(Number(e.target.value))}
+        onKeyDown={(e) => {
+          // The same steps as the buttons: the range would step from its own rounded value
+          // (85% from a fit shows as 90%, so → would give 100%).
+          const direction = STEP_KEYS[e.key]
+          if (!direction) return
+          e.preventDefault()
+          stepZoom(zoom, direction)
+        }}
       />
       <button
         type="button"
