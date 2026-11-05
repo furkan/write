@@ -87,8 +87,15 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
+# Download as PDF runs Chromium's headless shell (WRITE_PDF_CHROMIUM) inside this sandbox. Its
+# processes call capset() as they start and crash when it fails; the service has no capabilities
+# (CapabilityBoundingSet= is empty, NoNewPrivileges=yes), so capset() can only drop them. Chromium's
+# own sandbox is off (it needs user namespaces, which RestrictNamespaces= forbids): the page it
+# prints has no JavaScript and no network, and this unit is the boundary. Its profile goes in the
+# private /tmp, and --disable-dev-shm-usage keeps it off /dev/shm.
+SystemCallFilter=capset
 SystemCallErrorNumber=EPERM
-# Not MemoryDenyWriteExecute=: the JavaScript JIT needs writable, executable memory.
+# Not MemoryDenyWriteExecute=: the JavaScript JIT needs writable, executable memory (Node's and Chromium's).
 
 [Install]
 WantedBy=multi-user.target

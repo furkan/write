@@ -20,6 +20,7 @@ const GOOD = {
   WRITE_ACCESS_TEAM_DOMAIN: 'acme.cloudflareaccess.com',
   WRITE_ACCESS_AUD: 'abc123',
   WRITE_OWNER_EMAIL: 'owner@example.com',
+  WRITE_PDF_CHROMIUM: '/opt/write-pilot-chromium/chrome-headless-shell',
 }
 
 const file = (env: Record<string, string | undefined>) =>
@@ -29,9 +30,10 @@ const file = (env: Record<string, string | undefined>) =>
     .join('\n')
 
 const writable = () => 'writable' as const
+const executable = () => true
 
 const check = (env: Record<string, string | undefined>, options: Partial<Parameters<typeof checkPilotEnv>[1]> = {}) =>
-  checkPilotEnv(file(env), { root, writable, ...options })
+  checkPilotEnv(file(env), { root, writable, executable, ...options })
 
 const errors = (result: ReturnType<typeof checkPilotEnv>) =>
   result.findings.filter((finding) => finding.level === 'error').map((finding) => finding.message)
@@ -68,7 +70,7 @@ describe('checkPilotEnv', () => {
   })
 
   test('deploy/pilot.env.example still has placeholders, and is otherwise complete', () => {
-    const result = checkPilotEnv(readFileSync(join(ROOT, 'deploy', 'pilot.env.example'), 'utf8'), { root, writable })
+    const result = checkPilotEnv(readFileSync(join(ROOT, 'deploy', 'pilot.env.example'), 'utf8'), { root, writable, executable })
     const messages = errors(result)
     expect(messages.every((message) => message.includes('placeholder'))).toBe(true)
     expect(messages.map((message) => message.split(' ')[0]).sort()).toEqual([
@@ -127,21 +129,36 @@ describe('checkPilotEnv', () => {
     expect(warnings(check({ ...GOOD, WRITE_DATA_DIR: join(root, 'data') })).join()).toContain('inside the checkout')
   })
 
+  test('Chromium for Download as PDF: an executable outside /home', () => {
+    expect(errors(check(GOOD, { executable: () => false })).join()).toContain(
+      'WRITE_PDF_CHROMIUM /opt/write-pilot-chromium/chrome-headless-shell is not an executable this user can run',
+    )
+    expect(errors(check({ ...GOOD, WRITE_PDF_CHROMIUM: '/home/me/.cache/ms-playwright/chrome' })).join()).toContain(
+      'is under /home, which the unit hides',
+    )
+    expect(errors(check({ ...GOOD, WRITE_PDF_MAX_QUEUE: 'lots' })).join()).toContain('WRITE_PDF_MAX_QUEUE must be a whole number')
+    // The real check: /bin/sh is executable, a directory is not.
+    expect(errors(checkPilotEnv(file({ ...GOOD, WRITE_PDF_CHROMIUM: '/bin/sh' }), { root, writable }))).toEqual([])
+    expect(errors(checkPilotEnv(file({ ...GOOD, WRITE_PDF_CHROMIUM: '/opt' }), { root, writable })).join()).toContain(
+      'is not an executable',
+    )
+  })
+
   test('the real filesystem check sees a writable temp dir', () => {
-    const result = checkPilotEnv(file({ ...GOOD, WRITE_DATA_DIR: join(root, '..'), WRITE_BACKUP_DIR: '/proc' }), { root })
+    const result = checkPilotEnv(file({ ...GOOD, WRITE_DATA_DIR: join(root, '..'), WRITE_BACKUP_DIR: '/proc' }), { root, executable })
     expect(errors(result)).toEqual(['WRITE_BACKUP_DIR /proc is not writable by this user.'])
   })
 
   test('the checkout needs a build and no .env files with WRITE_* settings', async () => {
     const bare = await tempDir('pilot-check-bare-')
     try {
-      expect(errors(checkPilotEnv(file(GOOD), { root: bare, writable })).join()).toContain('has no build')
+      expect(errors(checkPilotEnv(file(GOOD), { root: bare, writable, executable })).join()).toContain('has no build')
       await mkdir(join(bare, 'dist'))
       await writeFile(join(bare, 'dist', 'index.html'), '')
-      expect(errors(checkPilotEnv(file(GOOD), { root: bare, writable })).join()).toContain('.vite-temp is missing')
+      expect(errors(checkPilotEnv(file(GOOD), { root: bare, writable, executable })).join()).toContain('.vite-temp is missing')
       await mkdir(join(bare, 'node_modules', '.vite-temp'), { recursive: true })
       await writeFile(join(bare, '.env.local'), 'WRITE_ACCESS_CERTS_URL=http://127.0.0.1:9/certs\nOTHER=1\n')
-      expect(errors(checkPilotEnv(file(GOOD), { root: bare, writable }))).toEqual([
+      expect(errors(checkPilotEnv(file(GOOD), { root: bare, writable, executable }))).toEqual([
         `${join(bare, '.env.local')} sets WRITE_ACCESS_CERTS_URL; \`vite preview\` reads it too. Keep every setting in the env file and delete it.`,
       ])
     } finally {
@@ -159,7 +176,7 @@ describe('bun run pilot:check', () => {
         writeFileSync(path, file(env))
         return spawnSync('bun', ['run', 'pilot:check', path], { cwd: ROOT, encoding: 'utf8' })
       }
-      const dirs = { WRITE_DATA_DIR: join(dir, 'data'), WRITE_BACKUP_DIR: join(dir, 'backups') }
+      const dirs = { WRITE_DATA_DIR: join(dir, 'data'), WRITE_BACKUP_DIR: join(dir, 'backups'), WRITE_PDF_CHROMIUM: '/bin/sh' }
       const bad = run({ ...GOOD, ...dirs, WRITE_COLLAB_PORT: '1234' })
       expect(bad.status).toBe(1)
       expect(bad.stdout).toContain("error    WRITE_COLLAB_PORT is 1234, the dev server's collaboration port")
