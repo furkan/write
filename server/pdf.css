@@ -1,0 +1,400 @@
+/*
+ * The PDF export's stylesheet (server/pdf-html.ts): the editor's content typography (src/App.css,
+ * `.tiptap`) in the light theme, laid out for paper. Self-contained: it doesn't share rules with
+ * the app's print CSS, so the two can change independently. The page size, margins and the
+ * "Page N of M" footer come from the document's page setup (`pageCss`), as two `@page` rules.
+ */
+
+:root {
+  --text: #1f1d24;
+  --muted: #6b6375;
+  --surface: #f6f5f8;
+  --surface-2: #eeedf2;
+  --border: #e5e4e7;
+  --accent: #7c3aed;
+  --accent-bg: rgba(124, 58, 237, 0.12);
+  --code-bg: #f4f3ec;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --info: #2563eb;
+  --radius: 10px;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+  color-scheme: light;
+  font: 16px/1.6 var(--sans);
+  color: var(--text);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+}
+
+.tiptap {
+  overflow-wrap: break-word;
+}
+
+.tiptap > * + * {
+  margin-top: 0.75em;
+}
+
+.tiptap > :first-child {
+  margin-top: 0;
+}
+
+p {
+  margin: 0;
+}
+
+/* Headings */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin-bottom: 0.2em;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  break-after: avoid;
+  break-inside: avoid;
+}
+
+h1 {
+  font-size: 2rem;
+}
+
+h2 {
+  margin-top: 1.6em;
+  font-size: 1.5rem;
+}
+
+h3 {
+  font-size: 1.2rem;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+code {
+  padding: 0.1em 0.35em;
+  font: 0.88em var(--mono);
+  background: var(--code-bg);
+  border-radius: 4px;
+}
+
+mark {
+  padding: 0 2px;
+  color: #1f1d24;
+  background: #fef08a;
+  border-radius: 2px;
+}
+
+blockquote {
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 1em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+}
+
+hr {
+  margin: 1.5em 0;
+  border: none;
+  border-top: 1px solid #d4d2d9;
+}
+
+/* Lists */
+ul,
+ol {
+  margin: 0;
+  padding-left: 1.5em;
+}
+
+li > p {
+  margin: 0.15em 0;
+}
+
+ul[data-type='taskList'] {
+  padding-left: 0.2em;
+  list-style: none;
+}
+
+ul[data-type='taskList'] li {
+  display: flex;
+  gap: 0.5em;
+  align-items: flex-start;
+  break-inside: avoid;
+}
+
+ul[data-type='taskList'] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.task-box {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 0.95em;
+  height: 0.95em;
+  margin-top: 0.35em;
+  font-size: 0.8em;
+  line-height: 1;
+  border: 1.5px solid #8b8496;
+  border-radius: 3px;
+}
+
+li[data-checked='true'] > .task-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+li[data-checked='true'] > .task-box::after {
+  color: #ffffff;
+  font-weight: 700;
+  content: '✓';
+}
+
+li[data-checked='true'] > div > p {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* Code blocks (lowlight) */
+pre {
+  margin: 0;
+  padding: 14px 16px;
+  font: 0.88rem/1.55 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--code-bg);
+  border-radius: var(--radius);
+}
+
+pre code {
+  padding: 0;
+  font: inherit;
+  white-space: inherit;
+  background: none;
+}
+
+pre .hljs-comment,
+pre .hljs-quote {
+  color: #8b8496;
+  font-style: italic;
+}
+
+pre .hljs-keyword,
+pre .hljs-selector-tag,
+pre .hljs-built_in {
+  color: #7c3aed;
+}
+
+pre .hljs-string,
+pre .hljs-attr,
+pre .hljs-template-tag {
+  color: #15803d;
+}
+
+pre .hljs-number,
+pre .hljs-literal,
+pre .hljs-variable,
+pre .hljs-symbol {
+  color: #c2410c;
+}
+
+pre .hljs-title,
+pre .hljs-name,
+pre .hljs-section {
+  color: #2563eb;
+}
+
+pre .hljs-type,
+pre .hljs-tag,
+pre .hljs-meta {
+  color: #b45309;
+}
+
+/* Tables: header rows repeat on every page (thead), rows don't split. */
+table {
+  width: 100%;
+  margin: 1em 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+thead {
+  display: table-header-group;
+}
+
+tr {
+  break-inside: avoid;
+}
+
+th,
+td {
+  padding: 6px 10px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  border: 1px solid #d4d2d9;
+}
+
+th {
+  font-weight: 600;
+  text-align: left;
+  background: var(--surface);
+}
+
+td > p,
+th > p {
+  margin: 0;
+}
+
+/* Images: never wider than the text or taller than a page. */
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: var(--content-height, 9in);
+  object-fit: contain;
+  border-radius: 8px;
+  break-inside: avoid;
+}
+
+/* Images linked by URL and videos: a box with the address. */
+.pdf-placeholder {
+  display: block;
+  padding: 14px 16px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px dashed #b9b5c2;
+  border-radius: var(--radius);
+  break-inside: avoid;
+}
+
+.pdf-placeholder-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.pdf-placeholder-url {
+  margin-top: 2px;
+  font: 0.8rem/1.4 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+/* Details: the summary, and the content when it was open. */
+details {
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+summary {
+  font-weight: 600;
+  list-style: none;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::before {
+  display: inline-block;
+  width: 1.2em;
+  font-size: 0.7rem;
+  content: '▶';
+  vertical-align: 0.15em;
+}
+
+details[open] > summary::before {
+  content: '▼';
+}
+
+[data-type='detailsContent'] {
+  margin-top: 0.4em;
+  padding-left: 1.2rem;
+}
+
+[data-type='detailsContent'] > * + * {
+  margin-top: 0.5em;
+}
+
+/* Callouts */
+.callout {
+  --callout: var(--info);
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--callout) 10%, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--callout) 35%, #ffffff);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+}
+
+.callout[data-variant='success'] {
+  --callout: var(--success);
+}
+
+.callout[data-variant='warning'] {
+  --callout: var(--warning);
+}
+
+.callout[data-variant='danger'] {
+  --callout: var(--danger);
+}
+
+.callout-icon {
+  flex: 0 0 auto;
+  font-size: 1.1rem;
+  line-height: 1.45;
+}
+
+.callout-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.callout-content > * + * {
+  margin-top: 0.5em;
+}
+
+/* Spoilers: a PDF can't be hovered, so the text shows, marked. */
+.spoiler {
+  padding: 0 2px;
+  background: var(--surface-2);
+  border-radius: 3px;
+}
+
+/* Mentions */
+.mention {
+  padding: 1px 5px;
+  font-weight: 500;
+  color: var(--accent);
+  white-space: nowrap;
+  background: var(--accent-bg);
+  border-radius: 6px;
+  box-decoration-break: clone;
+}
+
+/* Math (KaTeX, rendered on the server) */
+[data-type='block-math'] {
+  padding: 8px 0;
+  text-align: center;
+  break-inside: avoid;
+}

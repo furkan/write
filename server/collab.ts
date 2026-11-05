@@ -19,6 +19,8 @@ import {
   type User,
 } from './auth.ts'
 import { describeConfig, type WriteConfig } from './config.ts'
+import { documentPage } from './pdf-html.ts'
+import { createPdfRenderer, PdfBusy, PdfUnavailable, type PdfRenderer } from './pdf.ts'
 import {
   canEdit,
   isShareRole,
@@ -364,6 +366,8 @@ type Runtime = {
   authenticator: Authenticator
   /** The hourly Trash expiry and backup timer. */
   maintenance: ReturnType<typeof setInterval>
+  /** Download as PDF. */
+  pdf: PdfRenderer
 }
 
 /**
@@ -567,7 +571,9 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
   indexLoaded()
   const maintenance = startMaintenance(server)
   console.log(describeConfig(config))
-  return { server, config, authenticator, maintenance }
+  // Logs a warning if Chromium is missing; the browser itself starts on the first export.
+  const pdf = createPdfRenderer(config.pdf)
+  return { server, config, authenticator, maintenance, pdf }
 }
 
 /**
@@ -575,8 +581,9 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
  * (clients reconnect to the next server), the index is written, and the in-memory index is
  * forgotten so the next server reads it afresh from its own data dir.
  */
-async function stopRuntime({ server, maintenance }: Runtime) {
+async function stopRuntime({ server, maintenance, pdf }: Runtime) {
   clearInterval(maintenance)
+  await pdf.close()
   // destroy() closes every connection, stores and unloads every document, and closes the port.
   // A document held open by a request in progress could keep it waiting, so don't wait forever.
   // (The port itself is closed at once.)
@@ -917,6 +924,7 @@ type Handler = (
     body: Record<string, unknown>
     server: Server<CollabContext>
     user: User
+    runtime: Runtime
   },
 ) => Promise<void>
 
@@ -937,7 +945,15 @@ function route(handler: Handler): Connect.NextHandleFunction {
       if (segments.length > 3) return next()
       const [id, action, sub] = segments
       const body = req.method === 'GET' || req.method === 'HEAD' ? {} : await readJson(req)
-      await handler(req, res, next, { id, action, sub, body, server: context.runtime.server, user: context.user })
+      await handler(req, res, next, {
+        id,
+        action,
+        sub,
+        body,
+        server: context.runtime.server,
+        user: context.user,
+        runtime: context.runtime,
+      })
     } catch (error) {
       // A malformed escape in the URL (e.g. %E0) must not crash the server.
       if (error instanceof URIError) return send(res, 400, { error: 'bad request' })
@@ -1074,12 +1090,69 @@ async function sharesRoute(
 }
 
 /**
+ * A download file name from a document's title: no path separators, quotes or control characters,
+ * as `filename="…"` (ASCII) and `filename*=UTF-8''…` (the title as it is).
+ */
+export function pdfDisposition(title: string) {
+  const name =
+    title
+      // oxlint-disable-next-line no-control-regex -- control characters are what this removes
+      .replace(/[\u0000-\u001f\u007f"\\/:*?<>|]+/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120)
+      .replace(/^[.\s-]+|[.\s-]+$/g, '') || 'Untitled document'
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_')
+  return `attachment; filename="${ascii}.pdf"; filename*=UTF-8''${encodeURIComponent(`${name}.pdf`)}`
+}
+
+/**
+ * `GET /api/docs/:id/pdf`: the document as a PDF, with its page setup and page numbers and no
+ * browser headers (server/pdf.ts). The caller has a role; it is checked again after the state is
+ * read, like `duplicate`. 413 when the document is larger than `WRITE_PDF_MAX_MB`, 503 when
+ * Chromium isn't installed or too many exports are running.
+ */
+async function pdfRoute(
+  res: ServerResponse,
+  { id, server, user, runtime }: { id: string; server: Server; user: User; runtime: Runtime },
+) {
+  const { pdf, config } = runtime
+  if (pdf.unavailable) return send(res, 503, { error: 'pdf unavailable', message: pdf.unavailable })
+  const tooLarge = () => send(res, 413, { error: 'document too large for a PDF' })
+  const state = await currentState(server, id)
+  if (!roleFor(id, user)) return notFound(res)
+  if (state && state.byteLength > config.pdf.maxBytes) return tooLarge()
+  const page = documentPage(state)
+  if (Buffer.byteLength(page.html) > config.pdf.maxBytes) return tooLarge()
+  let file: Buffer
+  try {
+    file = await pdf.render(page.html)
+  } catch (error) {
+    if (error instanceof PdfBusy) {
+      res.setHeader('Retry-After', '5')
+      return send(res, 503, { error: 'busy', message: 'Too many PDF downloads at once. Try again in a moment.' })
+    }
+    if (error instanceof PdfUnavailable) return send(res, 503, { error: 'pdf unavailable', message: error.message })
+    console.error(`[write] PDF export of ${id} failed:`, error)
+    return send(res, 503, { error: 'pdf failed', message: 'The PDF could not be made. Try again in a moment.' })
+  }
+  audit('export', { actor: user.email, doc: id, format: 'pdf', bytes: file.length })
+  res.statusCode = 200
+  res.setHeader('Content-Type', 'application/pdf')
+  res.setHeader('Content-Disposition', pdfDisposition(page.title))
+  res.setHeader('Content-Length', String(file.length))
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.end(file)
+}
+
+/**
  * `/api/docs`: the library. Every handler for one document resolves the caller's role first,
  * and acts on it without awaiting anything in between; in particular before
  * `openDirectConnection` and `currentState`, which skip the collaboration server's hooks,
  * and checking again after them.
  */
-const docsApi = route(async (req, res, next, { id, action, sub, body, server, user }) => {
+const docsApi = route(async (req, res, next, { id, action, sub, body, server, user, runtime }) => {
   // My documents and Shared with me: open documents the caller owns or has a share on.
   if (!id && req.method === 'GET') {
     const list: DocMeta[] = []
@@ -1157,6 +1230,9 @@ const docsApi = route(async (req, res, next, { id, action, sub, body, server, us
     await saveIndex()
     return send(res, 200, meta)
   }
+
+  // Anyone with access may download it, viewers too, like any export.
+  if (action === 'pdf' && req.method === 'GET') return pdfRoute(res, { id, server, user, runtime })
 
   // Anyone with access may copy: the copy is the caller's, with no shares.
   if (action === 'duplicate' && req.method === 'POST') {
