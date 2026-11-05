@@ -26,8 +26,6 @@ const REQUIRED: Setting[] = [
   'WRITE_ACCESS_TEAM_DOMAIN',
   'WRITE_ACCESS_AUD',
   'WRITE_OWNER_EMAIL',
-  // Download as PDF: the unit hides Playwright's default install in the service user's home.
-  'WRITE_PDF_CHROMIUM',
 ]
 
 /** The ports of the dev server, which may run on the same machine. */
@@ -160,16 +158,19 @@ export function checkPilotEnv(text: string, { root, writable = defaultWritable, 
       }
     }
     if (config.dataDir === config.backupDir) error('WRITE_DATA_DIR and WRITE_BACKUP_DIR are the same directory.')
-    // Download as PDF (a missing setting is reported above). Without Chromium the pilot still runs,
-    // and PDF downloads answer 503.
+    // Download as PDF: warnings only, since without Chromium the pilot still runs and PDF downloads
+    // answer 503.
     const chromium = config.pdf.chromium
-    if (chromium && (chromium === '/home' || chromium.startsWith('/home/'))) {
-      error(`WRITE_PDF_CHROMIUM ${chromium} is under /home, which the unit hides (ProtectHome=yes): install it in /opt (README step 2).`)
-    } else if (chromium && !executable(chromium)) {
-      error(
-        `WRITE_PDF_CHROMIUM ${chromium} is not an executable this user can run, so PDF downloads would answer 503. ` +
-          'Install the headless shell (README step 2).',
+    const noPdf = 'PDF downloads would answer 503 (the rest of the pilot works)'
+    if (!chromium) {
+      warning(
+        `WRITE_PDF_CHROMIUM is not set: the unit hides Playwright's default install in the service user's home, so ${noPdf}. ` +
+          'Install the headless shell in /opt and set it (README step 2).',
       )
+    } else if (chromium === '/home' || chromium.startsWith('/home/')) {
+      warning(`WRITE_PDF_CHROMIUM ${chromium} is under /home, which the unit hides (ProtectHome=yes), so ${noPdf}. Install it in /opt (README step 2).`)
+    } else if (!executable(chromium)) {
+      warning(`WRITE_PDF_CHROMIUM ${chromium} is not an executable this user can run, so ${noPdf}. Install the headless shell (README step 2).`)
     }
   } catch (failure) {
     if (!(failure instanceof ConfigError)) throw failure

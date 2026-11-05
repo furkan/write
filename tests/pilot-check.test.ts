@@ -82,7 +82,7 @@ describe('checkPilotEnv', () => {
   })
 
   test('every required variable is reported when missing', () => {
-    for (const name of Object.keys(GOOD)) {
+    for (const name of Object.keys(GOOD).filter((key) => key !== 'WRITE_PDF_CHROMIUM')) {
       expect(errors(check({ ...GOOD, [name]: undefined }))).toContain(`${name} is not set.`)
     }
   })
@@ -129,17 +129,22 @@ describe('checkPilotEnv', () => {
     expect(warnings(check({ ...GOOD, WRITE_DATA_DIR: join(root, 'data') })).join()).toContain('inside the checkout')
   })
 
-  test('Chromium for Download as PDF: an executable outside /home', () => {
-    expect(errors(check(GOOD, { executable: () => false })).join()).toContain(
+  test('Chromium for Download as PDF: warnings only, since the pilot runs without it', () => {
+    const unset = check({ ...GOOD, WRITE_PDF_CHROMIUM: undefined })
+    expect(errors(unset)).toEqual([])
+    expect(warnings(unset).join()).toContain('WRITE_PDF_CHROMIUM is not set')
+    const notExecutable = check(GOOD, { executable: () => false })
+    expect(errors(notExecutable)).toEqual([])
+    expect(warnings(notExecutable).join()).toContain(
       'WRITE_PDF_CHROMIUM /opt/write-pilot-chromium/chrome-headless-shell is not an executable this user can run',
     )
-    expect(errors(check({ ...GOOD, WRITE_PDF_CHROMIUM: '/home/me/.cache/ms-playwright/chrome' })).join()).toContain(
-      'is under /home, which the unit hides',
-    )
+    const home = check({ ...GOOD, WRITE_PDF_CHROMIUM: '/home/me/.cache/ms-playwright/chrome' })
+    expect(errors(home)).toEqual([])
+    expect(warnings(home).join()).toContain('is under /home, which the unit hides')
     expect(errors(check({ ...GOOD, WRITE_PDF_MAX_QUEUE: 'lots' })).join()).toContain('WRITE_PDF_MAX_QUEUE must be a whole number')
     // The real check: /bin/sh is executable, a directory is not.
-    expect(errors(checkPilotEnv(file({ ...GOOD, WRITE_PDF_CHROMIUM: '/bin/sh' }), { root, writable }))).toEqual([])
-    expect(errors(checkPilotEnv(file({ ...GOOD, WRITE_PDF_CHROMIUM: '/opt' }), { root, writable })).join()).toContain(
+    expect(checkPilotEnv(file({ ...GOOD, WRITE_PDF_CHROMIUM: '/bin/sh' }), { root, writable }).findings).toEqual([])
+    expect(warnings(checkPilotEnv(file({ ...GOOD, WRITE_PDF_CHROMIUM: '/opt' }), { root, writable })).join()).toContain(
       'is not an executable',
     )
   })
