@@ -1,5 +1,6 @@
 /** Dev mode (`vite`) end to end: identity from the cookie, Origin checks and port clashes. */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { watch, type FSWatcher } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { rm, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -78,10 +79,19 @@ describe('Dev mode', () => {
 
 describe('Dev mode restarts', () => {
   let server: RunningServer
+  // What changes in the checkout itself while these tests run: they restart their server by
+  // touching its config and writing an .env file, which must never reach a dev server running
+  // from the checkout.
+  const changed = new Set<string>()
+  let watcher: FSWatcher
   beforeAll(async () => {
+    watcher = watch(ROOT, (_event, name) => name && changed.add(name))
     server = await startServer({ command: 'dev', ...DEV_PORTS })
   }, 30_000)
-  afterAll(() => server?.stop())
+  afterAll(async () => {
+    watcher?.close()
+    await server?.stop()
+  })
 
   test('after vite.config.ts changes, the server comes back on the same ports and editing still syncs', async () => {
     const origin = server.url
@@ -94,8 +104,9 @@ describe('Dev mode restarts', () => {
       await Bun.sleep(300)
       const mark = editor.events.length
 
-      // What Vite watches: touching the config makes it restart in-process.
-      const config = join(ROOT, 'vite.config.ts')
+      // What Vite watches: touching the config makes it restart in-process. (The server's own
+      // copy of the project, not the checkout.)
+      const config = join(server.root, 'vite.config.ts')
       const now = new Date()
       await utimes(config, now, now)
       const deadline = Date.now() + 15_000
@@ -120,10 +131,9 @@ describe('Dev mode restarts', () => {
   }, 40_000)
 
   test('a changed WRITE_* setting takes effect on the restart', async () => {
-    // Vite restarts when an .env file changes. This one is git-ignored (*.local) and only read
-    // by `vite dev` in this checkout; never overwrite one that someone else wrote.
-    const envFile = join(ROOT, '.env.development.local')
-    if (await Bun.file(envFile).exists()) return
+    // Vite restarts when an .env file changes; this one is only read by `vite dev`. In the
+    // server's own copy of the project.
+    const envFile = join(server.root, '.env.development.local')
     const restarts = () => server.output().split('server restarted').length - 1
     const before = restarts()
     try {
@@ -136,6 +146,11 @@ describe('Dev mode restarts', () => {
       await rm(envFile, { force: true })
     }
   }, 30_000)
+
+  test('they never touch the checkout', () => {
+    expect(server.root).not.toBe(ROOT)
+    expect([...changed].filter((name) => name === 'vite.config.ts' || name.startsWith('.env'))).toEqual([])
+  })
 })
 
 describe('Dev mode with a busy collaboration port', () => {

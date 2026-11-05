@@ -1,6 +1,7 @@
 /**
  * Test harness: runs the real Write server (`vite` or `vite preview`) as a child process with
- * its own data and backup dirs, plus a local JWKS server for Access mode.
+ * its own data and backup dirs, from its own copy of the project, plus a local JWKS server for
+ * Access mode.
  *
  * Ports are fixed so they never collide with the human's dev server (5173/1234):
  * Dev mode 5180/1240, Access mode 4180/1241.
@@ -8,7 +9,7 @@
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { connect } from 'node:net'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { exportJWK, generateKeyPair, SignJWT, type CryptoKey, type JWTPayload } from 'jose'
@@ -27,6 +28,29 @@ export const AUD = 'test-aud-0123456789abcdef'
 /** A fresh temp dir. `WRITE_TEST_TMP` picks where (default: the OS temp dir). */
 export async function tempDir(prefix = 'test-data-') {
   return mkdtemp(join(process.env.WRITE_TEST_TMP ?? tmpdir(), prefix))
+}
+
+// ---------- Project copies ----------
+
+/** What Vite reads from the project: its config, the server code and the client (and every `tsconfig*.json`). */
+const PROJECT_FILES = ['index.html', 'package.json', 'vite.config.ts', 'public', 'server', 'src']
+
+/**
+ * Copies the project into `dir` for one server or build, linking each `node_modules` entry
+ * instead of copying it. Nothing runs from the checkout itself: the restart tests touch the
+ * config and write an `.env` file, which would restart a dev server running there, and Vite would
+ * also read the checkout's own `.env*` files and write its caches (`node_modules/.vite`,
+ * `.vite-temp`) into it.
+ */
+async function copyProject(dir: string) {
+  const tsconfigs = (await readdir(ROOT)).filter((name) => /^tsconfig.*\.json$/.test(name))
+  for (const name of [...PROJECT_FILES, ...tsconfigs]) await cp(join(ROOT, name), join(dir, name), { recursive: true })
+  await mkdir(join(dir, 'node_modules'))
+  for (const name of await readdir(join(ROOT, 'node_modules'))) {
+    if (name === '.vite' || name === '.vite-temp') continue
+    await symlink(join(ROOT, 'node_modules', name), join(dir, 'node_modules', name))
+  }
+  return dir
 }
 
 // ---------- Child processes ----------
@@ -49,6 +73,8 @@ process.on('exit', () => {
 
 export type RunningServer = {
   child: ChildProcess
+  /** The copy of the project it runs from. */
+  root: string
   url: string
   port: number
   collabPort: number
@@ -75,6 +101,7 @@ type StartOptions = {
 /** Spawns `vite` (Dev mode) or `vite preview` (Access mode) with WRITE_* settings from `env`. */
 export async function spawnServer({ command, port, collabPort, env = {}, outDir, seed }: StartOptions) {
   const dir = await tempDir()
+  const root = await copyProject(join(dir, 'project'))
   const dataDir = join(dir, 'data')
   if (seed) {
     await mkdir(dataDir, { recursive: true })
@@ -84,7 +111,7 @@ export async function spawnServer({ command, port, collabPort, env = {}, outDir,
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('WRITE_')))
   const args = command === 'preview' ? ['preview', ...(outDir ? ['--outDir', outDir] : [])] : []
   const child = spawn(VITE, args, {
-    cwd: ROOT,
+    cwd: root,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
@@ -110,6 +137,7 @@ export async function spawnServer({ command, port, collabPort, env = {}, outDir,
   )
   const server: RunningServer = {
     child,
+    root,
     url: `http://127.0.0.1:${port}`,
     port,
     collabPort,
@@ -160,12 +188,20 @@ export async function exitCodeWithin(server: RunningServer, ms = 15_000) {
   return result
 }
 
-/** Builds the client once for `vite preview`. */
+/** Builds the client once for `vite preview`, from a copy of the project. */
 export async function buildClient() {
   const outDir = await tempDir('test-build-')
-  const child = spawn(VITE, ['build', '--outDir', outDir, '--emptyOutDir', '--logLevel', 'error'], { cwd: ROOT, stdio: 'inherit' })
-  const code = await new Promise<number | null>((done) => child.once('exit', done))
-  if (code !== 0) throw new Error(`vite build failed (${code})`)
+  const root = await copyProject(await tempDir('test-project-'))
+  try {
+    const child = spawn(VITE, ['build', '--outDir', outDir, '--emptyOutDir', '--logLevel', 'error'], { cwd: root, stdio: 'inherit' })
+    const code = await new Promise<number | null>((done) => child.once('exit', done))
+    if (code !== 0) {
+      await rm(outDir, { recursive: true, force: true })
+      throw new Error(`vite build failed (${code})`)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
   return outDir
 }
 
