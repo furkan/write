@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 import type { Me } from './api'
 import { isValidEmail, normalizeEmail } from './identity'
+import { createStore, useStore } from './store'
 
 /**
  * Who is signed in (loaded once at boot from `/api/me`) and whether their session has expired.
@@ -19,21 +20,11 @@ export function useMe(): Me {
 
 // ---------- Session expired ----------
 
-let expired = false
-const listeners = new Set<() => void>()
+const expired = createStore(false)
 
-export function setSessionExpired(next: boolean) {
-  if (expired === next) return
-  expired = next
-  listeners.forEach((listener) => listener())
-}
+export const setSessionExpired = (next: boolean) => expired.set(next)
 
-const subscribe = (listener: () => void) => {
-  listeners.add(listener)
-  return () => void listeners.delete(listener)
-}
-
-export const useSessionExpired = () => useSyncExternalStore(subscribe, () => expired)
+export const useSessionExpired = () => useStore(expired)
 
 // ---------- Signed in as someone else ----------
 
@@ -42,21 +33,11 @@ export const useSessionExpired = () => useSyncExternalStore(subscribe, () => exp
  * another tab, or "Sign in again" with another account). The tab then stops syncing: anything
  * it sends would be attributed to, and checked against, the other User.
  */
-let otherUser: string | null = null
-const otherListeners = new Set<() => void>()
+const otherUser = createStore<string | null>(null)
 
-export function setOtherUser(email: string | null) {
-  if (otherUser === email) return
-  otherUser = email
-  otherListeners.forEach((listener) => listener())
-}
+export const setOtherUser = (email: string | null) => otherUser.set(email)
 
-const subscribeOther = (listener: () => void) => {
-  otherListeners.add(listener)
-  return () => void otherListeners.delete(listener)
-}
-
-export const useOtherUser = () => useSyncExternalStore(subscribeOther, () => otherUser)
+export const useOtherUser = () => useStore(otherUser)
 
 /** Other tabs of this app, told when a sign-in in a new tab worked. */
 const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('write:session')

@@ -331,8 +331,9 @@ function updateIndexFromDoc(id: string, doc: Y.Doc) {
 /** Adds a new document to the index, owned by `owner`, with no shares. */
 function addEntry(id: string, owner: string, doc: Y.Doc): IndexEntry {
   const now = Date.now()
-  docs[id] = { title: '', preview: '', words: 0, createdAt: now, updatedAt: now, owner, shares: {} }
-  return updateIndexFromDoc(id, doc) ?? docs[id]
+  const entry: IndexEntry = { title: '', preview: '', words: 0, createdAt: now, updatedAt: now, owner, shares: {} }
+  docs[id] = entry
+  return updateIndexFromDoc(id, doc) ?? entry
 }
 
 /**
@@ -344,10 +345,10 @@ function toMeta(id: string, entry: IndexEntry, role: Role, { withShares = false 
   return { id, ...rest, role, ...(withShares || role === 'owner' ? { shares: { ...shares } } : {}) }
 }
 
-const toTrashed = (id: string) => {
-  const meta = toMeta(id, docs[id], 'owner')
-  return { ...meta, purgeAt: (meta.trashedAt ?? 0) + TRASH_RETENTION_MS }
-}
+const toTrashed = (id: string, entry: IndexEntry) => ({
+  ...toMeta(id, entry, 'owner'),
+  purgeAt: (entry.trashedAt ?? 0) + TRASH_RETENTION_MS,
+})
 
 const newId = () => randomBytes(9).toString('base64url')
 
@@ -706,7 +707,10 @@ function restoreFromTrash(server: Server, id: string, actor: string) {
 async function purge(server: Server, ids: string[], actor: string) {
   const purged = [...new Set(ids)].filter(isTrashed)
   if (!purged.length) return purged
-  const removed = purged.map((id) => ({ id, entry: docs[id] }))
+  const removed = purged.flatMap((id) => {
+    const entry = entryOf(id)
+    return entry ? [{ id, entry }] : []
+  })
   for (const { id, entry } of removed) {
     deleted.set(id, entry.owner)
     delete docs[id]
@@ -727,7 +731,7 @@ const isOwnTrashed = (id: string, user: User) => isTrashed(id) && entryOf(id)?.o
 
 function purgeExpired(server: Server) {
   const cutoff = Date.now() - TRASH_RETENTION_MS
-  const expired = trashedIds().filter((id) => (docs[id].trashedAt ?? Infinity) <= cutoff)
+  const expired = trashedIds().filter((id) => (entryOf(id)?.trashedAt ?? Infinity) <= cutoff)
   return purge(server, expired, 'expiry')
 }
 
@@ -960,8 +964,10 @@ const trashApi = route(async (req, res, next, { id, action, sub, body, server, u
   if (sub) return next()
   if (!id && req.method === 'GET') {
     const list = trashedIds()
-      .filter((docId) => isOwnTrashed(docId, user))
-      .map(toTrashed)
+      .flatMap((docId) => {
+        const entry = entryOf(docId)
+        return entry && isOwnTrashed(docId, user) ? [toTrashed(docId, entry)] : []
+      })
       .sort((a, b) => (b.trashedAt ?? 0) - (a.trashedAt ?? 0))
     return send(res, 200, { docs: list, retentionDays: TRASH_RETENTION_MS / DAY })
   }
@@ -1042,7 +1048,8 @@ async function sharesRoute(
   const next = body.role
   if (!isShareRole(next)) return send(res, 400, { error: 'role must be "editor" or "viewer"' })
   if (!isValidEmail(email)) return send(res, 400, { error: 'invalid email' })
-  const current = docs[id]
+  const current = entryOf(id)
+  if (!current) return notFound(res)
   // The caller is the owner, so this also covers sharing with yourself.
   if (email === current.owner) return send(res, 400, { error: 'the owner already has access' })
   const previous = shareOf(current, email)
@@ -1077,8 +1084,9 @@ const docsApi = route(async (req, res, next, { id, action, sub, body, server, us
   if (!id && req.method === 'GET') {
     const list: DocMeta[] = []
     for (const docId of Object.keys(docs)) {
-      const role = roleFor(docId, user)
-      if (role) list.push(toMeta(docId, docs[docId], role))
+      const entry = entryOf(docId)
+      const role = roleOf(entry, user.email)
+      if (entry && role) list.push(toMeta(docId, entry, role))
     }
     list.sort((a, b) => b.updatedAt - a.updatedAt)
     return send(res, 200, { docs: list })
@@ -1116,14 +1124,15 @@ const docsApi = route(async (req, res, next, { id, action, sub, body, server, us
     return send(res, 204)
   }
 
-  const role = roleFor(id, user)
-  if (!role) return notFound(res)
+  const entry = entryOf(id)
+  const role = roleOf(entry, user.email)
+  if (!entry || !role) return notFound(res)
 
   if (action === 'shares' && sub) return sharesRoute(req, res, { id, target: sub, role, body, server, user })
   if (sub) return next()
 
   // Everyone with access sees who has access.
-  if (!action && req.method === 'GET') return send(res, 200, toMeta(id, docs[id], role, { withShares: true }))
+  if (!action && req.method === 'GET') return send(res, 200, toMeta(id, entry, role, { withShares: true }))
 
   if (!action && req.method === 'PATCH') {
     if (!canEdit(role)) return forbidden(res)
@@ -1160,9 +1169,9 @@ const docsApi = route(async (req, res, next, { id, action, sub, body, server, us
     doc.getMap('meta').set('title', `Copy of ${sourceTitle}`)
     const copyId = newId()
     await writeAtomic(fileFor(copyId), Y.encodeStateAsUpdate(doc))
-    const entry = addEntry(copyId, user.email, doc)
+    const copy = addEntry(copyId, user.email, doc)
     audit('create', { actor: user.email, doc: copyId, from: id })
-    const meta = toMeta(copyId, entry, 'owner')
+    const meta = toMeta(copyId, copy, 'owner')
     await saveIndex()
     return send(res, 201, meta)
   }

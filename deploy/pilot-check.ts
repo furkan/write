@@ -8,27 +8,15 @@
 import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { isValidEmail } from '../server/roles.ts'
-import { ConfigError, describeConfig, resolveConfig } from '../server/config.ts'
+import { ConfigError, describeConfig, resolveConfig, SETTINGS, type Setting } from '../server/config.ts'
 
 export type Finding = { level: 'error' | 'warning'; message: string }
 
 /** Every WRITE_* variable the server reads (see .env.example). */
-const KNOWN = new Set([
-  'WRITE_HOST',
-  'WRITE_PORT',
-  'WRITE_COLLAB_PORT',
-  'WRITE_DATA_DIR',
-  'WRITE_BACKUP_DIR',
-  'WRITE_ALLOWED_HOSTS',
-  'WRITE_ALLOWED_ORIGINS',
-  'WRITE_ACCESS_TEAM_DOMAIN',
-  'WRITE_ACCESS_AUD',
-  'WRITE_ACCESS_CERTS_URL',
-  'WRITE_OWNER_EMAIL',
-  'WRITE_DEV_USER',
-])
+const KNOWN = new Set<string>(SETTINGS)
 
-const REQUIRED = [
+/** What the pilot must set, even where the server has a default. */
+const REQUIRED: Setting[] = [
   'WRITE_HOST',
   'WRITE_PORT',
   'WRITE_COLLAB_PORT',

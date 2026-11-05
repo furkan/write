@@ -51,20 +51,38 @@ export class ConfigError extends Error {
 
 type Env = Record<string, string | undefined>
 
+/** Every variable the server reads. Only these names can be read, so this list is complete. */
+export const SETTINGS = [
+  'WRITE_HOST',
+  'WRITE_PORT',
+  'WRITE_COLLAB_PORT',
+  'WRITE_DATA_DIR',
+  'WRITE_BACKUP_DIR',
+  'WRITE_ALLOWED_HOSTS',
+  'WRITE_ALLOWED_ORIGINS',
+  'WRITE_ACCESS_TEAM_DOMAIN',
+  'WRITE_ACCESS_AUD',
+  'WRITE_ACCESS_CERTS_URL',
+  'WRITE_OWNER_EMAIL',
+  'WRITE_DEV_USER',
+] as const
+
+export type Setting = (typeof SETTINGS)[number]
+
 const DEFAULT_DEV_USER = 'dev@localhost'
 
-const value = (env: Env, name: string) => {
+const value = (env: Env, name: Setting) => {
   const raw = env[name]?.trim()
   return raw ? raw : undefined
 }
 
-const list = (env: Env, name: string) =>
+const list = (env: Env, name: Setting) =>
   (value(env, name) ?? '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
 
-function port(env: Env, name: string, fallback: number) {
+function port(env: Env, name: Setting, fallback: number) {
   const raw = value(env, name)
   if (raw === undefined) return fallback
   const parsed = Number(raw)
@@ -130,7 +148,7 @@ const isLoopback = (hostname: string) =>
 export function resolveConfig(mode: AuthMode, env: Env, root: string): WriteConfig {
   const devUser = normalizeEmail(value(env, 'WRITE_DEV_USER')) || DEFAULT_DEV_USER
   const auth: AuthSettings = mode === 'access' ? accessSettings(env) : { mode: 'dev', devUser }
-  const dir = (name: string, fallback: string) => {
+  const dir = (name: Setting, fallback: string) => {
     const raw = value(env, name) ?? fallback
     return isAbsolute(raw) ? raw : resolve(root, raw)
   }

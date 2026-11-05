@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { checkPilotEnv, parseEnvironmentFile } from '../deploy/pilot-check.ts'
+import { SETTINGS } from '../server/config.ts'
 import { ROOT, tempDir } from './helpers.ts'
 
 let root: string
@@ -106,6 +107,14 @@ describe('checkPilotEnv', () => {
     expect(warnings(result).join('\n')).toContain('WRITE_ALLOWED_ORIGINS is set')
     expect(warnings(result).join('\n')).toContain('WRITE_DEV_USER is set')
     expect(warnings(result).join('\n')).toContain('WRITE_COLAB_PORT is not a Write setting')
+  })
+
+  test('knows, and .env.example documents, every setting the server reads', () => {
+    const example = readFileSync(join(ROOT, '.env.example'), 'utf8')
+    for (const name of SETTINGS) {
+      expect(warnings(check({ ...GOOD, [name]: GOOD[name as keyof typeof GOOD] ?? 'x' })).join()).not.toContain(`${name} is not`)
+      expect(example).toContain(`${name}=`)
+    }
   })
 
   test('data and backup dirs: absolute, writable, apart, outside the checkout', () => {

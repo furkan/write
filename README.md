@@ -206,6 +206,7 @@ src/pages/DocumentPage.tsx  Editor page: sync gating, roles, template seeding, v
 src/pages/SignIn.tsx      Sign-in, "can't reach the server" and "signed in again" screens
 src/api.ts                Library API client (detects a Session expired)
 src/session.ts            The signed-in user (from /api/me), Session expired state, account actions
+src/store.ts              A tiny external store that React components can follow
 src/identity.ts           Caret label and colour from an email
 src/theme.ts              Theme choice (System, Light, Dark)
 src/editor/templates.ts   New-document templates
