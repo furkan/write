@@ -219,6 +219,46 @@ describe('requests in flight while access changes', () => {
       for (const connection of live) connection.destroy()
     }
   })
+
+  test("#5 while everyone reconnects after an access change, a viewer can't take someone's presence ID", async () => {
+    const id = await create('presence after a reset')
+    await share(id, BOB, 'editor')
+    await share(id, CAROL, 'viewer')
+    const live: LiveDocument[] = []
+    const until = async (check: () => boolean) => {
+      for (let i = 0; i < 40 && !check(); i++) await Bun.sleep(50)
+    }
+    try {
+      const alice = await connectDocument(ws, id, as(server, ALICE))
+      live.push(alice)
+      alice.provider.setAwarenessField('user', { name: 'alice' })
+      const bob = await connectDocument(ws, id, as(server, BOB))
+      live.push(bob)
+      const aliceId = alice.doc.clientID
+      const seenByBob = () => bob.provider.awareness?.getStates().get(aliceId)
+      await until(() => seenByBob()?.user?.name === 'alice')
+      expect(seenByBob()).toEqual({ user: { name: 'alice' } })
+
+      // An access change reset every socket: alice's tab is between connections, and carol, a
+      // viewer, is back first, under alice's client ID, with a high clock.
+      alice.destroy()
+      await until(() => seenByBob() === undefined)
+      const carol = await connectDocument(ws, id, as(server, CAROL), { clientID: aliceId })
+      live.push(carol)
+      for (let i = 0; i < 5; i++) carol.provider.setAwarenessField('user', { name: `not alice ${i}` })
+      await Bun.sleep(300)
+      expect(seenByBob()).toBeUndefined()
+
+      // alice's tab reconnects, with the same client ID, and announces itself again.
+      const back = await connectDocument(ws, id, as(server, ALICE), { clientID: aliceId })
+      live.push(back)
+      for (let i = 0; i < 8; i++) back.provider.setAwarenessField('user', { name: 'alice, back' })
+      await until(() => seenByBob()?.user?.name === 'alice, back')
+      expect(seenByBob()).toEqual({ user: { name: 'alice, back' } })
+    } finally {
+      for (const connection of live) connection.destroy()
+    }
+  })
 })
 
 describe('messages queued before a connection is set up (#4)', () => {

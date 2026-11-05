@@ -280,8 +280,16 @@ export type LiveDocument = {
   destroy: () => void
 }
 
-/** Like `openDocument`, but keeps the connection open. Resolves once it is synced or denied. */
-export async function connectDocument(url: string, name: string, headers: Record<string, string>): Promise<LiveDocument> {
+/**
+ * Like `openDocument`, but keeps the connection open. Resolves once it is synced or denied.
+ * `clientID` sets the Yjs client ID (and so the presence ID), e.g. to reconnect as the same tab.
+ */
+export async function connectDocument(
+  url: string,
+  name: string,
+  headers: Record<string, string>,
+  { clientID }: { clientID?: number } = {},
+): Promise<LiveDocument> {
   class WebSocketWithHeaders extends WebSocket {
     constructor(target: string | URL) {
       super(target, { headers } as unknown as string[])
@@ -289,6 +297,7 @@ export async function connectDocument(url: string, name: string, headers: Record
   }
   const socket = new HocuspocusProviderWebsocket({ url, WebSocketPolyfill: WebSocketWithHeaders })
   const doc = new Y.Doc()
+  if (clientID !== undefined) doc.clientID = clientID
   const events: string[] = []
   const waiters = new Set<() => void>()
   const record = (event: string) => {

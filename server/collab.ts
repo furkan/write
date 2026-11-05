@@ -413,20 +413,47 @@ function listen(server: Server<CollabContext>, port: number) {
 }
 
 /**
- * Presence (awareness) states belong to the connection that first sent them. Hocuspocus applies
+ * Presence (awareness) client IDs belong to the User who first sent them. Hocuspocus applies
  * awareness for any Yjs client ID, and a read-only connection's too, so without this anyone on a
- * document could rewrite or remove someone else's caret and name. Keyed by document, then client ID.
+ * document could rewrite or remove someone else's caret and name.
+ *
+ * An ID stays its User's while they are connected to the document, and for a while after their
+ * last connection closes: every access change resets every socket on the document, and whoever
+ * reconnects first must not take over the IDs of the people still reconnecting. Their own new
+ * connections may use them again. Kept by document name, because a document is unloaded when
+ * its last connection closes.
  */
-const awarenessOwners = new WeakMap<Document, Map<number, Connection>>()
+const PRESENCE_HOLD_MS = 60_000
 
-function mayUpdatePresence(document: Document, connection: Connection, clientId: number) {
-  let owners = awarenessOwners.get(document)
-  if (!owners) awarenessOwners.set(document, (owners = new Map()))
-  const owner = owners.get(clientId)
-  // A closed connection's states are removed with it, so its IDs are free again.
-  if (owner && owner !== connection && document.hasConnection(owner)) return false
-  owners.set(clientId, connection)
-  return true
+function presenceOwners() {
+  /** Document name → client ID → its User, and when their last connection closed. */
+  const byDocument = new Map<string, Map<number, { email: string; leftAt?: number }>>()
+  const isConnected = (document: Document, email: string) =>
+    document.getConnections().some((connection) => (connection.context as Partial<CollabContext>).user?.email === email)
+  const isHeld = (document: Document, owner: { email: string; leftAt?: number }) =>
+    isConnected(document, owner.email) || (owner.leftAt !== undefined && Date.now() - owner.leftAt < PRESENCE_HOLD_MS)
+
+  return {
+    /** Whether `email` may set or remove the presence of `clientId`; if so, it is theirs from now on. */
+    mayUpdate(document: Document, email: string, clientId: number) {
+      let owners = byDocument.get(document.name)
+      if (!owners) byDocument.set(document.name, (owners = new Map()))
+      const owner = owners.get(clientId)
+      if (owner && owner.email !== email && isHeld(document, owner)) return false
+      owners.set(clientId, { email })
+      return true
+    },
+    /** One of `email`'s connections to the document closed. Also forgets IDs no longer held. */
+    disconnected(document: Document, email: string) {
+      const owners = byDocument.get(document.name)
+      if (!owners) return
+      for (const [clientId, owner] of owners) {
+        if (owner.email === email) owner.leftAt = Date.now()
+        else if (!isHeld(document, owner)) owners.delete(clientId)
+      }
+      if (!owners.size) byDocument.delete(document.name)
+    },
+  }
 }
 
 async function startRuntime(config: WriteConfig): Promise<Runtime> {
@@ -434,6 +461,7 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
   await mkdir(config.dataDir, { recursive: true })
   await loadIndex(config)
   const authenticator = createAuthenticator(config.auth)
+  const presence = presenceOwners()
   // Hooks get the upgrade request but not its socket: remember which socket each request opened.
   const sockets = new WeakMap<Request, { close: (code: number, reason: string) => void }>()
   const server = new Server<CollabContext>({
@@ -484,14 +512,20 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
     async connected({ documentName, context, connection }) {
       if (roleFor(documentName, context.user) !== context.role) resetConnection(connection)
     },
-    async beforeHandleAwareness({ document, connection, states, removedClients }) {
-      if (!connection) return
+    async beforeHandleAwareness({ document, context, states, removedClients }) {
+      // Only updates from a client connection have a context.
+      const email = context?.user.email
+      if (!email) return
       for (const clientId of [...states.keys()]) {
-        if (!mayUpdatePresence(document, connection, clientId)) states.delete(clientId)
+        if (!presence.mayUpdate(document, email, clientId)) states.delete(clientId)
       }
       for (const clientId of [...removedClients]) {
-        if (!mayUpdatePresence(document, connection, clientId)) removedClients.delete(clientId)
+        if (!presence.mayUpdate(document, email, clientId)) removedClients.delete(clientId)
       }
+    },
+    async onDisconnect({ document, context }) {
+      const email = (context as Partial<CollabContext> | undefined)?.user?.email
+      if (email) presence.disconnected(document, email)
     },
     extensions: [
       new Database({

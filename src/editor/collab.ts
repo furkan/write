@@ -73,7 +73,25 @@ export function getSession(name: string, checkUser: () => Promise<void>): Sessio
     fragment: ydoc.getXmlFragment('default'),
     retrying: retryWithBackoff(provider),
   }
+  provider.on('authenticated', () => reannouncePresence(provider))
   return current
+}
+
+/**
+ * After every (re)connect, sends our presence again with a newer clock, and accepts everyone
+ * else's afresh. When a socket closes, the server drops that tab's presence and tells everyone,
+ * and each tab drops the others'; the presence a tab re-sends on reconnect has the clock its
+ * peers already saw, so they ignore it. Without this, after an access change (which resets
+ * every socket) people stayed invisible to each other until they moved their caret.
+ */
+function reannouncePresence(provider: HocuspocusProvider) {
+  const { awareness } = provider
+  if (!awareness) return
+  for (const clientId of [...awareness.meta.keys()]) {
+    if (clientId !== awareness.clientID && !awareness.states.has(clientId)) awareness.meta.delete(clientId)
+  }
+  const state = awareness.getLocalState()
+  if (state) awareness.setLocalState({ ...state })
 }
 
 /**
