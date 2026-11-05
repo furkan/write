@@ -79,13 +79,91 @@ Each security event is logged as one JSON line on stdout, such as `{"audit":"aut
 
 ## Running the pilot (Access mode)
 
-The pilot is a separate checkout with its own data dir and ports, bound to `127.0.0.1` and reached only through `cloudflared` and Cloudflare Access:
+The **Pilot instance** is the copy of Write that other people use. It runs `vite preview` from its own checkout, with its own data, backups and ports, and binds to `127.0.0.1`, so the only way in is through `cloudflared` and Cloudflare Access ([ADR 0005](docs/adr/0005-separate-loopback-pilot-instance.md)). It starts empty.
 
-1. In Cloudflare Zero Trust, create a self-hosted Access application for the pilot's hostname and note its AUD tag. Under the application's cookie settings, set **SameSite** to **Lax**: the `CF_Authorization` cookie defaults to `None`, which lets other sites send it.
-2. Copy `.env.example` to an env file and set at least `WRITE_ACCESS_TEAM_DOMAIN`, `WRITE_ACCESS_AUD`, `WRITE_ALLOWED_HOSTS` (the pilot's hostname), `WRITE_DATA_DIR`, `WRITE_BACKUP_DIR`, and a `WRITE_COLLAB_PORT` other than 1234 if the dev server runs on the same machine.
-3. Run `bun install && bun run build && bun run preview` from a systemd unit with `EnvironmentFile=` pointing at that file, and point `cloudflared` at `http://127.0.0.1:<WRITE_PORT>`.
+Your Tailscale **Dev server** (`bun dev` in your usual checkout) doesn't change: it stays in Dev mode, with your data and no sign-in. It is not for pilot users. Don't give them its address, and don't put it behind the tunnel. On tailnet devices, open the pilot through its Access hostname like everyone else. The two can run on the same machine because their ports differ.
 
-The startup log has one line naming the mode, such as `[write] Access mode: every request needs a Cloudflare Access JWT for team acme.cloudflareaccess.com; ...`.
+The files are in [`deploy/`](deploy):
+- `write-pilot.service`: the systemd unit.
+- `pilot.env.example`: its settings.
+- `cloudflared.example.yml`: the tunnel.
+- `pilot-check.ts`: run as `bun run pilot:check`.
+
+The steps below use `write.example.com` for the pilot's hostname, `write-pilot` for the service account, `/opt/write-pilot` for the checkout and `/etc/write-pilot/pilot.env` for the settings.
+
+1. **Create the Access application and policy.** In Cloudflare Zero Trust, go to **Access → Applications** and add a **self-hosted** application for `write.example.com`. Give it an Allow policy that lists the pilot's people, by email or by email domain. Then:
+   - **Copy the AUD tag**, the application's "Application Audience (AUD) Tag", and the **team domain**, `<team>.cloudflareaccess.com` (under Zero Trust **Settings**).
+   - **Set the cookie's SameSite to Lax** in the application's cookie settings and leave HttpOnly on. The `CF_Authorization` cookie defaults to `None`, which lets other sites send it.
+   - **Pick the session duration.** One week is a good default: people sign in about once a week. Write checks the JWT when a socket connects, and an Access JWT stays valid until the session ends. So when you remove someone from the policy, also revoke their session (Zero Trust → **My Team → Users**). Then run `sudo systemctl restart write-pilot` to close their open sockets.
+2. **Make a separate checkout.** The service can't see `/home`, so bun and Node (22.12 or later) go in `/usr/local/bin`. The service runs Vite on Node: under Bun's runtime, the collaboration server refuses to start. The checkout is yours. The `write-pilot` account only reads it.
+   ```bash
+   sudo install -m 755 "$(readlink -f "$(command -v bun)")" /usr/local/bin/bun
+   sudo install -m 755 "$(readlink -f "$(command -v node)")" /usr/local/bin/node
+   sudo useradd --system --no-create-home --home-dir /var/lib/write-pilot --shell /usr/sbin/nologin write-pilot
+   sudo install -d -o "$USER" /opt/write-pilot
+   git clone https://github.com/furkan/write.git /opt/write-pilot
+   cd /opt/write-pilot && bun install --frozen-lockfile && bun run build
+   ```
+   Don't put `.env` or `.env.local` files in this checkout, because `vite preview` reads them too.
+3. **Fill in the env file.** Copy `deploy/pilot.env.example` and replace each `<...>` with your own values: the hostname, team domain, AUD tag and your email for `WRITE_OWNER_EMAIL`. The ports (4174 and 1235) and the data dirs (under `/var/lib/write-pilot`) can stay as they are. Leave `WRITE_ACCESS_CERTS_URL` and `WRITE_ALLOWED_ORIGINS` unset. Then check the file as the service user:
+   ```bash
+   sudo install -d -m 750 -g write-pilot /etc/write-pilot
+   sudo install -m 640 -g write-pilot deploy/pilot.env.example /etc/write-pilot/pilot.env
+   sudoedit /etc/write-pilot/pilot.env
+   sudo -u write-pilot /usr/local/bin/bun run pilot:check /etc/write-pilot/pilot.env
+   ```
+   `pilot:check` reports, among other things:
+   - required settings that are missing, and placeholders left in;
+   - a collaboration port of 1234 or an app port of 5173 (the Dev server's);
+   - a `WRITE_HOST` other than loopback, and a test-only `WRITE_ACCESS_CERTS_URL`;
+   - data dirs that aren't writable;
+   - a missing build, and `.env` files in the checkout.
+
+   It exits 1 on any error. Until the first start, it warns that `/var/lib/write-pilot` doesn't exist yet; systemd creates it.
+4. **Install the systemd unit and enable it.** Fill in the unit's placeholders, then start it:
+   ```bash
+   sed -e 's|@USER@|write-pilot|g' -e 's|@CHECKOUT@|/opt/write-pilot|g' -e 's|@BUN@|/usr/local/bin/bun|g' \
+     deploy/write-pilot.service | sudo tee /etc/systemd/system/write-pilot.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now write-pilot
+   ```
+   It is a system service with a dedicated account rather than a user service. It starts at boot without anyone logged in, and the sandbox only works under the system manager. The sandbox makes the whole file system read-only except `/var/lib/write-pilot`, hides `/home`, and gives the service a private `/tmp`. The service restarts on failure, and it gives up after five failed starts in two minutes, such as when a setting is missing. On stop it stores open documents before exiting. Logs go to journald.
+5. **Run `cloudflared` as a service.** Use a locally managed tunnel:
+   ```bash
+   cloudflared tunnel login
+   cloudflared tunnel create write-pilot          # prints the tunnel UUID and writes <UUID>.json
+   cloudflared tunnel route dns write-pilot write.example.com
+   sudo install -d /etc/cloudflared
+   sudo cp ~/.cloudflared/<UUID>.json /etc/cloudflared/
+   sudo cp deploy/cloudflared.example.yml /etc/cloudflared/config.yml   # then fill in its <...>
+   sudo cloudflared service install
+   ```
+   The config sends `write.example.com` to `http://127.0.0.1:4174` and answers 404 for everything else. It also has `cloudflared` check the Access JWT itself, so that's two checks. WebSockets need no extra settings.
+
+   Leave `httpHostHeader` unset. `cloudflared` then passes the browser's `Host: write.example.com` through to Write:
+   - Vite accepts it because it's in `WRITE_ALLOWED_HOSTS`.
+   - The Origin check passes because the browser's `Origin: https://write.example.com` matches it, so `WRITE_ALLOWED_ORIGINS` isn't needed.
+
+   If you rewrote Host to `127.0.0.1:4174`, every edit and every collaboration socket would be refused. If you manage the tunnel from the dashboard instead, add the same public hostname and service, and leave **HTTP Host Header** empty.
+6. **Verify.**
+   - Without a token, the app refuses requests:
+     ```bash
+     curl -i -H 'Host: write.example.com' http://127.0.0.1:4174/api/me   # 401 {"error":"unauthenticated"}
+     curl -I https://write.example.com/                                  # 302 to <team>.cloudflareaccess.com
+     ```
+   - In a browser, open `https://write.example.com`, sign in, check that the account menu shows your email, create a document and open it in a second browser to see both carets.
+   - `journalctl -u write-pilot -b` shows the startup line `[write] Access mode: every request needs a Cloudflare Access JWT for team <team>.cloudflareaccess.com; data in /var/lib/write-pilot/data, collaboration on 127.0.0.1:1235`. If it contains `WARNING: signing keys from`, a test certs URL is set: remove it. Audit lines (`{"audit":"auth_fail",...}`, `create`, `share`, ...) appear in the same log.
+7. **Back up, restore and upgrade.**
+   - **Backups.** The server snapshots the data dir daily into `/var/lib/write-pilot/backups` and keeps 14 (see [Backups](#backups)). Those copies are on the same disk, so also copy them off the machine now and then, e.g. `sudo rsync -a /var/lib/write-pilot/backups/ <elsewhere>/`.
+   - **Restore.** Run `sudo systemctl stop write-pilot`, then copy the snapshot over `/var/lib/write-pilot/data` (`sudo rsync -a --delete <snapshot>/ /var/lib/write-pilot/data/`). Run `sudo chown -R write-pilot: /var/lib/write-pilot/data`, then `sudo systemctl start write-pilot`.
+   - **Upgrade.** Note the running commit (`git -C /opt/write-pilot rev-parse HEAD`) and snapshot the data by hand (`sudo cp -a /var/lib/write-pilot/data /var/lib/write-pilot/data-before-<commit>`). Then:
+     ```bash
+     cd /opt/write-pilot && git pull && bun install --frozen-lockfile && bun run build && sudo systemctl restart write-pilot
+     ```
+     Check the log as in step 6. Open tabs reconnect on their own.
+8. **Roll back.**
+   - **A bad upgrade.** Check out the commit you noted, then `bun install --frozen-lockfile && bun run build && sudo systemctl restart write-pilot`. If the upgrade changed the data format (the release notes say so), stop the service and restore the `data-before-<commit>` copy first.
+   - **Taking the pilot offline.** Run `sudo systemctl disable --now write-pilot cloudflared`. You can also remove the Access application or its DNS route. `/var/lib/write-pilot` stays on disk until you delete it, and the Dev server is unaffected.
 
 ## Backups
 
@@ -110,6 +188,7 @@ server/collab.ts          Hocuspocus server, REST API and Vite plugin
 server/auth.ts            Identity: Access JWT verification, Dev mode cookie, Origin check
 server/config.ts          WRITE_* settings, read once in vite.config.ts
 server/audit.ts           Audit log lines
+deploy/                   The pilot: systemd unit, env file, cloudflared config, pilot:check
 tests/                    bun test suites: unit tests and the real server in Dev and Access modes
 src/App.tsx               Router: library or document
 src/pages/Library.tsx     Document library (templates, search, grid and list, actions)
@@ -132,6 +211,7 @@ src/tours.ts              Tutorial overlays (driver.js)
 
 - `bun dev`: dev server with the collaboration server
 - `bun run build`: type-check and production build. Each page and the large libraries (editor, emoji, KaTeX, syntax highlighting, Yjs, React) are separate chunks, so the library page doesn't download the editor
-- `bun run preview`: serve the build (collaboration included)
+- `bun run preview`: serve the build (collaboration included) in Access mode
+- `bun run pilot:check <env file>`: check the pilot's env file and checkout before starting it (see [Running the pilot](#running-the-pilot-access-mode))
 - `bun run lint`: oxlint
 - `bun run test`: the `bun test` suites. They start real servers on ports 5180/1240 (dev) and 4180/1241 (preview) with temporary data dirs (set `WRITE_TEST_TMP` to choose where), so they never touch a running dev server or its data. Access mode is tested against a local key server with tokens the tests sign
