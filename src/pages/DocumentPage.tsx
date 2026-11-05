@@ -2,6 +2,7 @@ import 'katex/dist/katex.min.css'
 import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
+import { yUndoPluginKey } from '@tiptap/y-tiptap'
 import {
   useCallback,
   useEffect,
@@ -19,6 +20,7 @@ import { EditorMenus } from '../components/EditorMenus'
 import { BarActions, DocumentTitle } from '../components/ribbon/BarItems'
 import { canWrite as canWriteAs, DocumentChromeContext, type DocumentChrome, type ViewOptions } from '../components/ribbon/documentContext'
 import { Ribbon } from '../components/ribbon/Ribbon'
+import { useMediaQuery } from '../components/ribbon/state'
 import { SessionBanner } from '../components/SessionBanner'
 import { ShareDialog } from '../components/ShareDialog'
 import { Sidebar } from '../components/Sidebar'
@@ -28,7 +30,7 @@ import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle
 import { buildExtensions } from '../editor/extensions'
 import { paginationKey } from '../editor/extensions/pagination/Pagination'
 import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRetrying } from '../editor/hooks'
-import { pageGeometry, pageRule, useLayoutMode, useNarrowScreen, usePageSetup } from '../editor/page-setup'
+import { pageGeometry, pageRule, trackPageSetupUndo, useLayoutMode, useNarrowScreen, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
 import { setDocumentScroller } from '../editor/scroller'
 import { fitZoom, useZoomSetting, type ZoomFit } from '../editor/zoom'
@@ -40,6 +42,13 @@ import '../layout.css'
 const SYNC_TIMEOUT_MS = 4000
 /** How long a template waits to learn whether we own the document before opening without it. */
 const OWNER_WAIT_MS = 10_000
+
+/**
+ * Room Print layout needs beside the page for the sidebar: the canvas padding (48), the column
+ * gap (24), the sidebar (320), the workspace padding (32) and a scrollbar (16). Narrower, the
+ * sidebar goes below the document, as it does on narrow screens.
+ */
+const SIDEBAR_ROOM = 48 + 24 + 320 + 32 + 16
 
 /**
  * Waits for the first sync with the collaboration server, so the editor never
@@ -301,9 +310,6 @@ function SyncedDocument({ name, templateId, access }: DocumentPageProps & { acce
   return <Workspace session={session} template={role === 'owner' ? template : undefined} role={role} />
 }
 
-/** Space between pages in Print layout. */
-const PAGE_GAP = 24
-
 /**
  * The `@page` rule for printing, kept in a <style> element of its own: the sheet size and
  * margins follow the document's page setup.
@@ -476,7 +482,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   const layoutMode = useLayoutMode()
   const narrow = useNarrowScreen()
   const paged = (layoutMode === 'print' && !narrow) || printing
-  const pagination = useMemo(() => ({ enabled: paged, pageGap: PAGE_GAP, ...pageGeometry(pageSetup) }), [paged, pageSetup])
+  const pagination = useMemo(() => ({ enabled: paged, ...pageGeometry(pageSetup) }), [paged, pageSetup])
   usePrintPageRule(pageRule(pageSetup, paged))
 
   const backupTimer = useRef<number | undefined>(undefined)
@@ -541,6 +547,12 @@ function Workspace({ session, template, role }: WorkspaceProps) {
       window.clearTimeout(backupTimer.current)
     }
   }, [editor])
+
+  // Page setup changes are steps in the editor's undo history (see `trackPageSetupUndo`).
+  useEffect(() => {
+    const undoManager = yUndoPluginKey.getState(editor.state)?.undoManager
+    if (undoManager) trackPageSetupUndo(session, undoManager)
+  }, [editor, session])
 
   useEffect(() => {
     editor.commands.showInvisibleCharacters(view.invisibles)
@@ -669,6 +681,8 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   const fitted = useFitZoom(fit, pagination.pageWidth, pagination.pageHeight, mainRef, scroller)
   const zoom = printing ? 100 : fit ? (fitted ?? 100) : zoomSetting.percent
   useZoomAnchor(zoom, editor, scroller)
+  // Room for the sidebar beside the page as it shows (zoomed); a fitted page leaves it room.
+  const sidebarFits = useMediaQuery(`(min-width: ${Math.ceil((pagination.pageWidth * zoom) / 100) + SIDEBAR_ROOM}px)`) || !!fit
 
   const canToggleReadOnly = canWrite && !closedWhileOpen
   const chrome = useMemo<DocumentChrome>(
@@ -699,6 +713,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     readOnly && 'read-only',
     !view.sidebar && 'no-sidebar',
     paged && 'layout-print',
+    paged && view.sidebar && !sidebarFits && 'sidebar-below',
   ]
     .filter(Boolean)
     .join(' ')

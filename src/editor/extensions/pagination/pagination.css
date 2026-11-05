@@ -123,15 +123,21 @@
   white-space: inherit;
 }
 
-.tiptap.paginated [data-type='block-math'] {
-  overflow: visible;
-}
-
-/* Images and videos can't be split: never taller than a page. */
+/* Images, videos and display math can't be split: never taller than a page. */
 .tiptap.paginated img,
 .tiptap.paginated div[data-youtube-video] iframe {
   max-height: var(--page-content-height);
   object-fit: contain;
+}
+
+/*
+ * A formula taller than a page scrolls inside its box (and is cut off on paper). The box is its
+ * own formatting context, so it's full width, or it would squeeze beside a break (as rows do).
+ */
+.tiptap.paginated [data-type='block-math'] {
+  min-width: 100%;
+  max-height: var(--page-content-height);
+  overflow: auto;
 }
 
 /*
@@ -168,7 +174,12 @@
   min-width: 100%;
 }
 
-/* Tables: each row is its own box, so rows move to the next page one at a time. */
+/*
+ * Tables: each row is its own box (a grid), so rows move to the next page one at a time. The
+ * extension places every cell in its column (`grid-column`) and gives the table its column
+ * template (`--table-columns`, which resized columns keep), so cells under a rowspan and wide
+ * colspans line up as in the table. A rowspan cell itself is drawn in its first row only.
+ */
 .tiptap.paginated .tableWrapper,
 .tiptap.paginated table {
   overflow: visible;
@@ -184,7 +195,8 @@
 }
 
 .tiptap.paginated tr {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--table-columns, repeat(auto-fit, minmax(0, 1fr)));
   /* A box that is its own formatting context fits beside a float when it can shrink enough,
      even to nothing. Full width, it can't, so it moves below the break instead. */
   min-width: 100%;
@@ -196,28 +208,12 @@
 
 .tiptap.paginated :is(td, th) {
   display: block;
-  flex: 1 1 0;
+  grid-row: 1;
 }
 
-.tiptap.paginated :is(td, th) + :is(td, th) {
+/* Neighbouring borders overlap, as in a collapsed table: every column but the first. */
+.tiptap.paginated :is(td, th):not([style*='grid-column: 1 /']) {
   margin-left: -1px;
-}
-
-.tiptap.paginated :is(td, th)[colspan='2'] {
-  flex-grow: 2;
-}
-
-.tiptap.paginated :is(td, th)[colspan='3'] {
-  flex-grow: 3;
-}
-
-.tiptap.paginated :is(td, th)[colspan='4'] {
-  flex-grow: 4;
-}
-
-/* A resized column keeps its width where the browser can read it from the cell (typed attr()). */
-.tiptap.paginated :is(td, th)[colwidth]:not([colspan]) {
-  flex: 0 1 attr(colwidth px, auto);
 }
 
 /*
@@ -244,6 +240,11 @@
   position: absolute;
   top: 0;
   left: 0;
+}
+
+/* A collaborator's name sits above their caret: on a page's first line, that's over the break. */
+.tiptap.paginated .collaboration-carets__label {
+  z-index: 2;
 }
 
 /* Focus mode dims the editor's children, but the pages aren't content. */
