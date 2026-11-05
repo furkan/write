@@ -203,8 +203,8 @@ export const TOURS: Record<TourId, Tour> = {
         element: '[data-tour="print"]',
         tab: 'file',
         popover: {
-          title: 'Print or save as PDF',
-          description: `<b>File → Print / PDF</b> (or ${k(`${mod}+P`)}) opens the browser’s print dialog; choose <b>Save as PDF</b> there for a PDF. The paper size and margins come from the <b>Layout</b> tab, in either layout and at any zoom.`,
+          title: 'Print or download a PDF',
+          description: `<b>File → Download as PDF</b> makes the PDF on the server, like Google Docs: the paper size and margins from the <b>Layout</b> tab, page numbers, and none of the date, address or title a browser adds. For a clean PDF without browser headers (in Safari especially), use it rather than printing. <b>Print</b> (or ${k(`${mod}+P`)}) opens the browser’s dialog, for paper.`,
           side: 'bottom',
         },
       },
@@ -245,7 +245,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Status bar',
           description:
-            'Word and character counts (with a limit), the block your cursor is in, when the local backup was last saved, and the connection status. On the right, <b>Print layout</b> (pages) or <b>Web layout</b> (one long page), and the <b>zoom</b> slider: click the percentage for presets, <b>Page width</b> and <b>One page</b>. Both are just for you; a narrow window always shows one long page, and zoom then makes the text larger or smaller.',
+            'The word count (hover it for characters) and whether your changes are synced. On the right, <b>Print layout</b> (pages) or <b>Web layout</b> (one long page), and the <b>zoom</b> slider: click the percentage for presets, <b>Page width</b> and <b>One page</b>. Both are just for you; a narrow window always shows one long page, and zoom then makes the text larger or smaller.',
           side: 'top',
         },
       },

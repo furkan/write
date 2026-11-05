@@ -1,11 +1,10 @@
 import { mergeAttributes, Node, wrappingInputRule } from '@tiptap/core'
-import { ReactNodeViewRenderer } from '@tiptap/react'
-import { CALLOUT_VARIANTS, isVariant, type CalloutVariant } from './callout-variants'
-import { CalloutView } from './CalloutView'
+import { CALLOUT_VARIANTS, isVariant, type CalloutVariant } from './callout-variants.ts'
 
 /**
- * A custom node rendered with a React node view: a coloured callout box whose
- * variant is switched by clicking its icon. Type `:::info `, `:::warning `,
+ * A custom node: a coloured callout box whose variant is switched by clicking its icon (the
+ * editor adds a React node view, `CalloutView`; this file stays free of React and the DOM so
+ * the server can render it too). Type `:::info `, `:::warning `,
  * `:::success ` or `:::danger ` at the start of a line to create one.
  */
 
@@ -74,10 +73,6 @@ export const Callout = Node.create({
       (Object.keys(CALLOUT_VARIANTS) as CalloutVariant[]).find((v) => CALLOUT_VARIANTS[v].alert === token.alert) ?? 'info'
     const content = h.parseChildren(token.tokens ?? [])
     return h.createNode('callout', { variant }, content.length ? content : [{ type: 'paragraph' }])
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(CalloutView)
   },
 
   addCommands() {

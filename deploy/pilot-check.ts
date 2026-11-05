@@ -65,6 +65,18 @@ export type CheckOptions = {
   root: string
   /** Whether `path` exists and the current user may write to it; overridable for tests. */
   writable?: (path: string) => 'writable' | 'read-only' | 'missing'
+  /** Whether the current user may run the file at `path`; overridable for tests. */
+  executable?: (path: string) => boolean
+}
+
+function defaultExecutable(path: string) {
+  try {
+    if (!statSync(path).isFile()) return false
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function defaultWritable(path: string): 'writable' | 'read-only' | 'missing' {
@@ -86,7 +98,7 @@ function existingParent(path: string, writable: NonNullable<CheckOptions['writab
 }
 
 /** Checks an env file's text for the pilot. Returns every finding, and the startup line if it resolves. */
-export function checkPilotEnv(text: string, { root, writable = defaultWritable }: CheckOptions) {
+export function checkPilotEnv(text: string, { root, writable = defaultWritable, executable = defaultExecutable }: CheckOptions) {
   const findings: Finding[] = []
   const error = (message: string) => findings.push({ level: 'error', message })
   const warning = (message: string) => findings.push({ level: 'warning', message })
@@ -146,6 +158,20 @@ export function checkPilotEnv(text: string, { root, writable = defaultWritable }
       }
     }
     if (config.dataDir === config.backupDir) error('WRITE_DATA_DIR and WRITE_BACKUP_DIR are the same directory.')
+    // Download as PDF: warnings only, since without Chromium the pilot still runs and PDF downloads
+    // answer 503.
+    const chromium = config.pdf.chromium
+    const noPdf = 'PDF downloads would answer 503 (the rest of the pilot works)'
+    if (!chromium) {
+      warning(
+        `WRITE_PDF_CHROMIUM is not set: the unit hides Playwright's default install in the service user's home, so ${noPdf}. ` +
+          'Install the headless shell in /opt and set it (README step 2).',
+      )
+    } else if (chromium === '/home' || chromium.startsWith('/home/')) {
+      warning(`WRITE_PDF_CHROMIUM ${chromium} is under /home, which the unit hides (ProtectHome=yes), so ${noPdf}. Install it in /opt (README step 2).`)
+    } else if (!executable(chromium)) {
+      warning(`WRITE_PDF_CHROMIUM ${chromium} is not an executable this user can run, so ${noPdf}. Install the headless shell (README step 2).`)
+    }
   } catch (failure) {
     if (!(failure instanceof ConfigError)) throw failure
     if (!incomplete) error(failure.message)

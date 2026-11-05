@@ -24,10 +24,12 @@ Open the URL Vite prints. The server listens on every interface, so other device
 - **Session expiry:** if your Cloudflare Access session expires while a document is open, a banner offers **Sign in again**, which opens a new tab. Keep typing meanwhile: once you have signed in, the tab reconnects and your changes merge. A dropped network connection shows "Offline" instead. If Cloudflare Access can't check who you are for a while (its signing keys are unavailable), the status bar says it is retrying, and the tab reconnects by itself, waiting longer each time (up to 30 seconds). If Write can't confirm who you are when a page loads, it shows a sign-in screen. If the browser is now signed in as someone else (another account in the new tab, or **Switch user…** in another tab), an open tab stops syncing rather than carry on as that person, and offers to reload as them or to sign back in (in Dev mode, switch back).
 - **Local backups:** your own edits are snapshotted to this browser's storage per user and document (`write:backup:<email>:<id>`), and **File → Restore backup…** brings them back. Only your own changes are backed up: opening a document, or edits arriving from collaborators, never replace your backup. Viewers take none. A backup made before documents had owners (`write:backup:<id>`) is copied to the owner's key when the owner opens the document, unless they already have a newer one; collaborators never get it.
 - **Ribbon:** the document page's whole top bar is a Word-style ribbon (there is no separate header). Its row holds ✍️ (back to the library), the title, undo and redo, the tabs **File · Home · Insert · Layout · View** (plus **Table** and **Code** while you're in one), then who's here, **Share**, the theme, your account and the **?** tours. The arrow at the far right collapses it to that row (remembered per browser); a tab then opens over the document. On a narrow screen, or whenever a tab's groups don't fit, the panel and the tabs scroll sideways. Below 860 px wide, who's here, Share, theme, account and tours fold into one **⋯** menu, and below 560 px the title and the tabs take a row each, so the page never scrolls sideways.
-- **File tab:** **New document**, **Make a copy**, **All documents**, **Print / PDF**, **Share** (or **Who has access**), **Import Markdown**, **Export** Markdown, HTML or JSON, the local backup (**Save backup** `Ctrl/⌘+S`, **Restore backup…**, **Reset to demo…**) and **Move to trash**. Viewers keep copy, export, print and who has access; import and the backups are for owners and editors (disabled in Read-only); the trash is the owner's.
-- **Print / Save as PDF:** **File → Print / PDF** or `Ctrl/⌘+P` opens the browser's print dialog; choose **Save as PDF** as the destination for a PDF. Nothing changes on screen.
-- **Printing:** the paper size, orientation and margins come from the **Layout** tab, in Print and Web layout alike and at any zoom: the browser splits the document into sheets with them (`@page`), and Print layout's on-screen pages aren't printed. Chrome and Edge add "Page N of M" at the bottom of each sheet. Safari doesn't support those page-number boxes: use its own **Print headers and footers** option for page numbers. Safari 18.2 or later is needed for the margins. Table rows and images aren't split across sheets, and headings stay with the text after them.
+- **File tab:** **New document**, **Make a copy**, **All documents**, **Print**, **Download as PDF**, **Share** (or **Who has access**), **Import Markdown**, **Export** Markdown, HTML or JSON, the local backup (**Save backup** `Ctrl/⌘+S`, **Restore backup…**, **Reset to demo…**) and **Move to trash**. Viewers keep copy, export, print, Download as PDF and who has access; import and the backups are for owners and editors (disabled in Read-only); the trash is the owner's.
+- **Print:** **File → Print** or `Ctrl/⌘+P` opens the browser's print dialog, for paper (its **Save as PDF** works too, with whatever headers the browser adds). Nothing changes on screen.
+- **Download as PDF:** **File → Download as PDF** saves a PDF made on the server, like Google Docs' **File → Download → PDF**. For a clean PDF without browser headers, use Download as PDF. The button says **Preparing PDF…** while it works. Edits that haven't reached the server yet get up to 3 seconds to arrive; if some still haven't, the PDF is downloaded anyway with a notice that they aren't in it. If the server can't make PDFs (no Chromium) or is busy, a notice says so.
+- **Printing:** the paper size, orientation and margins come from the **Layout** tab, in Print and Web layout alike and at any zoom: the browser splits the document into sheets with them (`@page`), and Print layout's on-screen pages aren't printed. Chrome and Edge add "Page N of M" at the bottom of each sheet. Safari doesn't support those page-number boxes: use its own **Print headers and footers** option for page numbers. Safari 18.2 or later is needed for the margins. For a clean PDF without browser headers, use **Download as PDF**. Table rows and images aren't split across sheets, and headings stay with the text after them.
 - **App shell:** on a document, the ribbon stays at the top and the status bar at the bottom; only the document scrolls between them. The page itself never scrolls or bounces, so there is no pull-to-refresh past the ribbon and nothing below the status bar (the library scrolls as a normal page). The scrolling keys work as soon as the document opens. On a phone the shell ends above the on-screen keyboard, so the status bar and the caret stay visible.
+- **How Download as PDF works:** `GET /api/docs/<id>/pdf` (anyone with access, viewers too) returns the document as a PDF made on the server, like Google Docs' **File → Download → PDF**: the Layout tab's paper size, orientation and margins, "Page N of M" centred at the bottom, and none of the date, URL or title a browser's print dialog adds. It is identical whichever browser asks. The page is built from the stored document in a worker thread (`server/pdf-html.ts`) and printed by headless Chromium (`server/pdf.ts`) with JavaScript off and no network: pasted images are included, while images linked by URL and YouTube videos become a box with their address. Install the browser once with `./node_modules/.bin/playwright-core install chromium-headless-shell` (or point `WRITE_PDF_CHROMIUM` at one); without it the server logs a warning and downloads answer 503. See [Download as PDF: security](#download-as-pdf-security) for what it can reach and how it is limited.
 - **View tab:** **Print layout** and **Web layout**; **Contents** (the sidebar), **Invisible characters** and **Focus mode**; **Read-only**; the **Zoom** group; and the **Theme**.
 - **Zoom:** 50% to 200%, from the View tab (**Zoom ▾** presets, **100%**, **Zoom in** and **Zoom out** in 10% steps, **One page** and **Page width**) or Word's slider at the right of the status bar (a range input: arrow keys, Home and End; click the percentage for the presets). **Page width** and **One page** apply in Print layout and follow the window. In one continuous page (Web layout, or below 900 px wide) zoom makes the text larger or smaller and it reflows. Zoomed in, a page wider than the document area scrolls sideways, and the Contents sidebar stays beside it. Resizing an image or a table column follows the pointer at any zoom. Zoom is yours, remembered per browser and never stored in the document; the browser's own zoom keys are left alone. It is CSS `zoom` on the editor, so clicks, carets, selections, menus and collaborators' carets stay where they belong, and the page count doesn't change with it.
 - **Print layout:** documents show as pages, like Word, with a page number in each footer. **Print layout** and **Web layout** (one continuous page) are on the **View** tab and are two buttons at the right of the status bar; the choice is yours, remembered per browser. Below 900 px wide the document is always continuous, and those controls say so. When the window is too narrow for the page (at 100%) and the sidebar side by side, the sidebar moves below the document. Tables break between rows, with merged cells kept in their columns; a row, task item, image or formula taller than a page is split or scaled to fit. Printing gives sheets on white paper in either theme, without the app around it (see **Printing**).
@@ -40,7 +42,7 @@ Open the URL Vite prints. The server listens on every interface, so other device
 | Area | Features |
 | --- | --- |
 | StarterKit | Bold, italic, underline, strike, code, links (autolink), headings, lists, blockquote, horizontal rule, hard break, drop and gap cursors, trailing node, Markdown-style shortcuts |
-| Small additions | Placeholder, character and word count (soft 50k limit shown in the status bar), Focus, text align, multi-colour highlight, text colour, font family and size (`TextStyleKit`), sub/superscript, Typography, task lists, resizable images, tables, details (toggle sections), YouTube, emoji, invisible characters, UniqueID |
+| Small additions | Placeholder, word and character count (in the status bar), Focus, text align, multi-colour highlight, text colour, font family and size (`TextStyleKit`), sub/superscript, Typography, task lists, resizable images, tables, details (toggle sections), YouTube, emoji, invisible characters, UniqueID |
 | UI | Word-style ribbon as the whole top bar (title, quick access undo and redo; File, Home, Insert, Layout and View tabs; contextual Table and Code tabs; Share, theme, account and tours; collapsible; `lucide-react` icons), print and save as PDF, zoom (50–200%, page width, one page), bubble menu, floating "+" menu, slash commands, `@` mentions, `:` emoji picker, drag handle, syntax-highlighted code blocks (lowlight), file drop and paste for images, table of contents |
 | Content and API | Markdown import and export, HTML and JSON export, read-only mode, a local backup driven by `onUpdate` |
 | Custom extensions | `Callout` (node with a React node view and an input rule), `Spoiler` (mark with input and paste rules and Markdown support), `Shortcuts` (commands, keyboard shortcuts, `!today` and `!shrug`), `SlashCommand`, `Pagination` (pages from decorations, trimmed from [tiptap-pagination-plus](https://github.com/RomikMakavana/tiptap-pagination-plus), MIT) |
@@ -114,7 +116,7 @@ The steps below use `write.example.com` for the pilot's hostname, `write-pilot` 
    - **Copy the AUD tag**, the application's "Application Audience (AUD) Tag", and the **team domain**, `<team>.cloudflareaccess.com` (under Zero Trust **Settings**).
    - **Set the cookie's SameSite to Lax** in the application's cookie settings and leave HttpOnly on. The `CF_Authorization` cookie defaults to `None`, which lets other sites send it.
    - **Pick the session duration.** One week is a good default: people sign in about once a week. Write checks the JWT when a socket connects, and an Access JWT stays valid until the session ends. So when you remove someone from the policy, also revoke their session (Zero Trust → **My Team → Users**). Then run `sudo systemctl restart write-pilot` to close their open sockets.
-2. **Make a separate checkout.** The service can't see `/home`, so bun and Node (22.12 or later) go in `/usr/local/bin`. The service runs Vite on Node: under Bun's runtime, the collaboration server refuses to start. The checkout is yours. The `write-pilot` account only reads it.
+2. **Make a separate checkout.** The service can't see `/home`, so bun and Node (22.18 or later: the PDF page builder is a TypeScript worker thread Node runs as it is) go in `/usr/local/bin`. The service runs Vite on Node: under Bun's runtime, the collaboration server refuses to start. The checkout is yours. The `write-pilot` account only reads it.
    ```bash
    sudo install -m 755 "$(readlink -f "$(command -v bun)")" /usr/local/bin/bun
    sudo install -m 755 "$(readlink -f "$(command -v node)")" /usr/local/bin/node
@@ -124,6 +126,15 @@ The steps below use `write.example.com` for the pilot's hostname, `write-pilot` 
    cd /opt/write-pilot && bun install --frozen-lockfile && bun run build
    ```
    Don't put `.env` or `.env.local` files in this checkout, because `vite preview` reads them too.
+
+   **Download as PDF** needs Chromium's headless shell, the build this checkout's `playwright-core` expects. Install it outside `/home`, which the service can't see, plus the system libraries it needs (Debian and Ubuntu):
+   ```bash
+   sudo install -d -o "$USER" /opt/write-pilot-chromium
+   cd /opt/write-pilot && PLAYWRIGHT_BROWSERS_PATH=/opt/write-pilot-chromium ./node_modules/.bin/playwright-core install chromium-headless-shell
+   sudo ./node_modules/.bin/playwright-core install-deps chromium-headless-shell
+   ls /opt/write-pilot-chromium/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell
+   ```
+   The last line prints the path for `WRITE_PDF_CHROMIUM` in step 3. An upgrade that changes `playwright-core` names a new build: run the install again and update the path. Without Chromium the pilot still runs, and PDF downloads answer 503.
 3. **Fill in the env file.** Copy `deploy/pilot.env.example` and replace each `<...>` with your own values: the hostname, team domain, AUD tag and your email for `WRITE_OWNER_EMAIL`. The ports (4174 and 1235) and the data dirs (under `/var/lib/write-pilot`) can stay as they are. Leave `WRITE_ACCESS_CERTS_URL` and `WRITE_ALLOWED_ORIGINS` unset. Then check the file as the service user:
    ```bash
    sudo install -d -m 750 -g write-pilot /etc/write-pilot
@@ -136,6 +147,7 @@ The steps below use `write.example.com` for the pilot's hostname, `write-pilot` 
    - a collaboration port of 1234 or an app port of 5173 (the Dev server's);
    - a `WRITE_HOST` other than loopback, and a test-only `WRITE_ACCESS_CERTS_URL`;
    - data dirs that aren't writable;
+   - a missing `WRITE_PDF_CHROMIUM`, one the service user can't run, or one under `/home` (warnings: the pilot runs without PDF downloads);
    - a missing build, and `.env` files in the checkout.
 
    It exits 1 on any error. Until the first start, it warns that `/var/lib/write-pilot` doesn't exist yet; systemd creates it.
@@ -146,7 +158,7 @@ The steps below use `write.example.com` for the pilot's hostname, `write-pilot` 
    sudo systemctl daemon-reload
    sudo systemctl enable --now write-pilot
    ```
-   It is a system service with a dedicated account rather than a user service. It starts at boot without anyone logged in, and the sandbox only works under the system manager. The sandbox makes the whole file system read-only except `/var/lib/write-pilot`, hides `/home`, and gives the service a private `/tmp`. The service restarts on failure, and it gives up after five failed starts in two minutes, such as when a setting is missing. On stop it stores open documents before exiting. Logs go to journald.
+   It is a system service with a dedicated account rather than a user service. It starts at boot without anyone logged in, and the sandbox only works under the system manager. The sandbox makes the whole file system read-only except `/var/lib/write-pilot`, hides `/home`, and gives the service a private `/tmp`. Chromium runs inside it for PDF downloads, with its own sandbox off (see the comment in the unit). The service restarts on failure, and it gives up after five failed starts in two minutes, such as when a setting is missing. On stop it stores open documents before exiting. Logs go to journald.
 5. **Run `cloudflared` as a service.** Use a locally managed tunnel:
    ```bash
    cloudflared tunnel login
@@ -171,6 +183,7 @@ The steps below use `write.example.com` for the pilot's hostname, `write-pilot` 
      curl -I https://write.example.com/                                  # 302 to <team>.cloudflareaccess.com
      ```
    - In a browser, open `https://write.example.com`, sign in, check that the account menu shows your email, create a document and open it in a second browser to see both carets.
+   - Download a document as a PDF (`https://write.example.com/api/docs/<id>/pdf` while signed in): it has the Layout tab's paper and margins and "Page N of M", and `journalctl -u write-pilot` has an `{"audit":"export",...}` line. If the log says `PDF download is off`, fix `WRITE_PDF_CHROMIUM`.
    - `journalctl -u write-pilot -b` shows the startup line `[write] Access mode: every request needs a Cloudflare Access JWT for team <team>.cloudflareaccess.com; data in /var/lib/write-pilot/data, collaboration on 127.0.0.1:1235`. If it contains `WARNING: signing keys from`, a test certs URL is set: remove it. Audit lines (`{"audit":"auth_fail",...}`, `create`, `share`, ...) appear in the same log.
 7. **Back up, restore and upgrade.**
    - **Backups.** The server snapshots the data dir daily into `/var/lib/write-pilot/backups` and keeps 14 (see [Backups](#backups)). Those copies are on the same disk, so also copy them off the machine now and then, e.g. `sudo rsync -a /var/lib/write-pilot/backups/ <elsewhere>/`.
@@ -183,6 +196,16 @@ The steps below use `write.example.com` for the pilot's hostname, `write-pilot` 
 8. **Roll back.**
    - **A bad upgrade.** Check out the commit you noted, then `bun install --frozen-lockfile && bun run build && sudo systemctl restart write-pilot`. If the upgrade changed the data format (the release notes say so), stop the service and restore the `data-before-<commit>` copy first.
    - **Taking the pilot offline.** Run `sudo systemctl disable --now write-pilot cloudflared`. You can also remove the Access application or its DNS route. `/var/lib/write-pilot` stays on disk until you delete it, and the Dev server is unaffected.
+
+## Download as PDF: security
+
+The PDF is made from what collaborators typed, so the renderer treats the document as untrusted:
+
+- **What Chromium sees:** one HTML page built on the server (`server/pdf-html.ts`, in a worker thread) with the text escaped, links limited to http(s), mailto and tel, inline styles limited to a few typographic properties, and no element that loads anything. Images linked by URL and YouTube videos become a box with their address; only pasted (`data:`) images and the app's own `public/` images are in the page.
+- **What it can reach:** nothing. A fresh browser context per export with JavaScript off and offline, every request but `data:` URLs aborted, and a Content-Security-Policy on the page. It can't read the data dir through the page; it runs as the server's user, though, so on the pilot it runs inside the systemd unit's sandbox.
+- **Chromium's own sandbox:** used when the system allows it (it needs unprivileged user namespaces). Where it doesn't (Ubuntu 23.10+ blocks them with AppArmor by default, and the pilot's unit forbids them), Chromium runs without it and the server logs that once at startup. The remaining risk is a bug in Chromium's image or font decoding reached through a pasted image: the renderer would then run as the server's user, which can read and write every document. Stronger isolation would be a separate service for the renderer with no access to the data dir, or re-encoding pasted images before printing; neither is done yet.
+- **Limits:** 2 exports at a time and 8 waiting (`WRITE_PDF_MAX_CONCURRENT`, `WRITE_PDF_MAX_QUEUE`), 30 s each, waiting included (`WRITE_PDF_TIMEOUT_SECONDS`), and documents up to 5 MB (`WRITE_PDF_MAX_MB`). Building the page runs in a worker thread that is stopped at the deadline, so a heavy document never holds up the editor for everyone else. Code with an unknown language isn't guessed and large code blocks aren't highlighted; a formula over 4,000 characters, or one KaTeX can't render, prints as its LaTeX. A browser that stops responding is killed and started again.
+- **Keep Chromium current:** `playwright-core` is pinned, and each version expects one headless shell build. Once a month, and whenever Chrome has a security release, bump `playwright-core` (`bun add playwright-core@<version>`), run the install from step 2 again and update `WRITE_PDF_CHROMIUM` to the new build's path.
 
 ## Backups
 
@@ -207,6 +230,9 @@ server/collab.ts          Hocuspocus server, REST API and Vite plugin
 server/auth.ts            Identity: Access JWT verification, Dev mode cookie, Origin check
 server/config.ts          WRITE_* settings, read once in vite.config.ts
 server/audit.ts           Audit log lines
+server/pdf-html.ts        Download as PDF: the stored document as one self-contained HTML page (pdf.css)
+server/pdf.ts             Download as PDF: the queue, the page builder worker and headless Chromium
+server/pdf-worker.ts      Download as PDF: builds the page in a worker thread
 deploy/                   The pilot: systemd unit, env file, cloudflared config, pilot:check
 tests/                    bun test suites: unit tests and the real server in Dev and Access modes
 src/App.tsx               Router: library or document
@@ -219,8 +245,10 @@ src/store.ts              A tiny external store that React components can follow
 src/identity.ts           Caret label and colour from an email
 src/theme.ts              Theme choice (System, Light, Dark)
 src/editor/templates.ts   New-document templates
-src/editor/extensions.ts  Every extension and its configuration
+src/editor/schema.ts      The document schema (nodes, marks, attributes), shared with the PDF export
+src/editor/extensions.ts  Every extension and its configuration: the schema plus the interactive parts
 src/editor/extensions/    Custom extensions (Callout, Spoiler, Shortcuts, SlashCommand, Pagination)
+src/editor/paper.ts       Page setup values (paper sizes, margins), shared with the PDF export
 src/editor/page-setup.ts  Page setup (in the shared document) and Print or Web layout (per browser)
 src/editor/zoom.ts        Zoom (per browser): percentages and the page fits
 src/editor/blocks.tsx     Block insert actions shared by the slash menu, "+" menu and ribbon
@@ -237,4 +265,4 @@ src/tours.ts              Tutorial overlays (driver.js)
 - `bun run preview`: serve the build (collaboration included) in Access mode
 - `bun run pilot:check <env file>`: check the pilot's env file and checkout before starting it (see [Running the pilot](#running-the-pilot-access-mode))
 - `bun run lint`: oxlint
-- `bun run test`: the `bun test` suites. They start real servers on ports 5180/1240 (dev) and 4180/1241 (preview), each from a temporary copy of the project (its `node_modules` linked, not copied) with temporary data dirs (set `WRITE_TEST_TMP` to choose where). So they never change the checkout's files, restart a dev server running from it or touch its data, even though some tests restart their own server by touching its `vite.config.ts` and `.env` files. They need those four ports free. Access mode is tested against a local key server with tokens the tests sign
+- `bun run test`: the `bun test` suites. They start real servers on ports 5180/1240 (dev) and 4180/1241 (preview), each from a temporary copy of the project (its `node_modules` linked, not copied) with temporary data dirs (set `WRITE_TEST_TMP` to choose where). So they never change the checkout's files, restart a dev server running from it or touch its data, even though some tests restart their own server by touching its `vite.config.ts` and `.env` files. They need those four ports free. Access mode is tested against a local key server with tokens the tests sign. The PDF tests need the Chromium headless shell (skipped without it) and poppler's `pdfinfo` and `pdftotext` for the page geometry.
