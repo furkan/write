@@ -1,11 +1,15 @@
-import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, hide, offset, shift, type VirtualElement } from '@floating-ui/dom'
 import { ReactRenderer } from '@tiptap/react'
 import type { SuggestionKeyDownProps, SuggestionOptions, SuggestionProps } from '@tiptap/suggestion'
+import { getDocumentScroller } from '../scroller'
 import { SuggestionList, type SuggestionItem, type SuggestionListProps, type SuggestionListRef } from './SuggestionList'
 
 /**
  * Builds a Tiptap suggestion `render()` that shows <SuggestionList> in a popup
- * positioned at the caret with Floating UI.
+ * positioned at the caret with Floating UI. The caret is in the document's own scroller (the page
+ * is an app shell), so the reference names the editor as its context: `autoUpdate` then follows
+ * that scroller, and the popup stays inside it (off the ribbon and the status bar), hidden while
+ * the caret is scrolled out of view.
  */
 export function renderSuggestionList(emptyText?: string): SuggestionOptions<SuggestionItem>['render'] {
   return () => {
@@ -13,20 +17,22 @@ export function renderSuggestionList(emptyText?: string): SuggestionOptions<Sugg
     let clientRect: (() => DOMRect | null) | null | undefined
     let stopAutoUpdate: (() => void) | null = null
 
-    const reference = {
+    const reference: VirtualElement = {
       getBoundingClientRect: () => clientRect?.() ?? new DOMRect(),
     }
 
     const position = () => {
       if (!renderer) return
       const element = renderer.element as HTMLElement
+      const boundary = getDocumentScroller() ?? 'clippingAncestors'
       computePosition(reference, element, {
         placement: 'bottom-start',
         strategy: 'fixed',
-        middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 })],
-      }).then(({ x, y }) => {
+        middleware: [offset(6), flip({ padding: 8, boundary }), shift({ padding: 8, boundary }), hide({ boundary })],
+      }).then(({ x, y, middlewareData }) => {
         element.style.left = `${x}px`
         element.style.top = `${y}px`
+        element.style.visibility = middlewareData.hide?.referenceHidden ? 'hidden' : ''
       })
     }
 
@@ -47,6 +53,7 @@ export function renderSuggestionList(emptyText?: string): SuggestionOptions<Sugg
     return {
       onStart: (props) => {
         clientRect = props.clientRect
+        reference.contextElement = props.editor.view.dom
         renderer = new ReactRenderer(SuggestionList, { props: toListProps(props), editor: props.editor })
         const element = renderer.element as HTMLElement
         element.classList.add('suggestion-popup')

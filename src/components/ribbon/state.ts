@@ -2,7 +2,7 @@ import { readStorage, writeStorage } from '../../editor/storage'
 import { useCallback, useSyncExternalStore } from 'react'
 import { createStore, useStore } from '../../store'
 
-export type RibbonTab = 'home' | 'insert' | 'layout' | 'table' | 'code'
+export type RibbonTab = 'file' | 'home' | 'insert' | 'layout' | 'view' | 'table' | 'code'
 
 const COLLAPSED_KEY = 'write:ribbon-collapsed'
 
@@ -37,8 +37,8 @@ export function setCollapsed(collapsed: boolean) {
 
 export const closeFlyout = () => view.get().flyout && update({ flyout: false })
 
-/** For tours: show the Home tab's groups, over the document if the ribbon is collapsed. */
-export const revealHomeTab = () => update({ tab: 'home', flyout: view.get().collapsed })
+/** For tours: show a tab's groups (Home by default), over the document if the ribbon is collapsed. */
+export const revealTab = (tab: RibbonTab = 'home') => update({ tab, flyout: view.get().collapsed })
 
 /**
  * The colour each split button applies, for the rest of the page's life: module state, since the

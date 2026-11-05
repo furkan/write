@@ -194,6 +194,16 @@ function tallDecorations(doc: PMNode, positions: number[]): Decoration[] {
   })
 }
 
+/**
+ * How much the editor is drawn larger or smaller than its layout size: a CSS `zoom` or `transform`
+ * on it or an ancestor (the app's zoom). Client rects are scaled by it, while the page geometry is
+ * in layout pixels, so measurements are converted with it.
+ */
+function layoutScale(view: EditorView): number {
+  const width = view.dom.offsetWidth
+  return width ? view.dom.getBoundingClientRect().width / width || 1 : 1
+}
+
 /** The document position where `el` (a node's own DOM) starts, or -1. */
 function nodePos(view: EditorView, el: Element): number {
   const pos = view.posAtDOM(el, 0) - 1
@@ -244,8 +254,8 @@ function measurePages(view: EditorView, options: PaginationOptions, pageCount: n
   const dom = view.dom
   const last = dom.lastElementChild
   if (!last || last.classList.contains('pagination-pages')) return { needed: 1, overflow: 0 }
-  const top = dom.getBoundingClientRect().top + dom.clientTop
-  const bottom = last.getBoundingClientRect().bottom - top
+  const top = dom.getBoundingClientRect().top
+  const bottom = (last.getBoundingClientRect().bottom - top) / layoutScale(view)
   const content = contentHeight(options)
   const pitch = options.pageHeight + options.pageGap
   const endOfLastPage = (pageCount - 1) * pitch + options.marginTop + content
@@ -304,7 +314,8 @@ function paginationPlugin(initial: PaginationOptions): Plugin<PaginationState> {
         // Print CSS has no gap between pages, so the screen geometry doesn't apply while printing.
         if (!current?.options.enabled || view.isDestroyed || printing.matches) return
         const { options, pageCount } = current
-        const limit = contentHeight(options)
+        // A page's content height on screen, where client rects are measured.
+        const limit = contentHeight(options) * layoutScale(view)
 
         // A marked box that now fits on a page (stacked, so it fits unstacked too): unmark it.
         const untall = [...view.dom.querySelectorAll(`.${TALL_CLASS}`)]
