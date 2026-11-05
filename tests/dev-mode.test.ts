@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { watch, type FSWatcher } from 'node:fs'
 import { createServer, type Server } from 'node:net'
-import { rm, utimes, writeFile } from 'node:fs/promises'
+import { readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   api,
@@ -15,7 +15,9 @@ import {
   spawnServer,
   startServer,
   typeParagraph,
+  writeV1Fixture,
   type RunningServer,
+  type V1Fixture,
 } from './helpers.ts'
 
 describe('Dev mode', () => {
@@ -161,12 +163,31 @@ describe('Dev mode with a busy collaboration port', () => {
   })
   afterAll(() => new Promise<void>((done) => blocker.close(() => done())))
 
-  test('refuses to start and names WRITE_COLLAB_PORT', async () => {
-    const server = await spawnServer({ command: 'dev', ...DEV_PORTS })
-    const code = await exitCodeWithin(server)
-    expect(code).not.toBe('timeout')
-    expect(code).not.toBe(0)
-    expect(server.output()).toContain(`127.0.0.1:${DEV_PORTS.collabPort} is already in use`)
-    expect(server.output()).toContain('WRITE_COLLAB_PORT')
+  test('refuses to start and names WRITE_COLLAB_PORT, before migrating anything', async () => {
+    // An index from before ownership, as when pulling this change while an older server still
+    // holds the port: a start that can't succeed must leave it as it was.
+    let dataDir = ''
+    let fixture: V1Fixture | undefined
+    const server = await spawnServer({
+      command: 'dev',
+      ...DEV_PORTS,
+      seed: async (dir) => {
+        dataDir = dir
+        fixture = await writeV1Fixture(dir)
+      },
+    })
+    const backups = server.backupDir
+    const code = await Promise.race([server.exited, Bun.sleep(15_000).then(() => 'timeout' as const)])
+    try {
+      expect(code).not.toBe('timeout')
+      expect(code).not.toBe(0)
+      expect(server.output()).toContain(`127.0.0.1:${DEV_PORTS.collabPort} is already in use`)
+      expect(server.output()).toContain('WRITE_COLLAB_PORT')
+      expect(server.output()).not.toContain('"audit":"migration"')
+      expect(await readFile(join(dataDir, 'index.json'), 'utf8')).toBe(String(fixture?.indexText))
+      expect(await readdir(backups).catch(() => [])).toEqual([])
+    } finally {
+      await exitCodeWithin(server, 1000)
+    }
   }, 20_000)
 })

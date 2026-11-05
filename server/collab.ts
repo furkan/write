@@ -459,8 +459,12 @@ function presenceOwners() {
 async function startRuntime(config: WriteConfig): Promise<Runtime> {
   indexState.dirs = { data: config.dataDir, backups: config.backupDir }
   await mkdir(config.dataDir, { recursive: true })
-  await loadIndex(config)
   const authenticator = createAuthenticator(config.auth)
+  // The port is bound before the index is loaded (and maybe migrated), so a start that can't
+  // succeed changes nothing: e.g. an older server still holds the port after a `git pull`.
+  // Connections wait for the index meanwhile.
+  let indexLoaded = () => {}
+  const indexReady = new Promise<void>((done) => (indexLoaded = done))
   const presence = presenceOwners()
   // Hooks get the upgrade request but not its socket: remember which socket each request opened.
   const sockets = new WeakMap<Request, { close: (code: number, reason: string) => void }>()
@@ -478,6 +482,7 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
     // identity comes from the upgrade request's headers, which Vite's proxy passes through. This
     // check runs here, not in the proxy, because anything on this machine can reach 127.0.0.1.
     async onAuthenticate({ request, requestHeaders, documentName, connectionConfig }) {
+      await indexReady
       const header = fetchHeaders(requestHeaders)
       const identity = await identifyRequest(authenticator, header, {
         checkOrigin: true,
@@ -552,6 +557,13 @@ async function startRuntime(config: WriteConfig): Promise<Runtime> {
     return handleConnection(websocket, request, context)
   }
   await listen(server, config.collabPort)
+  try {
+    await loadIndex(config)
+  } catch (error) {
+    await server.destroy()
+    throw error
+  }
+  indexLoaded()
   const maintenance = startMaintenance(server)
   console.log(describeConfig(config))
   return { server, config, authenticator, maintenance }

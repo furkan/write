@@ -9,6 +9,8 @@ bun install
 bun dev
 ```
 
+Already running Write from before per-user access? Follow [Upgrading a Dev server](#upgrading-a-dev-server-from-before-per-user-access) first: stop `bun dev` before you pull.
+
 Open the URL Vite prints. The server listens on every interface, so other devices on your Tailscale network can use `http://<tailscale-ip>:5173` or `http://<machine>.<tailnet>.ts.net:5173`.
 
 `bun dev` runs in **Dev mode**: there is no sign-in, and you are `dev@localhost` (or `WRITE_DEV_USER`, or whoever the `write-dev-user` cookie names; the account menu's **Switch user…** sets that cookie, so you can try several users in one browser). `bun run preview` runs in **Access mode** (see [Running the pilot](#running-the-pilot-access-mode)). Settings are `WRITE_*` environment variables, all listed in [`.env.example`](.env.example); they can also go in a `.env.local` file. Both ports are fixed: if the app port or the collaboration port is taken, startup stops with an error instead of moving to another port.
@@ -64,7 +66,15 @@ Every `/api/*` request needs an identity (401 without one; 503 when Access's sig
 
 Titles live in the shared Yjs document (`meta.title`) and sync live. Each time the server persists a document, it also updates `index.json` in the data dir with the title, preview text and edit time. `index.json` (version 2) also holds each document's `owner` and `shares`, and the tombstones with their former owner. Trashed documents keep their file until they are deleted forever; the server checks hourly for ones older than 30 days.
 
-**Upgrading from an index without owners** (version 1): on first start, the server takes a backup snapshot, gives every document without an owner to the Legacy owner, `WRITE_OWNER_EMAIL`, and rewrites the index as version 2. In Dev mode `WRITE_OWNER_EMAIL` defaults to the dev identity (`WRITE_DEV_USER`, else `dev@localhost`); in Access mode the server refuses to start while ownerless documents exist and it is unset. `.ydoc` files with no index entry are left on disk and never served. When Vite restarts by itself (after `vite.config.ts`, a server file or an `.env` file changes), the collaboration server restarts with it: open documents are stored, the collaboration port is released and bound again with the new settings, and open tabs reconnect. Only the first restart after pulling this change needs a manual stop and start, because the server already running predates this behaviour.
+### Upgrading a Dev server from before per-user access
+
+That is, from an `index.json` without owners (version 1):
+
+1. **Stop `bun dev` before you pull.** If it is running, Vite restarts into the new code, which can't take the collaboration port from the old server: you get `server restart failed`, and open tabs reload and show "Write can't reach the server" until you restart. The new server binds the port before it touches your data, so nothing is migrated in that case.
+2. Pull, then run `bun install`: this change adds the `jose` dependency.
+3. Start `bun dev`. On this first start the server copies the data dir to a backup snapshot (in `.collab-backups/`, or `WRITE_BACKUP_DIR`), then gives every document without an owner to the Legacy owner, `WRITE_OWNER_EMAIL`, and rewrites the index as version 2. In Dev mode `WRITE_OWNER_EMAIL` defaults to the dev identity: `WRITE_DEV_USER`, else `dev@localhost`. So everything is owned by `dev@localhost` (or `WRITE_DEV_USER`), and you see it all as long as you are that user (**Switch user…** changes who you are). The log shows one `{"audit":"migration",...}` line with the snapshot's path. Documents in the Trash stay there with their dates, and old local backups (`write:backup:<id>`) are copied to the owner's own key the first time they open the document.
+
+In Access mode the server refuses to start while ownerless documents exist and `WRITE_OWNER_EMAIL` is unset. `.ydoc` files with no index entry are left on disk and never served. After this upgrade, when Vite restarts by itself (after `vite.config.ts`, a server file or an `.env` file changes), the collaboration server restarts with it: open documents are stored, the collaboration port is released and bound again with the new settings, and open tabs reconnect.
 
 ## Identity
 
