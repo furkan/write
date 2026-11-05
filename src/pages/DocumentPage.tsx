@@ -443,9 +443,19 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   useEffect(() => {
     let cancelled = false
     let lastCheck = 0
-    // The provider retries refused connections in a loop; check at most every 3 s.
+    let pending: number | undefined
+    // The provider retries refused connections in a loop; check at most every 3 s. A refusal
+    // within 3 s of the last check is checked when they are up, not dropped: a socket refused
+    // for this document stays open without retrying, so there may be no later event.
     const onRefused = () => {
-      if (Date.now() - lastCheck < 3000) return
+      const wait = lastCheck + 3000 - Date.now()
+      if (wait > 0) {
+        pending ??= window.setTimeout(() => {
+          pending = undefined
+          onRefused()
+        }, wait)
+        return
+      }
       lastCheck = Date.now()
       void probeSession(me.email).then(async (result) => {
         if (cancelled || result !== 'ok') return
@@ -457,6 +467,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     provider.on('authenticationFailed', onRefused)
     return () => {
       cancelled = true
+      window.clearTimeout(pending)
       provider.off('close', onRefused)
       provider.off('authenticationFailed', onRefused)
     }
