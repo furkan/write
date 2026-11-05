@@ -204,7 +204,7 @@ export const TOURS: Record<TourId, Tour> = {
         tab: 'file',
         popover: {
           title: 'Print or save as PDF',
-          description: `<b>File → Print / PDF</b> (or ${k(`${mod}+P`)}) opens the browser’s print dialog; choose <b>Save as PDF</b> there for a PDF. You always get the pages with their page numbers at 100%, even from Web layout or zoomed in.`,
+          description: `<b>File → Print / PDF</b> (or ${k(`${mod}+P`)}) opens the browser’s print dialog; choose <b>Save as PDF</b> there for a PDF. The paper size and margins come from the <b>Layout</b> tab, in either layout and at any zoom.`,
           side: 'bottom',
         },
       },
