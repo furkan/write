@@ -1,0 +1,115 @@
+/* ---------- Print layout: pages on a canvas (see editor/extensions/pagination) ---------- */
+
+.app.layout-print {
+  background: var(--canvas);
+}
+
+/* Wide enough for the page; a page wider than the window (landscape) scrolls sideways, like Word. */
+.layout-print .workspace,
+.layout-print.no-sidebar .workspace {
+  grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr) 320px;
+  max-width: none;
+}
+
+.layout-print.no-sidebar .workspace {
+  grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
+}
+
+@media (max-width: 1000px) {
+  .layout-print .workspace {
+    grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
+  }
+}
+
+.layout-print .editor-shell {
+  padding: 16px 24px 120px;
+}
+
+/* Menu section labels (the temporary page setup in the View menu). */
+.menu-label {
+  padding: 6px 10px 2px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---------- Printing: only the document, on sheets that match its page setup ---------- */
+
+@media print {
+  /* Paper is white whatever the theme. Specific enough to beat both dark theme rules. */
+  :root:not([data-print-a]):not([data-print-b]) {
+    --text: #1f1d24;
+    --muted: #6b6375;
+    --bg: #ffffff;
+    --surface: #f6f5f8;
+    --surface-2: #eeedf2;
+    --border: #e5e4e7;
+    --accent: #7c3aed;
+    --accent-bg: rgba(124, 58, 237, 0.12);
+    --code-bg: #f4f3ec;
+    --danger: #dc2626;
+    --success: #16a34a;
+    --warning: #ca8a04;
+    --info: #2563eb;
+    --hl-keyword: #7c3aed;
+    --hl-string: #15803d;
+    --hl-number: #c2410c;
+    --hl-title: #2563eb;
+    --hl-type: #b45309;
+    --paper: #ffffff;
+    --canvas: #ffffff;
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  .app,
+  .app.layout-print {
+    min-height: 0;
+    background: #ffffff;
+  }
+
+  /* Everything but the document: header, banners, ribbon, sidebar, status bar, menus, tours. */
+  .app > :not(.workspace),
+  .workspace > :not(.main),
+  .main > :not(.editor-shell),
+  .editor-shell > :not(.editor),
+  .editor > :not(.tiptap),
+  .driver-popover,
+  .driver-overlay,
+  .collaboration-carets__caret,
+  .collaboration-carets__label {
+    display: none !important;
+  }
+
+  .workspace,
+  .layout-print .workspace {
+    display: block;
+    max-width: none;
+    padding: 0;
+  }
+
+  .editor-shell,
+  .layout-print .editor-shell {
+    padding: 0;
+  }
+
+  .editor .tiptap {
+    min-height: 0;
+  }
+
+  /* No placeholders, focus dimming or selection on paper. */
+  .tiptap .is-empty::before {
+    content: none !important;
+  }
+
+  .focus-mode .tiptap > * {
+    opacity: 1 !important;
+  }
+
+  .tiptap ::selection {
+    background: transparent;
+  }
+}

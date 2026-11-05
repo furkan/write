@@ -27,6 +27,7 @@ import { common, createLowlight } from 'lowlight'
 import { presenceLabel } from '../identity'
 import type { CollabUser, Session } from './collab'
 import { Callout } from './extensions/callout'
+import { Pagination, type PaginationOptions } from './extensions/pagination/Pagination'
 import { Shortcuts } from './extensions/shortcuts'
 import { SlashCommand } from './extensions/slash-command'
 import { Spoiler } from './extensions/spoiler'
@@ -100,9 +101,11 @@ type Options = {
   onSave: (editor: Editor) => void
   getEditor: () => Editor | null
   onTableOfContents: (data: TableOfContentData) => void
+  /** Initial page layout; it changes later through `setPagination`. */
+  pagination: PaginationOptions
 }
 
-export function buildExtensions({ session, user, onSave, getEditor, onTableOfContents }: Options): Extensions {
+export function buildExtensions({ session, user, onSave, getEditor, onTableOfContents, pagination }: Options): Extensions {
   return [
     StarterKit.configure({
       // Yjs has its own history; the regular undo/redo would fight it.
@@ -184,6 +187,7 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
     Callout,
     Spoiler,
     Shortcuts.configure({ onSave }),
+    Pagination.configure(pagination),
 
     // Bigger lifts
     Mathematics.configure({

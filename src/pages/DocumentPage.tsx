@@ -2,7 +2,7 @@ import 'katex/dist/katex.min.css'
 import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { EditorContent, useEditor, type Editor } from '@tiptap/react'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { getDocStatus, libraryUrl, probeSession, restoreOrConfirmOpen, trashUrl, type DocStatus, type Role } from '../api'
 import { ClosedPage } from '../components/ClosedPage'
 import { EditorMenus } from '../components/EditorMenus'
@@ -15,9 +15,11 @@ import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
 import { buildExtensions } from '../editor/extensions'
 import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRetrying } from '../editor/hooks'
+import { pageGeometry, pageRule, useLayoutMode, useNarrowScreen, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
 import { accountAction, setSessionExpired, useMe } from '../session'
 import { autoStartTour, setTourContext, startTour } from '../tours'
+import '../layout.css'
 
 /** How long to wait for the collaboration server before opening the editor offline. */
 const SYNC_TIMEOUT_MS = 4000
@@ -284,6 +286,23 @@ function SyncedDocument({ name, templateId, access }: DocumentPageProps & { acce
   return <Workspace session={session} template={role === 'owner' ? template : undefined} role={role} />
 }
 
+/** Space between pages in Print layout. */
+const PAGE_GAP = 24
+
+/**
+ * The `@page` rule for printing, kept in a <style> element of its own: the sheet size and
+ * margins follow the document's page setup.
+ */
+function usePrintPageRule(rule: string) {
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.dataset.pageRule = ''
+    style.textContent = rule
+    document.head.append(style)
+    return () => style.remove()
+  }, [rule])
+}
+
 type WorkspaceProps = { session: Session; template: Template | undefined; role: Role | null }
 
 function Workspace({ session, template, role }: WorkspaceProps) {
@@ -300,6 +319,14 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     focusMode: false,
     sidebar: true,
   })
+
+  // Print layout shows pages; Web layout, or a screen too narrow for a page, one continuous page.
+  const pageSetup = usePageSetup(session)
+  const layoutMode = useLayoutMode()
+  const narrow = useNarrowScreen()
+  const paged = layoutMode === 'print' && !narrow
+  const pagination = useMemo(() => ({ enabled: paged, pageGap: PAGE_GAP, ...pageGeometry(pageSetup) }), [paged, pageSetup])
+  usePrintPageRule(pageRule(pageSetup, paged))
 
   const editorRef = useRef<Editor | null>(null)
   const backupTimer = useRef<number | undefined>(undefined)
@@ -331,6 +358,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
       onSave: backup,
       getEditor,
       onTableOfContents: (data) => queueMicrotask(() => setToc(data)),
+      pagination,
     })
     // A brand-new document opened from a template gets its content written to Yjs
     // before the editor binds to it.
@@ -369,6 +397,11 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   useEffect(() => {
     editor.commands.showInvisibleCharacters(view.invisibles)
   }, [editor, view.invisibles])
+
+  // Before paint, so switching layouts or page sizes doesn't flash the old one.
+  useLayoutEffect(() => {
+    editor.commands.setPagination(pagination)
+  }, [editor, pagination])
 
   // Tutorial overlays: auto-start once, and `?` replays the welcome tour. They describe what
   // this user can do here.
@@ -474,12 +507,18 @@ function Workspace({ session, template, role }: WorkspaceProps) {
 
   const reconnect = useCallback(() => resume(session), [session])
 
-  const classes = ['app', view.focusMode && 'focus-mode', readOnly && 'read-only', !view.sidebar && 'no-sidebar']
+  const classes = [
+    'app',
+    view.focusMode && 'focus-mode',
+    readOnly && 'read-only',
+    !view.sidebar && 'no-sidebar',
+    paged && 'layout-print',
+  ]
     .filter(Boolean)
     .join(' ')
 
   return (
-    <div className={classes}>
+    <div className={classes} style={{ '--layout-page-width': `${pagination.pageWidth}px` } as CSSProperties}>
       <Header
         editor={editor}
         session={session}
