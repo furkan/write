@@ -46,7 +46,7 @@ export function DocumentTitle({ session }: { session: Session }) {
         <span className="logo" aria-hidden>
           ✍️
         </span>
-        <span className="visually-hidden">All documents</span>
+        <span className="sr-only">All documents</span>
       </a>
       <TitleField session={session} readOnly={view.readOnly} />
       {/* On a phone the status bar's own badge says it. */}

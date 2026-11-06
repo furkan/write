@@ -126,15 +126,6 @@ html:has(.doc-shell) body {
   color: var(--muted);
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
 .danger-text {
   color: var(--danger);
 }
@@ -1024,12 +1015,12 @@ html:has(.doc-shell) body {
 /* Text colours are stored as fixed values (picked for white paper), so lift them on dark paper to
    keep them readable (4.5:1) in the same hue. Print is always light. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .tiptap [style*='color:']:not([style*='background']) {
+  :root:not([data-theme='light']) .tiptap span[style*='color:']:not([style*='background']):not(.collaboration-carets__caret) {
     filter: brightness(1.5);
   }
 }
 
-:root[data-theme='dark'] .tiptap [style*='color:']:not([style*='background']) {
+:root[data-theme='dark'] .tiptap span[style*='color:']:not([style*='background']):not(.collaboration-carets__caret) {
   filter: brightness(1.5);
 }
 
@@ -1688,4 +1679,34 @@ html:has(.doc-shell) body {
 
 .doc-toast-close:hover {
   background: color-mix(in srgb, var(--bg) 18%, transparent);
+}
+
+/* Alt text field in the image bubble menu. Enter on a selected image focuses it. */
+.image-alt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.image-alt input {
+  width: 220px;
+  max-width: 60vw;
+  height: 28px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+@media (pointer: coarse) {
+  .image-alt input {
+    height: 44px;
+    font-size: 1rem;
+  }
 }
