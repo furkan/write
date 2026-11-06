@@ -83,13 +83,15 @@ class LoadErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
   render() {
     if (!this.state.failed) return this.props.children
     return (
-      <div className="loading deleted" role="alert">
-        <p className="deleted-title">Write couldn’t load.</p>
-        <p className="muted">Check your connection, then reload the page.</p>
-        <button type="button" className="primary-button" onClick={() => window.location.reload()}>
-          Reload
-        </button>
-      </div>
+      <main>
+        <div className="loading deleted" role="alert">
+          <h1 className="deleted-title">Write couldn’t load.</h1>
+          <p className="muted">Check your connection, then reload the page.</p>
+          <button type="button" className="primary-button" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </div>
+      </main>
     )
   }
 }

@@ -24,6 +24,7 @@ import { ThemeToggle } from '../components/ThemeToggle'
 import { readStorage, writeStorage } from '../editor/storage'
 import { TEMPLATES, type Template } from '../editor/templates'
 import { useMe } from '../session'
+import { usePauseOnInteraction } from '../toast'
 import { autoStartTour, setTourContext, startTour, toursFor } from '../tours'
 import './library.css'
 
@@ -124,6 +125,7 @@ export function Library() {
   const [sharing, setSharing] = useState<string | null>(null)
   const [toast, setToastState] = useState<Toast | null>(null)
   const setToast = (text: string, undo?: DocMeta) => setToastState({ text, undo })
+  const dismissToast = useCallback(() => setToastState(null), [])
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Bumped to reload the lists now, e.g. after signing in again.
@@ -199,13 +201,6 @@ export function Library() {
     if (!loaded) return
     return autoStartTour('library', 500)
   }, [loaded])
-
-  useEffect(() => {
-    if (!toast) return
-    // Leave time to reach an "Undo" button.
-    const timer = window.setTimeout(() => setToastState(null), toast.undo ? 8000 : 3000)
-    return () => window.clearTimeout(timer)
-  }, [toast])
 
   // One search and one sort for both sections.
   const [mine, shared] = useMemo(() => {
@@ -392,199 +387,205 @@ export function Library() {
       </header>
       <SessionBanner onSignedIn={reloadNow} />
 
-      {section === 'docs' && (
-        <section className="templates-band" aria-labelledby="templates-title">
-          <div className="library-inner">
-            <h2 id="templates-title" className="section-title">
-              Start a new document
-            </h2>
-            <div className="templates" data-tour="templates">
-              {TEMPLATES.map((template) => (
-                <button
-                  key={template.id}
-                  type="button"
-                  className="template"
-                  disabled={busy !== null}
-                  onClick={() => void startFromTemplate(template)}
-                >
-                  <span className={`page-thumb${template.id === 'blank' ? ' blank' : ''}`} aria-hidden>
-                    {template.id === 'blank' ? (
-                      <span className="plus">＋</span>
-                    ) : (
-                      template.thumbnail.map((line, i) => (
-                        <span key={i} className={i === 0 ? 'thumb-title' : 'thumb-line'}>
-                          {line}
-                        </span>
-                      ))
-                    )}
-                    {busy === template.id && <span className="spinner thumb-spinner" />}
-                  </span>
-                  <span className="template-name">{template.name}</span>
-                  <span className="template-desc muted small">{template.description}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {section === 'trash' ? (
-        <main className="library-inner docs-section trash-section">
-          <div className="docs-toolbar">
-            <div className="trash-heading">
-              <button type="button" className="back-button" onClick={() => goTo('docs')}>
-                ← Documents
-              </button>
-              <h2 className="section-title">{query ? `Trash results for “${query}”` : 'Trash'}</h2>
-            </div>
-            <button
-              type="button"
-              className="secondary-button danger-text"
-              disabled={trashCount === 0}
-              onClick={() => void empty()}
-            >
-              Empty trash
-            </button>
-          </div>
-          <p className="trash-note muted small">
-            Documents in the trash are deleted forever after {retentionDays} days. Daily backups are kept on the server
-            too.
-          </p>
-          {error && trash === null ? (
-            <p className="empty">Couldn’t reach the server. Is `bun dev` running?</p>
-          ) : trash === null ? (
-            <div className="loading inline" role="status">
-              <span className="spinner" aria-hidden /> Loading the trash…
-            </div>
-          ) : visibleTrash.length === 0 ? (
-            <div className="empty">
-              {query ? (
-                <p>Nothing in the trash matches “{query}”.</p>
-              ) : (
-                <>
-                  <p className="empty-title">The trash is empty</p>
-                  <p className="muted">Documents you delete stay here for {retentionDays} days.</p>
-                </>
-              )}
-            </div>
-          ) : (
-            <ul className="docs list trash-list">
-              {visibleTrash.map((doc) => (
-                <li key={doc.id} className="doc-row">
-                  <span className="doc-icon" aria-hidden>
-                    ▤
-                  </span>
-                  <div className="doc-row-main">
-                    <span className="doc-title">{displayTitle(doc)}</span>
-                    <span className="doc-snippet muted small">{doc.preview || 'Empty document'}</span>
-                    <span className="trash-dates small">
-                      <time dateTime={new Date(doc.trashedAt).toISOString()}>Trashed {relativeTime(doc.trashedAt)}</time>
-                      {' · '}deleted forever {timeUntil(doc.purgeAt)}
+      <main>
+        <h1 className="sr-only">{section === 'trash' ? 'Your trash' : 'Your documents'}</h1>
+        {section === 'docs' && (
+          <section className="templates-band" aria-labelledby="templates-title">
+            <div className="library-inner">
+              <h2 id="templates-title" className="section-title">
+                Start a new document
+              </h2>
+              <div className="templates" data-tour="templates">
+                {TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className="template"
+                    disabled={busy !== null}
+                    onClick={() => void startFromTemplate(template)}
+                  >
+                    <span className={`page-thumb${template.id === 'blank' ? ' blank' : ''}`} aria-hidden>
+                      {template.id === 'blank' ? (
+                        <span className="plus">＋</span>
+                      ) : (
+                        template.thumbnail.map((line, i) => (
+                          <span key={i} className={i === 0 ? 'thumb-title' : 'thumb-line'}>
+                            {line}
+                          </span>
+                        ))
+                      )}
+                      {busy === template.id && <span className="spinner thumb-spinner" />}
                     </span>
-                  </div>
-                  <div className="trash-actions">
-                    <button type="button" className="secondary-button" onClick={() => void restore(doc)}>
-                      Restore
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-danger-button"
-                      title={`Delete “${displayTitle(doc)}” forever`}
-                      aria-label={`Delete “${displayTitle(doc)}” forever`}
-                      onClick={() => void removeForever(doc)}
-                    >
-                      Delete forever
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </main>
-      ) : (
-        <main className="library-inner docs-section">
-          <div className="docs-toolbar">
-            <h2 className="section-title">{query ? `Results for “${query}”` : 'Documents'}</h2>
-            <div className="docs-controls">
-              <label className="sort">
-                <span className="visually-hidden">Sort by</span>
-                <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort documents">
-                  <option value="updated">Last edited</option>
-                  <option value="created">Date created</option>
-                  <option value="title">Title</option>
-                </select>
-              </label>
-              <div className="view-toggle" role="group" aria-label="Layout">
-                <button
-                  type="button"
-                  aria-pressed={view === 'grid'}
-                  title="Grid view"
-                  onClick={() => setView('grid')}
-                >
-                  ▦
+                    <span className="template-name">{template.name}</span>
+                    <span className="template-desc muted small">{template.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {section === 'trash' ? (
+          <div className="library-inner docs-section trash-section">
+            <div className="docs-toolbar">
+              <div className="trash-heading">
+                <button type="button" className="back-button" onClick={() => goTo('docs')}>
+                  ← Documents
                 </button>
-                <button
-                  type="button"
-                  aria-pressed={view === 'list'}
-                  title="List view"
-                  onClick={() => setView('list')}
-                >
-                  ☰
+                <h2 className="section-title">{query ? `Trash results for “${query}”` : 'Trash'}</h2>
+              </div>
+              <button
+                type="button"
+                className="secondary-button danger-text"
+                disabled={trashCount === 0}
+                onClick={() => void empty()}
+              >
+                Empty trash
+              </button>
+            </div>
+            <p className="trash-note muted small">
+              Documents in the trash are deleted forever after {retentionDays} days. Daily backups are kept on the server
+              too.
+            </p>
+            {error && trash === null ? (
+              <p className="empty">Couldn’t reach the server. Is `bun dev` running?</p>
+            ) : trash === null ? (
+              <div className="loading inline" role="status">
+                <span className="spinner" aria-hidden /> Loading the trash…
+              </div>
+            ) : visibleTrash.length === 0 ? (
+              <div className="empty">
+                {query ? (
+                  <p>Nothing in the trash matches “{query}”.</p>
+                ) : (
+                  <>
+                    <p className="empty-title">The trash is empty</p>
+                    <p className="muted">Documents you delete stay here for {retentionDays} days.</p>
+                  </>
+                )}
+              </div>
+            ) : (
+              <ul className="docs list trash-list">
+                {visibleTrash.map((doc) => (
+                  <li key={doc.id} className="doc-row">
+                    <span className="doc-icon" aria-hidden>
+                      ▤
+                    </span>
+                    <div className="doc-row-main">
+                      <span className="doc-title">{displayTitle(doc)}</span>
+                      <span className="doc-snippet muted small">{doc.preview || 'Empty document'}</span>
+                      <span className="trash-dates small">
+                        <time dateTime={new Date(doc.trashedAt).toISOString()}>Trashed {relativeTime(doc.trashedAt)}</time>
+                        {' · '}deleted forever {timeUntil(doc.purgeAt)}
+                      </span>
+                    </div>
+                    <div className="trash-actions">
+                      <button type="button" className="secondary-button" onClick={() => void restore(doc)}>
+                        Restore
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-danger-button"
+                        title={`Delete “${displayTitle(doc)}” forever`}
+                        aria-label={`Delete “${displayTitle(doc)}” forever`}
+                        onClick={() => void removeForever(doc)}
+                      >
+                        Delete forever
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <div className="library-inner docs-section">
+            <div className="docs-toolbar">
+              <h2 className="section-title">{query ? `Results for “${query}”` : 'Documents'}</h2>
+              <div className="docs-controls">
+                <label className="sort">
+                  <span className="visually-hidden">Sort by</span>
+                  <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort documents">
+                    <option value="updated">Last edited</option>
+                    <option value="created">Date created</option>
+                    <option value="title">Title</option>
+                  </select>
+                </label>
+                <div className="view-toggle" role="group" aria-label="Layout">
+                  <button
+                    type="button"
+                    aria-pressed={view === 'grid'}
+                    aria-label="Grid view"
+                    title="Grid view"
+                    onClick={() => setView('grid')}
+                  >
+                    <span aria-hidden>▦</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={view === 'list'}
+                    aria-label="List view"
+                    title="List view"
+                    onClick={() => setView('list')}
+                  >
+                    <span aria-hidden>☰</span>
+                  </button>
+                </div>
+                <button type="button" className="trash-button" data-tour="trash" onClick={() => goTo('trash')}>
+                  <TrashIcon />
+                  Trash
+                  {trashCount > 0 && <span className="count">{trashCount}</span>}
                 </button>
               </div>
-              <button type="button" className="trash-button" data-tour="trash" onClick={() => goTo('trash')}>
-                <TrashIcon />
-                Trash
-                {trashCount > 0 && <span className="count">{trashCount}</span>}
-              </button>
             </div>
-          </div>
 
-          {error && docs === null ? (
-            <p className="empty">Couldn’t reach the server. Is `bun dev` running?</p>
-          ) : docs === null ? (
-            <div className="loading inline" role="status">
-              <span className="spinner" aria-hidden /> Loading documents…
-            </div>
-          ) : query && mine.length === 0 && shared.length === 0 ? (
-            <div className="empty">
-              <p>No documents match “{query}”.</p>
-            </div>
-          ) : (
-            <div className="doc-groups" data-tour="doc-list">
-              {(!query || mine.length > 0) && (
-                <section className="doc-group" aria-labelledby="mine-title">
-                  <h3 id="mine-title" className="doc-group-title">
-                    My documents {mine.length > 0 && <span className="count">{mine.length}</span>}
-                  </h3>
-                  {mine.length === 0 ? (
-                    <div className="empty">
-                      <p className="empty-title">No documents yet</p>
-                      <p className="muted">Pick a template above to create your first one.</p>
-                    </div>
-                  ) : (
-                    renderDocs(mine, true)
-                  )}
-                </section>
-              )}
-              {(!query || shared.length > 0) && (
-                <section className="doc-group" aria-labelledby="shared-title" data-tour="shared">
-                  <h3 id="shared-title" className="doc-group-title">
-                    Shared with me {shared.length > 0 && <span className="count">{shared.length}</span>}
-                  </h3>
-                  {hasShared ? (
-                    renderDocs(shared, mine.length === 0)
-                  ) : (
-                    <p className="muted small shared-empty">
-                      Nothing yet. When someone shares a document with {me.email}, it appears here.
-                    </p>
-                  )}
-                </section>
-              )}
-            </div>
-          )}
-        </main>
-      )}
+            {error && docs === null ? (
+              <p className="empty">Couldn’t reach the server. Is `bun dev` running?</p>
+            ) : docs === null ? (
+              <div className="loading inline" role="status">
+                <span className="spinner" aria-hidden /> Loading documents…
+              </div>
+            ) : query && mine.length === 0 && shared.length === 0 ? (
+              <div className="empty">
+                <p>No documents match “{query}”.</p>
+              </div>
+            ) : (
+              <div className="doc-groups" data-tour="doc-list">
+                {(!query || mine.length > 0) && (
+                  <section className="doc-group" aria-labelledby="mine-title">
+                    <h3 id="mine-title" className="doc-group-title">
+                      My documents {mine.length > 0 && <span className="count">{mine.length}</span>}
+                    </h3>
+                    {mine.length === 0 ? (
+                      <div className="empty">
+                        <p className="empty-title">No documents yet</p>
+                        <p className="muted">Pick a template above to create your first one.</p>
+                      </div>
+                    ) : (
+                      renderDocs(mine, true)
+                    )}
+                  </section>
+                )}
+                {(!query || shared.length > 0) && (
+                  <section className="doc-group" aria-labelledby="shared-title" data-tour="shared">
+                    <h3 id="shared-title" className="doc-group-title">
+                      Shared with me {shared.length > 0 && <span className="count">{shared.length}</span>}
+                    </h3>
+                    {hasShared ? (
+                      renderDocs(shared, mine.length === 0)
+                    ) : (
+                      <p className="muted small shared-empty">
+                        Nothing yet. When someone shares a document with {me.email}, it appears here.
+                      </p>
+                    )}
+                  </section>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+      </main>
 
       {sharing && (
         <ShareDialog
@@ -594,23 +595,44 @@ export function Library() {
         />
       )}
 
+      {/* Mounted once, so a screen reader announces the text when it changes. */}
+      <div className="sr-only" role="status">
+        {toast?.text ?? ''}
+      </div>
       {toast && (
-        <div className="toast" role="status">
-          <span>{toast.text}</span>
-          {toast.undo && (
-            <button
-              type="button"
-              className="toast-action"
-              onClick={() => {
-                const { undo } = toast
-                setToastState(null)
-                if (undo) void restore(undo, 'Moved back to your documents.')
-              }}
-            >
-              Undo
-            </button>
-          )}
-        </div>
+        <LibraryToast
+          toast={toast}
+          onDismiss={dismissToast}
+          onUndo={(undo) => void restore(undo, 'Moved back to your documents.')}
+        />
+      )}
+    </div>
+  )
+}
+
+function LibraryToast({ toast, onDismiss, onUndo }: { toast: Toast; onDismiss: () => void; onUndo: (doc: DocMeta) => void }) {
+  // Own component so the pause state goes with the toast. Leave time to reach an "Undo" button.
+  const { paused, props } = usePauseOnInteraction()
+  useEffect(() => {
+    if (paused) return
+    const timer = window.setTimeout(onDismiss, toast.undo ? 8000 : 3000)
+    return () => window.clearTimeout(timer)
+  }, [toast, paused, onDismiss])
+  const { undo } = toast
+  return (
+    <div className="toast" {...props}>
+      <span>{toast.text}</span>
+      {undo && (
+        <button
+          type="button"
+          className="toast-action"
+          onClick={() => {
+            onDismiss()
+            onUndo(undo)
+          }}
+        >
+          Undo
+        </button>
       )}
     </div>
   )
@@ -662,7 +684,8 @@ function DocItem(props: DocItemProps) {
   const sharing = isOwner ? (
     shareCount > 0 && (
       <span className="doc-shared muted small" title={`Shared with ${shareCount} ${shareCount === 1 ? 'person' : 'people'}`}>
-        <PeopleIcon /> {shareCount}
+        <PeopleIcon /> <span aria-hidden>{shareCount}</span>
+        <span className="sr-only">Shared with {shareCount} {shareCount === 1 ? 'person' : 'people'}</span>
       </span>
     )
   ) : (

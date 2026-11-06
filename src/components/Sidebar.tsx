@@ -19,7 +19,8 @@ function TableOfContents({ editor, toc }: { editor: Editor; toc: TableOfContentD
     // The element in the TOC data can be stale after re-renders; look up the live one.
     const live = editor.view.nodeDOM(pos)
     const target = live instanceof HTMLElement && live.isConnected ? live : fallback
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    target.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
   }
 
   return (

@@ -71,10 +71,14 @@ function Avatars({ presence, max }: { presence: Presence[]; max: number }) {
           style={{ background: person.color }}
           title={`${person.email || person.name}${person.self ? ' (you)' : ''}`}
         >
-          {initialOf(person.name)}
+          <span aria-hidden>{initialOf(person.name)}</span>
+          <span className="sr-only">{`${person.name && person.email && person.name !== person.email ? `${person.name} (${person.email})` : person.name || person.email}${person.self ? ' (you)' : ''}`}</span>
         </span>
       ))}
-      {extra > 0 && <span className="avatar more">+{extra}</span>}
+      {extra > 0 && <span className="avatar more">
+          <span aria-hidden>+{extra}</span>
+          <span className="sr-only">{`and ${extra} more`}</span>
+        </span>}
     </>
   )
 }
