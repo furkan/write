@@ -759,6 +759,13 @@ html:has(.doc-shell) body {
   margin: 0;
 }
 
+/* Word's contextual spacing: no space between list items, nested lists included; the list as a
+   whole keeps the 8pt after it. */
+.tiptap li :is(ul, ol),
+.tiptap li > p {
+  margin: 0;
+}
+
 .tiptap :is(blockquote, [data-type='detailsContent']) > :last-child {
   margin-bottom: 0;
 }
@@ -874,9 +881,15 @@ html:has(.doc-shell) body {
   user-select: none;
 }
 
+.tiptap ul[data-type='taskList'] li > label {
+  /* No taller than the text line, so every item is one line high (the checkbox's own margins and line box made it 22px). */
+  line-height: 0;
+}
+
 .tiptap ul[data-type='taskList'] li > label input {
   width: 1em;
   height: 1em;
+  margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
 }

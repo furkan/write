@@ -165,6 +165,24 @@ describe('PDF page (HTML)', () => {
     expect(html).toContain('@page { @bottom-center { content: "Page " counter(page) " of " counter(pages);')
   })
 
+  test('paragraph spacing and indents become inline styles, and stay out of the way when unset', () => {
+    const para = (value: string, attrs: Record<string, unknown> = {}) => ({ type: 'paragraph', attrs, content: [{ type: 'text', text: value }] })
+    const { html } = documentPage(
+      docState({
+        type: 'doc',
+        content: [
+          para('Spaced', { lineHeight: 1.5, spaceBefore: 6, spaceAfter: 12, indentLeft: 36, indentFirstLine: -18 }),
+          { type: 'heading', attrs: { level: 2, indentLeft: 18, indentRight: 9 }, content: [{ type: 'text', text: 'Heading' }] },
+          para('Plain'),
+        ],
+      }),
+    )
+    const body = html.slice(html.indexOf('<body>'))
+    for (const style of ['line-height: 1.5', 'margin-top: 6pt', 'margin-bottom: 12pt', 'margin-left: 36pt', 'text-indent: -18pt']) expect(body).toContain(style)
+    expect(body).toMatch(/<h2[^>]*style="[^"]*margin-left: 18pt[^"]*margin-right: 9pt/)
+    expect(body).toContain('<p>Plain</p>')
+  })
+
   test('an empty or unknown document is an empty page', () => {
     expect(documentPage(null).html).toContain('<main class="tiptap"></main>')
   })
@@ -244,6 +262,42 @@ describe('PDF page (HTML)', () => {
 
 describe.skipIf(!CHROMIUM)('PDF renderer', () => {
   const settings = { chromium: CHROMIUM, maxConcurrent: 2, maxQueue: 8, timeoutMs: 30_000, maxBytes: 1e8 }
+
+  test.skipIf(!POPPLER)('paragraph spacing, line spacing and indents reach the PDF', async () => {
+    const para = (value: string, attrs: Record<string, unknown> = {}) => ({ type: 'paragraph', attrs, content: [{ type: 'text', text: value }] })
+    const long = Array.from({ length: 80 }, (_, i) => `w${i}`).join(' ')
+    const renderer = createPdfRenderer(settings)
+    try {
+      const { pdf } = await renderer.exportDocument(
+        docState({
+          type: 'doc',
+          content: [
+            para('Alpha', { spaceAfter: 0 }),
+            para('Bravo', { spaceAfter: 0 }),
+            para('Charlie', { spaceBefore: 50, spaceAfter: 0 }),
+            para(long, { lineHeight: 3, spaceBefore: 0, indentLeft: 72, indentFirstLine: 36 }),
+          ],
+        }),
+      )
+      const { words } = await layout(pdf)
+      const at = (text: string) => words.find((w) => w.text === text)!
+      const left = 1 * 72
+      // Bravo is one line below Alpha; Charlie one line plus the 50 pt before it below Bravo.
+      const line = at('Bravo').y0 - at('Alpha').y0
+      expect(line).toBeGreaterThan(10)
+      expect(Math.abs(at('Charlie').y0 - at('Bravo').y0 - (line + 50))).toBeLessThan(1.5)
+      // Line spacing 3: the wrapped paragraph's lines are 3 / 1.08 times as far apart as Alpha and Bravo (Normal is 1.08).
+      const rows = [...new Set(words.filter((w) => w.text.startsWith('w')).map((w) => Math.round(w.y0)))].sort((a, b) => a - b)
+      expect(rows.length).toBeGreaterThan(2)
+      expect(Math.abs(rows[1] - rows[0] - (line * 3) / 1.08)).toBeLessThan(2.5)
+      // Left indent 72 pt, the first line a further 36 pt in.
+      expect(Math.abs(at('w0').x0 - (left + 72 + 36))).toBeLessThan(1.5)
+      const second = words.find((w) => Math.round(w.y0) === rows[1] && w.text.startsWith('w'))!
+      expect(Math.abs(second.x0 - (left + 72))).toBeLessThan(1.5)
+    } finally {
+      await renderer.close()
+    }
+  }, 60_000)
 
   test('no request leaves the page, whatever the HTML asks for', async () => {
     let hits = 0
