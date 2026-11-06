@@ -17,16 +17,16 @@ export function ZoomMenuItems({ zoom, onDone }: { zoom: number; onDone: () => vo
     <>
       {ZOOM_PRESETS.map((percent) => (
         <MenuItem key={percent} checked={!fitting && zoom === percent} onSelect={pick(() => setZoom(percent))}>
-          {!fitting && zoom === percent ? '✓ ' : ''}
+          {!fitting && zoom === percent && <span aria-hidden>✓ </span>}
           {percent}%
         </MenuItem>
       ))}
       <hr />
       <MenuItem checked={fitting === 'page-width'} disabled={!canFit} onSelect={pick(() => setZoomFit('page-width'))}>
-        {fitting === 'page-width' ? '✓ ' : ''}Page width
+        {fitting === 'page-width' && <span aria-hidden>✓ </span>}Page width
       </MenuItem>
       <MenuItem checked={fitting === 'one-page'} disabled={!canFit} onSelect={pick(() => setZoomFit('one-page'))}>
-        {fitting === 'one-page' ? '✓ ' : ''}One page
+        {fitting === 'one-page' && <span aria-hidden>✓ </span>}One page
       </MenuItem>
     </>
   )

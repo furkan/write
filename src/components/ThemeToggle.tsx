@@ -51,7 +51,7 @@ export function ThemeMenuItems({ onDone }: { onDone: () => void }) {
       }}
     >
       <span className="menu-icon">{option.icon}</span> {option.label}
-      {option.value === choice ? ' ✓' : ''}
+      {option.value === choice && <span aria-hidden> ✓</span>}
     </MenuItem>
   ))
 }

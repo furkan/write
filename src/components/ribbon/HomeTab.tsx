@@ -285,7 +285,7 @@ function FontPicker({ editor, value, disabled }: { editor: Editor; value: string
         FONT_FAMILIES.map((font) => (
           <MenuItem
             key={font.label}
-            active={font.value === value}
+            checked={font.value === value}
             onSelect={() => {
               close()
               const chain = editor.chain().focus()
@@ -347,7 +347,7 @@ function FontSize({ editor, size, disabled }: { editor: Editor; size: number | n
             {FONT_SIZES.map((px) => (
               <MenuItem
                 key={px}
-                active={px === size}
+                checked={px === size}
                 onSelect={() => {
                   close()
                   apply(px)

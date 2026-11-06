@@ -18,6 +18,9 @@ export function RibbonGroup({ label, tour, children }: { label: string; tour?: s
   )
 }
 
+/** "Ctrl+Shift+Z" / "⌘+B" as an aria-keyshortcuts value ("Control+Shift+Z", "Meta+B"). */
+const ariaKeys = (shortcut?: string) => shortcut?.replace('Ctrl', 'Control').replace('⌘', 'Meta')
+
 type ButtonProps = {
   label: string
   /** The tooltip, when it says more than the label. The label stays the accessible name. */
@@ -50,7 +53,8 @@ export function RibbonButton({ label, title, shortcut, icon, glyph, size = 'smal
       type="button"
       className={`ribbon-btn ${size}${active ? ' active' : ''}${tone ? ` ${tone}` : ''}`}
       title={tooltip(title ?? label, shortcut)}
-      aria-label={tooltip(label, shortcut)}
+      aria-label={label}
+      aria-keyshortcuts={ariaKeys(shortcut)}
       aria-pressed={active}
       aria-busy={busy || undefined}
       aria-disabled={busy || undefined}
@@ -129,6 +133,7 @@ export function ColorSplitButton({ label, shortcut, glyph, colors, kind, clearLa
         className="ribbon-btn small"
         title={tooltip(title, shortcut)}
         aria-label={title}
+        aria-keyshortcuts={ariaKeys(shortcut)}
         disabled={disabled}
         onMouseDown={keepSelection}
         onClick={() => onApply(last)}

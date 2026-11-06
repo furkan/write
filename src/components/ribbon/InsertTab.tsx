@@ -11,7 +11,7 @@ import {
   Table,
   TvMinimalPlay,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { insertBlockMath, insertImage, insertInlineMath, insertYoutube, setLink } from '../../editor/blocks'
 import { CALLOUT_VARIANTS, variantList } from '../../editor/extensions/callout-variants'
 import { mod } from '../../editor/platform'
@@ -187,9 +187,29 @@ export function InsertTab({ editor, s, disabled }: TabProps) {
 /** Word's table grid: point at a size and click. */
 function TablePicker({ onPick }: { onPick: (rows: number, cols: number) => void }) {
   const [size, setSize] = useState({ rows: 3, cols: 3 })
+  // One Tab stop: the cell the arrows last reached (the 3 × 3 default to begin with).
+  const [cell, setCell] = useState(2 * GRID.cols + 2)
+  const move = (event: KeyboardEvent<HTMLDivElement>) => {
+    const row = Math.floor(cell / GRID.cols)
+    const col = cell % GRID.cols
+    const to = {
+      ArrowRight: [row, col + 1],
+      ArrowLeft: [row, col - 1],
+      ArrowDown: [row + 1, col],
+      ArrowUp: [row - 1, col],
+      Home: [row, 0],
+      End: [row, GRID.cols - 1],
+    }[event.key]
+    if (!to) return
+    event.preventDefault()
+    const r = Math.max(0, Math.min(GRID.rows - 1, to[0]))
+    const c = Math.max(0, Math.min(GRID.cols - 1, to[1]))
+    setCell(r * GRID.cols + c)
+    event.currentTarget.querySelectorAll<HTMLElement>('button')[r * GRID.cols + c]?.focus()
+  }
   return (
     <div className="table-picker" onMouseLeave={() => setSize({ rows: 3, cols: 3 })}>
-      <div className="table-picker-grid" style={{ gridTemplateColumns: `repeat(${GRID.cols}, 1fr)` }}>
+      <div className="table-picker-grid" role="group" aria-label="Table size" onKeyDown={move} style={{ gridTemplateColumns: `repeat(${GRID.cols}, 1fr)` }}>
         {Array.from({ length: GRID.rows * GRID.cols }, (_, i) => {
           const rows = Math.floor(i / GRID.cols) + 1
           const cols = (i % GRID.cols) + 1
@@ -199,10 +219,14 @@ function TablePicker({ onPick }: { onPick: (rows: number, cols: number) => void 
               key={i}
               type="button"
               className={on ? 'on' : undefined}
+              tabIndex={i === cell ? 0 : -1}
               aria-label={`${cols} by ${rows} table`}
               onMouseDown={keepSelection}
               onMouseEnter={() => setSize({ rows, cols })}
-              onFocus={() => setSize({ rows, cols })}
+              onFocus={() => {
+                setSize({ rows, cols })
+                setCell(i)
+              }}
               onClick={() => onPick(rows, cols)}
             />
           )

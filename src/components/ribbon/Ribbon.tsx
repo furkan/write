@@ -112,6 +112,52 @@ export function Ribbon({ editor, session, readOnly, start, end }: RibbonProps) {
 
   const chain = () => editor.chain().focus()
 
+  // Roving tabindex: the toolbar is one Tab stop (its last-focused control, else the first), and
+  // the arrows move between controls across groups. Done on the DOM since the controls are many
+  // small components; menus and pickers (inside `.dropdown-menu`) manage their own focus.
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const stop = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const bar = toolbarRef.current
+    if (!bar) return
+    const items = () => [...bar.querySelectorAll<HTMLElement>('button, input, select')].filter((el) => !el.closest('.dropdown-menu') && !el.matches(':disabled'))
+    const sync = () => {
+      const all = items()
+      if (!stop.current || !all.includes(stop.current)) stop.current = all[0] ?? null
+      for (const el of all) el.tabIndex = el === stop.current ? 0 : -1
+    }
+    const onFocus = (event: FocusEvent) => {
+      const el = event.target as HTMLElement
+      if (items().includes(el)) {
+        stop.current = el
+        sync()
+      }
+    }
+    sync()
+    // Controls come and go (a tab's contents, enabled state, a menu opening).
+    const observer = new MutationObserver(sync)
+    observer.observe(bar, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] })
+    bar.addEventListener('focusin', onFocus)
+    return () => {
+      observer.disconnect()
+      bar.removeEventListener('focusin', onFocus)
+    }
+  }, [current.id, showPanel])
+
+  const onToolbarKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    // Typing, and the arrows inside a text field or a menu, are theirs.
+    if (target.tagName !== 'BUTTON' || target.closest('.dropdown-menu') || event.altKey || event.ctrlKey || event.metaKey) return
+    const items = [...event.currentTarget.querySelectorAll<HTMLElement>('button, input, select')].filter(
+      (el) => !el.closest('.dropdown-menu') && !el.matches(':disabled'),
+    )
+    const i = items.indexOf(target)
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: items.length - 1 }[event.key]
+    if (next === undefined || i < 0) return
+    event.preventDefault()
+    items[Math.max(0, Math.min(items.length - 1, next))].focus()
+  }
+
   return (
     <div
       ref={rootRef}
@@ -173,10 +219,12 @@ export function Ribbon({ editor, session, readOnly, start, end }: RibbonProps) {
       {showPanel && (
         <div id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(current.id)} className={`ribbon-panel${view.collapsed ? ' flyout' : ''}`}>
           <div
+            ref={toolbarRef}
             className="ribbon-groups"
             role="toolbar"
             aria-label={current.label}
             aria-disabled={disabled}
+            onKeyDown={onToolbarKey}
           >
             <current.Panel editor={editor} session={session} s={s} disabled={disabled} />
           </div>
