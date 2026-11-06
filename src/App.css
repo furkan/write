@@ -812,7 +812,9 @@ html:has(.doc-shell) body {
   padding-left: 1.5em;
 }
 
-.tiptap li > p {
+/* A task item's paragraph sits one level deeper, in the div beside its checkbox. */
+.tiptap li > p,
+.tiptap ul[data-type='taskList'] li > div > p {
   margin: 0.15em 0;
 }
 
@@ -830,7 +832,8 @@ html:has(.doc-shell) body {
 
 .tiptap ul[data-type='taskList'] li > label {
   flex: 0 0 auto;
-  margin-top: 0.3em;
+  /* Centres the checkbox on the first line of text. */
+  margin-top: 0.2em;
   user-select: none;
 }
 
