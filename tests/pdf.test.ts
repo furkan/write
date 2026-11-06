@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { docFileName, pdfDisposition } from '../server/collab.ts'
 import { cleanStyle, documentPage, MAX_FORMULA_CHARS, MAX_HIGHLIGHT_CHARS } from '../server/pdf-html.ts'
 import { createPdfRenderer, defaultChromium, PdfBusy, PdfTimeout, PdfTooLarge, PdfUnavailable } from '../server/pdf.ts'
-import { IN, MARGIN_PRESETS, PAPER_SIZES, type PageSetup } from '../src/editor/paper.ts'
+import { IN, marginsOf, PAPER_SIZES, type PageSetup } from '../src/editor/paper.ts'
 import { api, connectDocument, DEV_PORTS, startServer, typeParagraph, type RunningServer } from './helpers.ts'
 import { blockMathJson, codeJson, docState, everyNodeJson, matrixLatex, pageMeta, paragraphsJson, PNG_DATA_URL, type Meta } from './pdf-fixtures.ts'
 
@@ -439,7 +439,7 @@ describe.skipIf(!CHROMIUM)('GET /api/docs/:id/pdf', () => {
       expect(Math.abs(height - expectedHeight)).toBeLessThan(2)
       expect(pages).toBeGreaterThan(1)
 
-      const [top, right, bottom, left] = MARGIN_PRESETS[setup.margins].margins.map((m) => m * PT)
+      const [top, right, bottom, left] = marginsOf(setup).map((m) => m * PT)
       // The footer sits in the bottom margin; everything else inside the margins.
       const footerTop = height - bottom
       const body = words.filter((word) => word.y0 < footerTop)

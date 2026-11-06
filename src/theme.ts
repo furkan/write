@@ -34,3 +34,18 @@ export function useThemeChoice(): ThemeChoice {
   }, [])
   return choice
 }
+
+const DARK_QUERY = '(prefers-color-scheme: dark)'
+
+/** Whether the app is showing its dark theme: chosen, or the system's when following it. */
+export function useDarkTheme(): boolean {
+  const choice = useThemeChoice()
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia(DARK_QUERY).matches)
+  useEffect(() => {
+    const query = window.matchMedia(DARK_QUERY)
+    const onChange = () => setSystemDark(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+  return choice === 'dark' || (choice === 'system' && systemDark)
+}

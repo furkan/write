@@ -4,7 +4,7 @@ import { createStore, useStore } from '../store'
 import type { Session } from './collab'
 import type { PaginationOptions } from './extensions/pagination/Pagination'
 import { readStorage, writeStorage } from './storage'
-import { IN, MARGIN_PRESETS, PAPER_SIZES, PAGE_SETUP_KEYS as KEYS, readPageSetup, type PageSetup } from './paper'
+import { IN, marginsOf, PAPER_SIZES, PAGE_SETUP_KEYS as KEYS, readPageSetup, serializeMargins, type PageSetup } from './paper'
 
 /*
  * Page setup belongs to the document (like Word's Layout tab); its values are in paper.ts, which
@@ -14,7 +14,9 @@ import { IN, MARGIN_PRESETS, PAPER_SIZES, PAGE_SETUP_KEYS as KEYS, readPageSetup
 
 export {
   DEFAULT_PAGE_SETUP,
+  marginsOf,
   MARGIN_PRESETS,
+  MAX_MARGIN,
   ORIENTATIONS,
   PAPER_SIZES,
   type MarginPreset,
@@ -51,7 +53,8 @@ export function setPageSetup(session: Session, change: Partial<PageSetup>) {
   session.ydoc.transact(() => {
     for (const key of Object.keys(change) as (keyof PageSetup)[]) {
       const value = change[key]
-      if (value) session.meta.set(KEYS[key], value)
+      if (!value) continue
+      session.meta.set(KEYS[key], key === 'customMargins' ? serializeMargins(value as NonNullable<PageSetup['customMargins']>) : value)
     }
   }, PAGE_SETUP_ORIGIN)
   undoManager?.stopCapturing()
@@ -64,7 +67,12 @@ export function usePageSetup(session: Session): PageSetup {
     const update = () =>
       setSetup((prev) => {
         const next = getPageSetup(session)
-        return prev.size === next.size && prev.orientation === next.orientation && prev.margins === next.margins ? prev : next
+        const same =
+          prev.size === next.size &&
+          prev.orientation === next.orientation &&
+          prev.margins === next.margins &&
+          serializeMargins(marginsOf(prev)) === serializeMargins(marginsOf(next))
+        return same ? prev : next
       })
     update()
     session.meta.observe(update)
@@ -77,7 +85,7 @@ export function usePageSetup(session: Session): PageSetup {
 export function pageGeometry(setup: PageSetup): Omit<PaginationOptions, 'enabled' | 'pageGap'> {
   const paper = PAPER_SIZES[setup.size]
   const landscape = setup.orientation === 'landscape'
-  const [marginTop, marginRight, marginBottom, marginLeft] = MARGIN_PRESETS[setup.margins].margins
+  const [marginTop, marginRight, marginBottom, marginLeft] = marginsOf(setup)
   return {
     pageWidth: landscape ? paper.height : paper.width,
     pageHeight: landscape ? paper.width : paper.height,
@@ -99,8 +107,9 @@ export function pageGeometry(setup: PageSetup): Omit<PaginationOptions, 'enabled
 export function pageRules(setup: PageSetup): string {
   const [width, height] = PAPER_SIZES[setup.size].css
   const size = setup.orientation === 'landscape' ? `${height} ${width}` : `${width} ${height}`
-  const [top, , bottom] = MARGIN_PRESETS[setup.margins].margins
-  const margin = MARGIN_PRESETS[setup.margins].margins.map((m) => `${m / IN}in`).join(' ')
+  const margins = marginsOf(setup)
+  const [top, , bottom] = margins
+  const margin = margins.map((m) => `${Math.round((m / IN) * 1000) / 1000}in`).join(' ')
   const contentHeight = (pageGeometry(setup).pageHeight - top - bottom) / IN
   return [
     `@page { size: ${size}; margin: ${margin}; }`,

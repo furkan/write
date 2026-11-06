@@ -1,6 +1,7 @@
 import { Check, Proportions, RotateCwSquare, ScanText } from 'lucide-react'
 import type { ReactNode } from 'react'
 import {
+  marginsOf,
   MARGIN_PRESETS,
   ORIENTATIONS,
   PAPER_SIZES,
@@ -34,8 +35,9 @@ export function LayoutTab({ session, disabled }: TabProps) {
     <RibbonGroup label="Page Setup" tour="page-setup">
       <div className="ribbon-row">
         <RibbonMenuButton label="Margins" icon={ScanText} disabled={disabled}>
-          {(close) =>
-            entries(MARGIN_PRESETS).map(([margins, preset]) => {
+          {(close) => (
+            <>
+              {entries(MARGIN_PRESETS).map(([margins, preset]) => {
               const [top, right, bottom, left] = preset.margins
               return (
                 <PageOption
@@ -56,8 +58,18 @@ export function LayoutTab({ session, disabled }: TabProps) {
                   }}
                 />
               )
-            })
-          }
+              })}
+              {setup.margins === 'custom' && (
+                <PageOption
+                  checked
+                  icon={<PageIcon width={current.pageWidth} height={current.pageHeight} margins={marginsOf(setup)} />}
+                  name="Custom"
+                  detail="Set by dragging the ruler"
+                  onSelect={close}
+                />
+              )}
+            </>
+          )}
         </RibbonMenuButton>
 
         <RibbonMenuButton label="Orientation" icon={RotateCwSquare} disabled={disabled}>

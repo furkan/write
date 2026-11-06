@@ -65,17 +65,27 @@ html:has(.doc-shell) body {
   overflow: hidden;
 }
 
-.doc-shell > :not(.doc-scroll) {
+.doc-shell > :not(.doc-body) {
   flex: none;
+}
+
+/* The navigation pane beside the document's scroller. */
+.doc-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .doc-scroll {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+  /* The canvas around the page, in both layouts. */
+  background: var(--canvas);
 }
 
 /* Focusable only so the scrolling keys work before a click (see useDocumentScroller). */
@@ -516,23 +526,9 @@ html:has(.doc-shell) body {
 .workspace {
   display: grid;
   flex: 1;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 24px;
-  width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 0 16px;
-}
-
-.no-sidebar .workspace {
   grid-template-columns: minmax(0, 1fr);
-  max-width: 900px;
-}
-
-@media (max-width: 1000px) {
-  .workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  width: 100%;
+  padding: 0 16px;
 }
 
 /*
@@ -728,6 +724,16 @@ html:has(.doc-shell) body {
   zoom: var(--zoom, 1);
 }
 
+/* Web layout: one continuous white sheet on the canvas (Print layout's pages: pagination.css). */
+.editor .tiptap:not(.paginated) {
+  max-width: 960px;
+  margin: 0 auto;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--paper-edge),
+    var(--page-shadow);
+}
+
 @media (max-width: 640px) {
   .editor .tiptap {
     padding-left: 8px;
@@ -768,7 +774,7 @@ html:has(.doc-shell) body {
   line-height: 1.08;
   color: var(--heading);
   /* A little room above a heading jumped to from the navigation pane. */
-  scroll-margin-top: 16px;
+  scroll-margin-top: 48px;
 }
 
 .tiptap h1 {
@@ -1434,40 +1440,63 @@ html:has(.doc-shell) body {
   color: var(--muted);
 }
 
-/* ---------- Sidebar ---------- */
+/* ---------- Navigation pane ---------- */
 
-.sidebar {
+.nav-pane {
   display: flex;
+  flex: 0 0 260px;
   flex-direction: column;
-  gap: 16px;
   min-width: 0;
-  padding: 10px 0 120px;
-}
-
-@media (min-width: 1001px) {
-  .sidebar {
-    position: sticky;
-    top: 0;
-    align-self: start;
-    max-height: var(--doc-view-height, 100%);
-    overflow-y: auto;
-  }
-}
-
-.panel {
-  padding: 12px;
+  overflow-y: auto;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-right: 1px solid var(--border);
 }
 
-.panel-title {
-  margin: 0 0 8px;
-  font-size: 0.75rem;
-  font-weight: 700;
+.nav-pane-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 6px 14px;
+}
+
+.nav-pane-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.nav-pane-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.nav-pane-close:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.nav-pane-empty {
+  margin: 0;
+  padding: 4px 14px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Phones have no room beside the page: the pane is for wider screens. */
+@media (max-width: 700px) {
+  .nav-pane {
+    display: none;
+  }
 }
 
 .link-button {
@@ -1486,14 +1515,14 @@ html:has(.doc-shell) body {
 
 .toc {
   margin: 0;
-  padding: 0;
+  padding: 0 0 24px;
   list-style: none;
 }
 
 .toc button {
   display: block;
   width: 100%;
-  padding: 3px 8px;
+  padding: 5px 14px 5px 11px;
   overflow: hidden;
   font-size: 0.88rem;
   text-align: left;
@@ -1501,21 +1530,22 @@ html:has(.doc-shell) body {
   text-overflow: ellipsis;
   background: none;
   border: none;
-  border-left: 2px solid transparent;
-  border-radius: 0 4px 4px 0;
+  border-left: 3px solid transparent;
   cursor: pointer;
+}
+
+.toc li {
+  margin: 0;
 }
 
 .toc button:hover {
   background: var(--surface-2);
 }
 
-.toc button.passed {
-  color: var(--muted);
-}
-
 .toc button.active {
+  font-weight: 600;
   color: var(--accent);
+  background: var(--accent-bg);
   border-left-color: var(--accent);
 }
 
@@ -1792,4 +1822,118 @@ html:has(.doc-shell) body {
     transition: none;
     scale: none;
   }
+}
+
+/* ---------- Ruler (Print layout; components/Ruler.tsx) ---------- */
+
+/* Sticks to the top of the document area, over the page's width and centred like it. */
+.ruler-bar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  padding: 6px 24px 4px;
+  background: var(--canvas);
+}
+
+.ruler {
+  position: relative;
+  width: var(--ruler-width);
+  margin: 0 auto;
+  user-select: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-width: 1px 0;
+  touch-action: none;
+}
+
+.ruler-scale {
+  display: block;
+}
+
+.ruler-text-area {
+  fill: var(--bg);
+}
+
+.ruler-tick {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.ruler-tick.major {
+  stroke: var(--text);
+}
+
+.ruler-number {
+  font: 9px var(--sans);
+  fill: var(--text);
+}
+
+.ruler-handle {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  transform: translateX(-50%);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.ruler-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ruler-handle svg {
+  display: block;
+  fill: var(--bg);
+  stroke: var(--text);
+  stroke-width: 1;
+}
+
+.ruler-handle:hover svg,
+.ruler-handle.dragging svg {
+  fill: var(--accent-bg);
+  stroke: var(--accent);
+}
+
+.ruler-indent.first {
+  top: 0;
+}
+
+.ruler-indent.hanging,
+.ruler-indent.right {
+  top: 17px;
+}
+
+.ruler-indent.left {
+  top: 27px;
+}
+
+/* The margin boundary: a bar across the ruler, wide enough to grab. */
+.ruler-margin {
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: ew-resize;
+}
+
+.ruler-bar-grip {
+  width: 3px;
+  height: 100%;
+  background: var(--border-strong);
+  opacity: 0;
+}
+
+.ruler-margin:hover .ruler-bar-grip,
+.ruler-margin:focus-visible .ruler-bar-grip,
+.ruler-margin.dragging .ruler-bar-grip {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.ruler-handle[aria-disabled='true'] {
+  cursor: default;
+}
+
+.ruler-margin[aria-disabled='true']:hover .ruler-bar-grip {
+  opacity: 0;
 }

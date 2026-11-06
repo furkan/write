@@ -20,11 +20,11 @@ import { EditorMenus } from '../components/EditorMenus'
 import { BarActions, DocumentTitle } from '../components/ribbon/BarItems'
 import { canWrite as canWriteAs, DocumentChromeContext, type DocumentChrome, type ViewOptions } from '../components/ribbon/documentContext'
 import { Ribbon } from '../components/ribbon/Ribbon'
-import { useMediaQuery } from '../components/ribbon/state'
 import { SessionBanner } from '../components/SessionBanner'
 import { Toast } from '../components/Toast'
 import { ShareDialog } from '../components/ShareDialog'
-import { Sidebar } from '../components/Sidebar'
+import { NavigationPane } from '../components/NavigationPane'
+import { Ruler } from '../components/Ruler'
 import { StatusBar } from '../components/StatusBar'
 import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
@@ -33,6 +33,7 @@ import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRe
 import { pageGeometry, pageRules, trackPageSetupUndo, usePagedView, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
 import { setDocumentScroller } from '../editor/scroller'
+import { navPanePref, rulerPref } from '../editor/view-prefs'
 import { fitZoom, useZoomSetting, type ZoomFit } from '../editor/zoom'
 import { accountAction, setSessionExpired, useMe } from '../session'
 import { autoStartTour, setTourContext, startTour } from '../tours'
@@ -42,13 +43,6 @@ import '../layout.css'
 const SYNC_TIMEOUT_MS = 4000
 /** How long a template waits to learn whether we own the document before opening without it. */
 const OWNER_WAIT_MS = 10_000
-
-/**
- * Room Print layout needs beside the page for the sidebar: the canvas padding (48), the column
- * gap (24), the sidebar (320), the workspace padding (32) and a scrollbar (16). Narrower, the
- * sidebar goes below the document, as it does on narrow screens.
- */
-const SIDEBAR_ROOM = 48 + 24 + 320 + 32 + 16
 
 /**
  * Waits for the first sync with the collaboration server, so the editor never
@@ -465,7 +459,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     readOnly: false,
     invisibles: false,
     focusMode: false,
-    sidebar: true,
   })
 
   const editorRef = useRef<Editor | null>(null)
@@ -674,9 +667,8 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   const fitted = useFitZoom(fit, pagination.pageWidth, pagination.pageHeight, mainRef, scroller)
   const zoom = fit ? (fitted ?? 100) : zoomSetting.percent
   useZoomAnchor(zoom, editor, scroller)
-  // Room for the sidebar beside the page at 100%. Zoomed in further, the page scrolls sideways in
-  // the document area instead (like a landscape page wider than the window): the contents stay.
-  const sidebarFits = useMediaQuery(`(min-width: ${Math.ceil(pagination.pageWidth) + SIDEBAR_ROOM}px)`)
+  const navPane = navPanePref.use()
+  const ruler = rulerPref.use()
 
   const canToggleReadOnly = canWrite && !closedWhileOpen
   const chrome = useMemo<DocumentChrome>(
@@ -704,9 +696,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
     'doc-shell',
     view.focusMode && 'focus-mode',
     readOnly && 'read-only',
-    !view.sidebar && 'no-sidebar',
     paged && 'layout-print',
-    paged && view.sidebar && !sidebarFits && 'sidebar-below',
   ]
     .filter(Boolean)
     .join(' ')
@@ -747,17 +737,20 @@ function Workspace({ session, template, role }: WorkspaceProps) {
           </div>
         )}
         {!closed && <SessionBanner keepsChanges onSignedIn={reconnect} />}
-        {/* The only part of the page that scrolls: the ribbon above and the status bar below stay put. */}
-        <div className="doc-scroll" ref={setScroller} tabIndex={-1}>
-          <div className="workspace">
-            <main className="main" ref={mainRef}>
-              <h1 className="sr-only">{title || 'Untitled document'}</h1>
-              <div className="editor-shell" data-tour="editor">
-                <EditorContent editor={editor} className="editor" />
-                <EditorMenus editor={editor} scrollTarget={scroller} />
-              </div>
-            </main>
-            {view.sidebar && <Sidebar editor={editor} toc={toc} />}
+        <div className="doc-body">
+          {navPane && <NavigationPane editor={editor} toc={toc} />}
+          {/* The only part of the page that scrolls: the ribbon above and the status bar below stay put. */}
+          <div className="doc-scroll" ref={setScroller} tabIndex={-1}>
+            <div className="workspace">
+              <main className="main" ref={mainRef}>
+                <h1 className="sr-only">{title || 'Untitled document'}</h1>
+                {paged && ruler && <Ruler editor={editor} session={session} setup={pageSetup} pageWidth={pagination.pageWidth} zoom={zoom} editable={!readOnly} />}
+                <div className="editor-shell" data-tour="editor">
+                  <EditorContent editor={editor} className="editor" />
+                  <EditorMenus editor={editor} scrollTarget={scroller} />
+                </div>
+              </main>
+            </div>
           </div>
         </div>
         <Toast />

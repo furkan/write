@@ -9,7 +9,9 @@
 export type PaperSize = 'a4' | 'letter' | 'legal' | 'a5'
 export type Orientation = 'portrait' | 'landscape'
 export type MarginPreset = 'normal' | 'narrow' | 'wide'
-export type PageSetup = { size: PaperSize; orientation: Orientation; margins: MarginPreset }
+export type Margins = readonly [top: number, right: number, bottom: number, left: number]
+/** `custom` is what dragging a margin on the ruler makes: `customMargins` (CSS px) then applies. */
+export type PageSetup = { size: PaperSize; orientation: Orientation; margins: MarginPreset | 'custom'; customMargins?: Margins }
 
 const MM = 96 / 25.4
 /** CSS pixels per inch. */
@@ -37,17 +39,41 @@ export const ORIENTATIONS: Record<Orientation, { label: string }> = {
 
 export const DEFAULT_PAGE_SETUP: PageSetup = { size: 'a4', orientation: 'portrait', margins: 'normal' }
 
-/** Where each setting lives in the document's `meta` map. */
-export const PAGE_SETUP_KEYS = { size: 'pageSize', orientation: 'pageOrientation', margins: 'pageMargins' } as const
+/** Where each setting lives in the document's `meta` map. Custom margins are "top,right,bottom,left" in px. */
+export const PAGE_SETUP_KEYS = {
+  size: 'pageSize',
+  orientation: 'pageOrientation',
+  margins: 'pageMargins',
+  customMargins: 'pageMarginValues',
+} as const
+
+/** The largest margin the ruler can make: 3 inches. */
+export const MAX_MARGIN = 3 * IN
+
+/** Top, right, bottom and left margins in CSS px: the preset's, or the custom ones. */
+export function marginsOf(setup: PageSetup): Margins {
+  if (setup.margins === 'custom' && setup.customMargins) return setup.customMargins
+  // `custom` without values reads as the default, as an unknown value does.
+  return MARGIN_PRESETS[setup.margins === 'custom' ? 'normal' : setup.margins].margins
+}
+
+export const serializeMargins = (margins: Margins) => margins.map((m) => Math.round(m * 10) / 10).join(',')
+
+function parseMargins(value: unknown): Margins | undefined {
+  if (typeof value !== 'string') return undefined
+  const parts = value.split(',').map(Number)
+  return parts.length === 4 && parts.every((m) => Number.isFinite(m) && m >= 0 && m <= MAX_MARGIN) ? (parts as unknown as Margins) : undefined
+}
 
 const oneOf = <T extends string>(value: unknown, options: Record<T, unknown>, fallback: T): T =>
   typeof value === 'string' && Object.hasOwn(options, value) ? (value as T) : fallback
 
 /** Reads the page setup from a document's `meta` map; anything missing or unknown is the default. */
 export function readPageSetup(meta: { get: (key: string) => unknown }): PageSetup {
-  return {
-    size: oneOf(meta.get(PAGE_SETUP_KEYS.size), PAPER_SIZES, DEFAULT_PAGE_SETUP.size),
-    orientation: oneOf(meta.get(PAGE_SETUP_KEYS.orientation), ORIENTATIONS, DEFAULT_PAGE_SETUP.orientation),
-    margins: oneOf(meta.get(PAGE_SETUP_KEYS.margins), MARGIN_PRESETS, DEFAULT_PAGE_SETUP.margins),
-  }
+  const customMargins = parseMargins(meta.get(PAGE_SETUP_KEYS.customMargins))
+  const margins = meta.get(PAGE_SETUP_KEYS.margins)
+  const size = oneOf(meta.get(PAGE_SETUP_KEYS.size), PAPER_SIZES, DEFAULT_PAGE_SETUP.size)
+  const orientation = oneOf(meta.get(PAGE_SETUP_KEYS.orientation), ORIENTATIONS, DEFAULT_PAGE_SETUP.orientation)
+  if (margins === 'custom' && customMargins) return { size, orientation, margins, customMargins }
+  return { size, orientation, margins: oneOf(margins, MARGIN_PRESETS, 'normal') }
 }

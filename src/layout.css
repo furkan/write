@@ -5,25 +5,8 @@
 }
 
 /* Wide enough for the page; a page wider than the window (landscape) scrolls sideways, like Word. */
-.layout-print .workspace,
-.layout-print.no-sidebar .workspace {
-  grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr) 320px;
-  max-width: none;
-}
-
-.layout-print.no-sidebar .workspace {
+.layout-print .workspace {
   grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
-}
-
-/* No room for the sidebar beside the page (see SIDEBAR_ROOM): it goes below, as on narrow screens. */
-.layout-print.sidebar-below .workspace {
-  grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
-}
-
-@media (max-width: 1000px) {
-  .layout-print .workspace {
-    grid-template-columns: minmax(calc(var(--layout-page-width) + 48px), 1fr);
-  }
 }
 
 .layout-print .editor-shell {
@@ -243,14 +226,16 @@
   html:has(.doc-shell),
   html:has(.doc-shell) body,
   .app.doc-shell,
+  .doc-body,
   .doc-scroll {
     display: block;
     height: auto;
     overflow: visible;
   }
 
-  /* Everything but the document: banners, ribbon, sidebar, status bar, menus, tours. */
-  .app > :not(.doc-scroll),
+  /* Everything but the document: banners, ribbon, navigation pane, status bar, menus, tours. */
+  .app > :not(.doc-body),
+  .doc-body > :not(.doc-scroll),
   .doc-scroll > :not(.workspace),
   .workspace > :not(.main),
   .main > :not(.editor-shell),
@@ -289,6 +274,14 @@
 
   .tiptap > .pagination-pages {
     display: none !important;
+  }
+
+  /* Web layout's sheet on the canvas is a screen thing. */
+  .editor .tiptap:not(.paginated) {
+    max-width: none;
+    margin: 0;
+    background: none;
+    box-shadow: none;
   }
 
   /* The text starts at the sheet's top margin. */

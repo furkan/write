@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/react'
 import type { Session } from '../../editor/collab'
 import { selectionFontSize } from './fontSize'
+import { summarizeParagraphs } from './paragraph'
 
 export const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const
 export type HeadingLevel = (typeof HEADING_LEVELS)[number]
@@ -24,6 +25,7 @@ export const selectRibbonState = (e: Editor) => {
     fontFamily: (textStyle.fontFamily as string | undefined) ?? '',
     /** In pt; `null` for a selection that mixes sizes. */
     fontSize: selectionFontSize(e.state),
+    spacing: summarizeParagraphs(e.state),
     align: ALIGNMENTS.find((a) => e.isActive({ textAlign: a })) ?? 'left',
     bulletList: e.isActive('bulletList'),
     orderedList: e.isActive('orderedList'),

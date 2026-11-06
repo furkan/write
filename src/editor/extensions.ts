@@ -121,6 +121,7 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
     CharacterCount,
     Focus.configure({ className: 'has-focus', mode: 'deepest' }),
     schema.textAlign,
+    schema.paragraphFormat,
     schema.highlight,
     schema.textStyle,
     schema.subscript,

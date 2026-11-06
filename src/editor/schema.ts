@@ -1,3 +1,4 @@
+import { Extension } from '@tiptap/core'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { isChangeOrigin } from '@tiptap/extension-collaboration'
 import { Details, DetailsContent, DetailsSummary } from '@tiptap/extension-details'
@@ -85,6 +86,108 @@ const CodeBlock = CodeBlockLowlight.extend({
   },
 })
 
+/*
+ * Paragraph formatting, like Word's Paragraph dialog: line spacing (a multiple of the font size),
+ * space before and after (pt) and indents (pt; the first line's may be negative: a hanging
+ * indent). Attributes of paragraphs and headings, `null` meaning the style's own value, stored
+ * in the Y.Doc like any other attribute and rendered as inline style (so the PDF has them too).
+ */
+export const PARAGRAPH_TYPES = ['paragraph', 'heading']
+
+export type ParagraphFormat = {
+  lineHeight: number | null
+  spaceBefore: number | null
+  spaceAfter: number | null
+  indentLeft: number | null
+  indentRight: number | null
+  indentFirstLine: number | null
+}
+
+const UNITS_PER_PT: Record<string, number> = { pt: 1, px: 0.75, in: 72, cm: 72 / 2.54, mm: 72 / 25.4 }
+
+/** A CSS length as points (pt, px, in, cm and mm; what Word and Google Docs paste), else `null`. */
+export function lengthToPt(value: string | null | undefined): number | null {
+  const match = /^(-?\d*\.?\d+)(pt|px|in|cm|mm)$/i.exec((value ?? '').trim())
+  if (!match) return null
+  const pt = Number(match[1]) * UNITS_PER_PT[match[2].toLowerCase()]
+  return Number.isFinite(pt) ? Math.round(pt * 10) / 10 : null
+}
+
+const finite = (min: number, max: number) => (value: unknown) => {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n * 100) / 100)) : null
+}
+
+type Field = { attr: keyof ParagraphFormat; css: string; unit: string; read: (el: HTMLElement) => number | null; clean: (v: unknown) => number | null }
+
+const FIELDS: Field[] = [
+  {
+    attr: 'lineHeight',
+    css: 'line-height',
+    unit: '',
+    // Only a plain multiple: a length (`18pt`) or `normal` is the pasted document's own.
+    read: (el) => (/^\d*\.?\d+$/.test(el.style.lineHeight) ? Number(el.style.lineHeight) : null),
+    clean: finite(0.5, 10),
+  },
+  { attr: 'spaceBefore', css: 'margin-top', unit: 'pt', read: (el) => lengthToPt(el.style.marginTop), clean: finite(0, 1584) },
+  { attr: 'spaceAfter', css: 'margin-bottom', unit: 'pt', read: (el) => lengthToPt(el.style.marginBottom), clean: finite(0, 1584) },
+  { attr: 'indentLeft', css: 'margin-left', unit: 'pt', read: (el) => lengthToPt(el.style.marginLeft), clean: finite(-1584, 1584) },
+  { attr: 'indentRight', css: 'margin-right', unit: 'pt', read: (el) => lengthToPt(el.style.marginRight), clean: finite(-1584, 1584) },
+  { attr: 'indentFirstLine', css: 'text-indent', unit: 'pt', read: (el) => lengthToPt(el.style.textIndent), clean: finite(-1584, 1584) },
+]
+
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    paragraphFormat: {
+      /** Sets (or, with `null`, resets) paragraph formatting on every paragraph and heading in the selection. */
+      setParagraphFormat: (change: Partial<ParagraphFormat>) => ReturnType
+    }
+  }
+}
+
+export const ParagraphFormat = Extension.create({
+  name: 'paragraphFormat',
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: PARAGRAPH_TYPES,
+        attributes: Object.fromEntries(
+          FIELDS.map(({ attr, css, unit, read, clean }) => [
+            attr,
+            {
+              default: null,
+              parseHTML: (element: HTMLElement) => read(element),
+              renderHTML: (attributes: Record<string, unknown>) => {
+                const value = clean(attributes[attr])
+                return value === null ? {} : { style: `${css}: ${value}${unit}` }
+              },
+            },
+          ]),
+        ),
+      },
+    ]
+  },
+
+  addCommands() {
+    return {
+      setParagraphFormat:
+        (change) =>
+        ({ tr, state }) => {
+          const clean: Record<string, number | null> = {}
+          for (const field of FIELDS) if (field.attr in change) clean[field.attr] = field.clean(change[field.attr])
+          const { from, to } = state.selection
+          state.doc.nodesBetween(from, to, (node, pos) => {
+            if (!PARAGRAPH_TYPES.includes(node.type.name)) return true
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...clean })
+            return false
+          })
+          return true
+        },
+    }
+  },
+})
+
 export const KATEX_OPTIONS = { throwOnError: false }
 
 // The YouTube iframe below the fold needn't load with the page. Not images: they measure 0px until
@@ -103,6 +206,7 @@ export function documentExtensions() {
       dropcursor: { color: 'var(--accent)', width: 2 },
     }),
     textAlign: TextAlign.configure({ types: ['heading', 'paragraph'] }),
+    paragraphFormat: ParagraphFormat,
     highlight: Highlight.configure({ multicolor: true }),
     textStyle: TextStyleKit,
     subscript: Subscript,

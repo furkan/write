@@ -7,6 +7,7 @@ import {
   Code,
   Highlighter,
   Italic,
+  LineHeight,
   List,
   ListIndentDecrease,
   ListIndentIncrease,
@@ -28,8 +29,9 @@ import { useState } from 'react'
 import { mod } from '../../editor/platform'
 import { Dropdown, MenuItem } from '../Dropdown'
 import { ColorSplitButton, RibbonButton, RibbonGroup } from './controls'
-import { HEADING_LEVELS, keepSelection, tooltip, type TabProps } from './editorState'
+import { HEADING_LEVELS, keepSelection, tooltip, type RibbonState, type TabProps } from './editorState'
 import { FONT_SIZES, parseFontSize, stepFontSize } from './fontSize'
+import { ADDED_SPACE, DEFAULT_LINE_HEIGHT, LINE_SPACINGS } from './paragraph'
 import { useMediaQuery } from './state'
 
 const FONT_FAMILIES = [
@@ -226,6 +228,7 @@ export function HomeTab({ editor, s, disabled }: TabProps) {
             ))}
           </div>
           <div className="ribbon-cluster">
+            <SpacingMenu editor={editor} spacing={s.spacing} disabled={disabled} />
             <RibbonButton
               label="Quote"
               shortcut={`${mod}+Shift+B`}
@@ -250,6 +253,61 @@ export function HomeTab({ editor, s, disabled }: TabProps) {
         <StyleGallery editor={editor} current={s.heading} disabled={disabled} />
       </RibbonGroup>
     </>
+  )
+}
+
+/** Word's "Line and paragraph spacing": line spacing, and space before and after, for every selected block. */
+function SpacingMenu({ editor, spacing, disabled }: { editor: Editor; spacing: RibbonState['spacing']; disabled: boolean }) {
+  const set = (change: Parameters<Editor['commands']['setParagraphFormat']>[0]) => editor.chain().focus().setParagraphFormat(change).run()
+  const hasBefore = (spacing.spaceBefore ?? 0) > 0
+  const hasAfter = (spacing.spaceAfter ?? 0) > 0
+  return (
+    <Dropdown
+      fixed
+      className="ribbon-combo spacing-menu"
+      title="Line and paragraph spacing"
+      disabled={disabled}
+      label={
+        <>
+          <LineHeight aria-hidden size={16} />
+          <ChevronDown aria-hidden size={10} />
+        </>
+      }
+    >
+      {(close) => (
+        <>
+          {LINE_SPACINGS.map((value) => (
+            <MenuItem
+              key={value}
+              checked={spacing.lineHeight === value}
+              onSelect={() => {
+                close()
+                set({ lineHeight: value === DEFAULT_LINE_HEIGHT ? null : value })
+              }}
+            >
+              {Number.isInteger(value) ? value.toFixed(1) : String(value)}
+            </MenuItem>
+          ))}
+          <hr />
+          <MenuItem
+            onSelect={() => {
+              close()
+              set({ spaceBefore: hasBefore ? 0 : ADDED_SPACE })
+            }}
+          >
+            {hasBefore ? 'Remove space before paragraph' : 'Add space before paragraph'}
+          </MenuItem>
+          <MenuItem
+            onSelect={() => {
+              close()
+              set({ spaceAfter: hasAfter ? 0 : ADDED_SPACE })
+            }}
+          >
+            {hasAfter ? 'Remove space after paragraph' : 'Add space after paragraph'}
+          </MenuItem>
+        </>
+      )}
+    </Dropdown>
   )
 }
 

@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 import { dirname, extname, join, normalize, sep } from 'node:path'
 import * as Y from 'yjs'
 import { CALLOUT_VARIANTS, isVariant } from '../src/editor/extensions/callout-variants.ts'
-import { IN, MARGIN_PRESETS, PAPER_SIZES, readPageSetup, type PageSetup } from '../src/editor/paper.ts'
+import { IN, marginsOf, PAPER_SIZES, readPageSetup, type PageSetup } from '../src/editor/paper.ts'
 import { documentExtensions, KATEX_OPTIONS, lowlight } from '../src/editor/schema.ts'
 
 /**
@@ -133,6 +133,12 @@ const STYLE_PROPERTIES = new Set([
   'line-height',
   'text-align',
   'text-decoration',
+  // Paragraph formatting: spacing and indents.
+  'margin-top',
+  'margin-bottom',
+  'margin-left',
+  'margin-right',
+  'text-indent',
 ])
 
 /** Keeps `prop: value` pairs with allowed properties and plain values: no `url()`, no escapes, no at-rules. */
@@ -375,12 +381,12 @@ const escapeHtml = (text: string) =>
 export function pageCss(setup: PageSetup) {
   const [width, height] = PAPER_SIZES[setup.size].css
   const size = setup.orientation === 'landscape' ? `${height} ${width}` : `${width} ${height}`
-  const margins = MARGIN_PRESETS[setup.margins].margins
+  const margins = marginsOf(setup)
   const paper = PAPER_SIZES[setup.size]
   const pageHeight = setup.orientation === 'landscape' ? paper.width : paper.height
   const contentHeight = (pageHeight - margins[0] - margins[2]) / IN
   return [
-    `@page { size: ${size}; margin: ${margins.map((m) => `${m / IN}in`).join(' ')}; }`,
+    `@page { size: ${size}; margin: ${margins.map((m) => `${Math.round((m / IN) * 1000) / 1000}in`).join(' ')}; }`,
     '@page { @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt Carlito, Calibri, Arial, sans-serif; color: #605e5c; } }',
     `:root { --content-height: ${Math.floor(contentHeight * 1000) / 1000}in; }`,
   ].join('\n')
