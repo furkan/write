@@ -37,6 +37,12 @@ export function Dropdown({ label, title, children, align = 'start', className, t
   const menuId = useId()
   // A fixed menu is hidden until positioned, and a hidden item can't take focus: it waits for that.
   const focusPending = useRef(false)
+  // Focus moves into the menu only when it was opened from the keyboard: a mouse or touch open
+  // leaves focus (and the text selection) in the editor.
+  const byKeyboard = useRef(false)
+  // Whether focus is inside the menu, so closing it knows to give focus back to the trigger.
+  const focusInMenu = useRef(false)
+  const wasOpen = useRef(false)
   const typeahead = useRef({ text: '', timer: 0 })
 
   // Disabled while open (say, a demotion to viewer): close, so its items can't run.
@@ -46,7 +52,7 @@ export function Dropdown({ label, title, children, align = 'start', className, t
     const root = rootRef.current
     const menu = menuRef.current
     if (!open || !fixed || !root || !menu) return
-    focusPending.current = kind === 'menu'
+    focusPending.current = kind === 'menu' && byKeyboard.current
     return autoUpdate(root, menu, () => {
       void computePosition(root, menu, {
         strategy: 'fixed',
@@ -78,18 +84,28 @@ export function Dropdown({ label, title, children, align = 'start', className, t
 
   // A menu opens with focus on its current (checked) item, else the first one.
   useEffect(() => {
-    if (open && kind === 'menu' && !fixed) focusFirstItem(menuRef.current)
+    if (open && kind === 'menu' && !fixed && byKeyboard.current) focusFirstItem(menuRef.current)
   }, [open, kind, fixed])
 
-  // Choosing an item closes the menu; focus goes back to the trigger unless the action put it
-  // somewhere else (the editor, a dialog). Once the menu is gone a focused item leaves it on <body>.
-  const close = useCallback(() => {
-    setOpen(false)
-    requestAnimationFrame(() => {
+  // When the menu closes with focus inside it (the focused item vanishes, leaving <body>), focus
+  // goes back to the trigger, unless the chosen action put it elsewhere (the editor, a dialog).
+  useEffect(() => {
+    if (open) {
+      wasOpen.current = true
+      return
+    }
+    if (!wasOpen.current) return
+    wasOpen.current = false
+    if (!focusInMenu.current) return
+    focusInMenu.current = false
+    const frame = requestAnimationFrame(() => {
       const active = document.activeElement
       if (!active || active === document.body) buttonRef.current?.focus()
     })
-  }, [])
+    return () => cancelAnimationFrame(frame)
+  }, [open])
+
+  const close = useCallback(() => setOpen(false), [])
 
   const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (kind !== 'menu' || event.altKey || event.ctrlKey || event.metaKey) return
@@ -158,10 +174,15 @@ export function Dropdown({ label, title, children, align = 'start', className, t
         aria-controls={menuId}
         disabled={disabled}
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setOpen((o) => !o)}
+        onClick={(event) => {
+          // `detail` is 0 for a click from the keyboard (Enter, Space).
+          byKeyboard.current = event.detail === 0
+          setOpen((o) => !o)
+        }}
         onKeyDown={(event) => {
           if (kind === 'menu' && !open && event.key === 'ArrowDown') {
             event.preventDefault()
+            byKeyboard.current = true
             setOpen(true)
           }
         }}
@@ -176,6 +197,10 @@ export function Dropdown({ label, title, children, align = 'start', className, t
           aria-label={kind === 'menu' ? undefined : title}
           id={menuId}
           onKeyDown={onMenuKey}
+          onFocus={() => (focusInMenu.current = true)}
+          onBlur={(event) => {
+            if (!menuRef.current?.contains(event.relatedTarget)) focusInMenu.current = false
+          }}
         >
           {children(close)}
         </div>

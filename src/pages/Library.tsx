@@ -24,7 +24,7 @@ import { ThemeToggle } from '../components/ThemeToggle'
 import { readStorage, writeStorage } from '../editor/storage'
 import { TEMPLATES, type Template } from '../editor/templates'
 import { useMe } from '../session'
-import { usePauseOnInteraction } from '../toast'
+import { useAnnouncement, usePauseOnInteraction } from '../toast'
 import { autoStartTour, setTourContext, startTour, toursFor } from '../tours'
 import './library.css'
 
@@ -125,6 +125,8 @@ export function Library() {
   const [sharing, setSharing] = useState<string | null>(null)
   const [toast, setToastState] = useState<Toast | null>(null)
   const setToast = (text: string, undo?: DocMeta) => setToastState({ text, undo })
+  // Keyed by the toast object: each one is new, so identical text (two trashed documents) re-announces.
+  const toastSpoken = useAnnouncement(toast?.text ?? '', toast)
   const dismissToast = useCallback(() => setToastState(null), [])
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -504,7 +506,7 @@ export function Library() {
               <h2 className="section-title">{query ? `Results for “${query}”` : 'Documents'}</h2>
               <div className="docs-controls">
                 <label className="sort">
-                  <span className="visually-hidden">Sort by</span>
+                  <span className="sr-only">Sort by</span>
                   <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort documents">
                     <option value="updated">Last edited</option>
                     <option value="created">Date created</option>
@@ -597,7 +599,7 @@ export function Library() {
 
       {/* Mounted once, so a screen reader announces the text when it changes. */}
       <div className="sr-only" role="status">
-        {toast?.text ?? ''}
+        {toastSpoken}
       </div>
       {toast && (
         <LibraryToast

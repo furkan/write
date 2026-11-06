@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { useEffect } from 'react'
 import { useStore } from '../store'
-import { toast, usePauseOnInteraction, type ToastMessage } from '../toast'
+import { toast, useAnnouncement, usePauseOnInteraction, type ToastMessage } from '../toast'
 
 const VISIBLE_MS = { info: 6000, error: 10_000 }
 
@@ -10,13 +10,15 @@ export function Toast() {
   const message = useStore(toast)
   // Live regions only announce changes to content that is already mounted, so these stay in the
   // page and only their text changes; the visible toast is plain (and has the dismiss button).
+  const info = useAnnouncement(message?.tone === 'info' ? message.text : '', message?.id)
+  const error = useAnnouncement(message?.tone === 'error' ? message.text : '', message?.id)
   return (
     <>
       <div className="sr-only" role="status">
-        {message?.tone === 'info' ? message.text : ''}
+        {info}
       </div>
       <div className="sr-only" role="alert">
-        {message?.tone === 'error' ? message.text : ''}
+        {error}
       </div>
       {message && <ToastBox message={message} />}
     </>

@@ -1,4 +1,4 @@
-import { useState, type FocusEvent } from 'react'
+import { useEffect, useState, type FocusEvent } from 'react'
 import { createStore } from './store'
 
 /**
@@ -34,4 +34,19 @@ export function usePauseOnInteraction() {
       },
     },
   }
+}
+
+/**
+ * Text for a persistent live region. Identical text is not announced twice, so it is cleared and
+ * set again on the next frame whenever `key` (the toast's id) changes.
+ */
+export function useAnnouncement(text: string, key: unknown) {
+  const [shown, setShown] = useState<{ text: string; key: unknown } | null>(null)
+  useEffect(() => {
+    if (!text) return
+    const frame = requestAnimationFrame(() => setShown({ text, key }))
+    return () => cancelAnimationFrame(frame)
+  }, [text, key])
+  // Derived: empty the moment the key changes, filled again a frame later.
+  return shown && shown.text === text && Object.is(shown.key, key) ? text : ''
 }
