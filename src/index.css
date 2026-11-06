@@ -31,6 +31,8 @@
   --paper: var(--bg);
   --paper-edge: #dcdae2;
   --canvas: #e8e7ed;
+  /* Pure black or white at 10%, never a tinted neutral: a hairline edge on images. */
+  --image-edge: oklch(0 0 0 / 0.1);
 
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, 'SF Mono', Consolas, monospace;
@@ -73,6 +75,7 @@
     --paper: var(--surface);
     --paper-edge: var(--border);
     --canvas: var(--bg);
+    --image-edge: oklch(1 0 0 / 0.1);
     color-scheme: dark;
   }
 }
@@ -106,6 +109,7 @@
   --paper: var(--surface);
   --paper-edge: var(--border);
   --canvas: var(--bg);
+  --image-edge: oklch(1 0 0 / 0.1);
   color-scheme: dark;
 }
 

@@ -38,6 +38,7 @@
 .status-toggle {
   display: inline-grid;
   place-items: center;
+  position: relative;
   width: 26px;
   height: 22px;
   padding: 0;
@@ -46,6 +47,13 @@
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
+}
+
+/* A 28x32 hit area: as wide as the 2px gap allows, so neighbouring buttons never overlap. */
+.status-toggle::before {
+  position: absolute;
+  inset: -5px -1px;
+  content: '';
 }
 
 .status-toggle:hover:not([aria-disabled='true']) {
@@ -72,6 +80,11 @@
 .zoom-control .status-toggle:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* The slider sits 4px away on each side, so these two can reach 2px further. */
+.zoom-control .status-toggle::before {
+  inset: -5px -2px;
 }
 
 /* A thin track with a round thumb, like Word's. */
@@ -207,6 +220,7 @@
     --hl-comment: #675f72;
     --paper: #ffffff;
     --canvas: #ffffff;
+    --image-edge: oklch(0 0 0 / 0.1);
     color-scheme: light;
   }
 

@@ -1,5 +1,6 @@
 import { DragHandle } from '@tiptap/extension-drag-handle-react'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
+import { GripVertical } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useEditorState, type Editor } from '@tiptap/react'
 import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus'
@@ -147,7 +148,7 @@ export function EditorMenus({ editor, scrollTarget }: { editor: Editor; scrollTa
       {s.editable && (
         <DragHandle editor={editor} className="drag-handle-wrapper">
           <div className="drag-handle" title="Drag to move · click to select" aria-hidden="true">
-            ⋮⋮
+            <GripVertical aria-hidden size={16} />
           </div>
         </DragHandle>
       )}

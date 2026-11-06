@@ -50,3 +50,18 @@ export function useAnnouncement(text: string, key: unknown) {
   // Derived: empty the moment the key changes, filled again a frame later.
   return shown && shown.text === text && Object.is(shown.key, key) ? text : ''
 }
+
+/**
+ * Keeps the last value for `ms` after `value` becomes null, so a toast can fade out instead of
+ * vanishing. `leaving` is true during that short window; the live regions never depend on it.
+ */
+export function useExit<T>(value: T | null, ms = 150) {
+  const [held, setHeld] = useState<T | null>(value)
+  if (value && value !== held) setHeld(value)
+  useEffect(() => {
+    if (value || !held) return
+    const timer = window.setTimeout(() => setHeld(null), ms)
+    return () => window.clearTimeout(timer)
+  }, [value, held, ms])
+  return { shown: value ?? held, leaving: !value && held !== null }
+}

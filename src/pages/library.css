@@ -63,7 +63,8 @@
 }
 
 .search-icon {
-  font-size: 1.2rem;
+  display: grid;
+  place-items: center;
   color: var(--muted);
 }
 
@@ -80,6 +81,7 @@
 
 .section-title {
   margin: 0;
+  text-wrap: balance;
   font-size: 1rem;
   font-weight: 600;
 }
@@ -109,6 +111,11 @@
   background: none;
   border: none;
   cursor: pointer;
+  transition: scale 0.1s ease-out;
+}
+
+.template:active:not(:disabled) {
+  scale: 0.96;
 }
 
 .template:disabled {
@@ -117,8 +124,13 @@
 
 .template-name {
   margin-top: 8px;
+  text-wrap: balance;
   font-size: 0.9rem;
   font-weight: 600;
+}
+
+.template-desc {
+  text-wrap: pretty;
 }
 
 /* A miniature page, used for template and document thumbnails. */
@@ -231,6 +243,8 @@
 }
 
 .view-toggle button {
+  display: grid;
+  place-items: center;
   width: 32px;
   height: 28px;
   background: none;
@@ -372,6 +386,8 @@
 }
 
 .doc-menu > button {
+  display: grid;
+  place-items: center;
   width: 32px;
   min-width: 32px;
   height: 32px;
@@ -410,6 +426,8 @@
 }
 
 .doc-icon {
+  display: grid;
+  place-items: center;
   color: var(--accent);
 }
 
@@ -480,6 +498,12 @@
   border-radius: 8px;
   box-shadow: var(--shadow);
   transform: translateX(-50%);
+  animation: toast-in 0.2s ease-out backwards;
+}
+
+.toast.leaving {
+  pointer-events: none;
+  animation: toast-out 0.15s ease-out forwards;
 }
 
 .toast-action {
@@ -616,5 +640,14 @@
 
   .trash-actions {
     justify-content: flex-start;
+  }
+}
+
+/* No press feedback without motion. */
+@media (prefers-reduced-motion: reduce) {
+  .template,
+  .template:active:not(:disabled) {
+    transition: none;
+    scale: none;
   }
 }

@@ -144,6 +144,11 @@ html:has(.doc-shell) body {
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
+  transition: scale 0.1s ease-out;
+}
+
+.primary-button:active:not(:disabled) {
+  scale: 0.96;
 }
 
 .secondary-button {
@@ -421,6 +426,7 @@ html:has(.doc-shell) body {
 
 .deleted-title {
   margin: 0;
+  text-wrap: balance;
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text);
@@ -649,7 +655,7 @@ html:has(.doc-shell) body {
   text-align: left;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px; /* popup radius 10 - padding 6 */
   cursor: pointer;
 }
 
@@ -699,10 +705,12 @@ html:has(.doc-shell) body {
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
+  transition: box-shadow 0.12s ease-out;
 }
 
+/* A ring rather than a scale: it can't cover the neighbouring swatches. */
 .swatch:hover {
-  transform: scale(1.1);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--text);
 }
 
 /* ---------- Editor content ---------- */
@@ -951,16 +959,19 @@ html:has(.doc-shell) body {
 }
 
 /* Images (resizable node view) */
-.tiptap img {
+.tiptap img[src] {
   display: block;
   max-width: 100%;
   height: auto;
   border-radius: 8px;
+  outline: 1px solid var(--image-edge);
+  outline-offset: -1px;
 }
 
 .tiptap img.ProseMirror-selectednode,
 .tiptap [data-resize-container].ProseMirror-selectednode img {
   outline: 3px solid var(--accent);
+  outline-offset: 0;
 }
 
 .tiptap [data-resize-handle] {
@@ -1172,14 +1183,17 @@ html:has(.doc-shell) body {
   padding: 0 2px;
   background: var(--surface-2);
   border-radius: 3px;
-  filter: blur(4px);
-  transition: filter 0.2s;
+  /* Blurred by a text shadow with a fixed radius; only colours fade, so hover never re-runs a filter. */
+  color: transparent;
+  text-shadow: 0 0 6px var(--text);
+  transition: color 0.2s, text-shadow 0.2s;
 }
 
 .tiptap .spoiler:hover,
 .tiptap .spoiler:focus-within,
 .tiptap.ProseMirror-focused .has-focus .spoiler {
-  filter: none;
+  color: inherit;
+  text-shadow: 0 0 6px transparent;
 }
 
 /* Mentions + emoji */
@@ -1195,6 +1209,7 @@ html:has(.doc-shell) body {
 
 .tiptap [data-type='emoji'] img {
   display: inline;
+  outline: none; /* inline glyphs, not pictures */
   width: 1em;
   height: 1em;
   vertical-align: -0.1em;
@@ -1314,15 +1329,21 @@ html:has(.doc-shell) body {
 }
 
 .drag-handle {
+  position: relative;
   display: grid;
   place-items: center;
   width: 20px;
   height: 24px;
-  font-size: 0.8rem;
-  letter-spacing: -2px;
   color: var(--muted);
   border-radius: 4px;
   cursor: grab;
+}
+
+/* 32x32 hit area, grown away from the text so it never covers the block it moves. */
+.drag-handle::before {
+  position: absolute;
+  inset: -4px 0 -4px -12px;
+  content: '';
 }
 
 .drag-handle:hover {
@@ -1366,7 +1387,7 @@ html:has(.doc-shell) body {
   text-align: left;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px; /* popup radius 10 - padding 6 */
   cursor: pointer;
 }
 
@@ -1384,7 +1405,7 @@ html:has(.doc-shell) body {
   font-weight: 600;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px; /* no room inside a 4px item for more than this */
 }
 
 .suggestion-label {
@@ -1656,11 +1677,57 @@ html:has(.doc-shell) body {
   border-radius: 8px;
   box-shadow: var(--shadow);
   transform: translateX(-50%);
+  animation: toast-in 0.2s ease-out backwards;
+}
+
+.doc-toast.leaving {
+  pointer-events: none;
+  animation: toast-out 0.15s ease-out forwards;
 }
 
 .doc-toast.error {
   /* A danger tint, so an error reads differently from a notice without an accent stripe. */
   background: color-mix(in srgb, var(--danger) 35%, var(--text));
+}
+
+/* Shared with the library's toast. Enters 8px below its place, leaves 4px lower and faster. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+}
+
+@keyframes toast-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes toast-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Opacity only: nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .doc-toast,
+  .toast {
+    animation-name: toast-fade-in;
+  }
+
+  .doc-toast.leaving,
+  .toast.leaving {
+    animation-name: toast-fade-out;
+  }
 }
 
 .doc-toast-close {
@@ -1708,5 +1775,13 @@ html:has(.doc-shell) body {
   .image-alt input {
     height: 44px;
     font-size: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary-button,
+  .primary-button:active:not(:disabled) {
+    transition: none;
+    scale: none;
   }
 }

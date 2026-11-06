@@ -1,3 +1,4 @@
+import { FileText, LayoutGrid, List, MoreVertical, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createDoc,
@@ -24,7 +25,7 @@ import { ThemeToggle } from '../components/ThemeToggle'
 import { readStorage, writeStorage } from '../editor/storage'
 import { TEMPLATES, type Template } from '../editor/templates'
 import { useMe } from '../session'
-import { useAnnouncement, usePauseOnInteraction } from '../toast'
+import { useAnnouncement, useExit, usePauseOnInteraction } from '../toast'
 import { autoStartTour, setTourContext, startTour, toursFor } from '../tours'
 import './library.css'
 
@@ -127,6 +128,7 @@ export function Library() {
   const setToast = (text: string, undo?: DocMeta) => setToastState({ text, undo })
   // Keyed by the toast object: each one is new, so identical text (two trashed documents) re-announces.
   const toastSpoken = useAnnouncement(toast?.text ?? '', toast)
+  const { shown: shownToast, leaving: toastLeaving } = useExit(toast)
   const dismissToast = useCallback(() => setToastState(null), [])
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -346,7 +348,7 @@ export function Library() {
         </a>
         <label className="search" data-tour="search">
           <span className="search-icon" aria-hidden>
-            ⌕
+            <Search size={16} />
           </span>
           <input
             ref={searchRef}
@@ -471,7 +473,7 @@ export function Library() {
                 {visibleTrash.map((doc) => (
                   <li key={doc.id} className="doc-row">
                     <span className="doc-icon" aria-hidden>
-                      ▤
+                      <FileText size={16} />
                     </span>
                     <div className="doc-row-main">
                       <span className="doc-title">{displayTitle(doc)}</span>
@@ -521,7 +523,7 @@ export function Library() {
                     title="Grid view"
                     onClick={() => setView('grid')}
                   >
-                    <span aria-hidden>▦</span>
+                    <LayoutGrid aria-hidden size={16} />
                   </button>
                   <button
                     type="button"
@@ -530,7 +532,7 @@ export function Library() {
                     title="List view"
                     onClick={() => setView('list')}
                   >
-                    <span aria-hidden>☰</span>
+                    <List aria-hidden size={16} />
                   </button>
                 </div>
                 <button type="button" className="trash-button" data-tour="trash" onClick={() => goTo('trash')}>
@@ -601,9 +603,10 @@ export function Library() {
       <div className="sr-only" role="status">
         {toastSpoken}
       </div>
-      {toast && (
+      {shownToast && (
         <LibraryToast
-          toast={toast}
+          toast={shownToast}
+          leaving={toastLeaving}
           onDismiss={dismissToast}
           onUndo={(undo) => void restore(undo, 'Moved back to your documents.')}
         />
@@ -612,17 +615,17 @@ export function Library() {
   )
 }
 
-function LibraryToast({ toast, onDismiss, onUndo }: { toast: Toast; onDismiss: () => void; onUndo: (doc: DocMeta) => void }) {
+function LibraryToast({ toast, leaving, onDismiss, onUndo }: { toast: Toast; leaving: boolean; onDismiss: () => void; onUndo: (doc: DocMeta) => void }) {
   // Own component so the pause state goes with the toast. Leave time to reach an "Undo" button.
   const { paused, props } = usePauseOnInteraction()
   useEffect(() => {
-    if (paused) return
+    if (paused || leaving) return
     const timer = window.setTimeout(onDismiss, toast.undo ? 8000 : 3000)
     return () => window.clearTimeout(timer)
-  }, [toast, paused, onDismiss])
+  }, [toast, paused, leaving, onDismiss])
   const { undo } = toast
   return (
-    <div className="toast" {...props}>
+    <div className={`toast${leaving ? ' leaving' : ''}`} {...props}>
       <span>{toast.text}</span>
       {undo && (
         <button
@@ -703,7 +706,7 @@ function DocItem(props: DocItemProps) {
 
   // What the ⋮ menu offers follows your role on the document.
   const menu = (
-    <Dropdown label="⋮" title={`Actions for ${title}`} align="end" className="doc-menu" tour={isFirst ? 'doc-actions' : undefined}>
+    <Dropdown label={<MoreVertical aria-hidden size={16} />} title={`Actions for ${title}`} align="end" className="doc-menu" tour={isFirst ? 'doc-actions' : undefined}>
       {(close) => {
         const then = (run: () => void) => () => {
           close()
@@ -727,7 +730,7 @@ function DocItem(props: DocItemProps) {
     return (
       <li className="doc-row">
         <span className="doc-icon" aria-hidden>
-          ▤
+          <FileText size={16} />
         </span>
         <div className="doc-row-main">
           {titleNode}

@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ApiError, displayTitle, docUrl, getDoc, shareDoc, unshareDoc, type DocMeta, type Role, type ShareRole, type Shares } from '../api'
 import { isValidEmail, MAX_SHARES, normalizeEmail } from '../identity'
@@ -221,7 +222,7 @@ export function ShareDialog({ docId, onClose, onChange }: ShareDialogProps) {
                         disabled={busy}
                         onClick={() => void apply(() => unshareDoc(docId, person), `Removed ${person}.`)}
                       >
-                        ✕
+                        <X aria-hidden size={16} />
                       </button>
                     </>
                   ) : (

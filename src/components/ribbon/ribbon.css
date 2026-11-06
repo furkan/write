@@ -88,6 +88,11 @@
   border: 1px solid var(--accent);
   border-radius: 6px;
   cursor: pointer;
+  transition: scale 0.1s ease-out;
+}
+
+.ribbon-share:active {
+  scale: 0.96;
 }
 
 .ribbon-share:hover {
@@ -883,5 +888,13 @@
 
   .ribbon-pin {
     order: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ribbon-share,
+  .ribbon-share:active {
+    transition: none;
+    scale: none;
   }
 }
