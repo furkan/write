@@ -207,6 +207,12 @@ li[data-checked='true'] > div > p {
   text-decoration: line-through;
 }
 
+/* Typed spaces and tabs show as in the editor (which keeps whitespace); tab stops every half inch. */
+:is(p, h1, h2, h3, h4, h5, h6) {
+  white-space: pre-wrap;
+  tab-size: 0.5in;
+}
+
 /* Code blocks (lowlight) */
 pre {
   margin: 0 0 8pt;

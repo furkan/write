@@ -52,6 +52,33 @@ function moveBlocks(editor: Editor, dir: -1 | 1) {
   return true
 }
 
+/**
+ * Tab types a tab character, as in Word, instead of the browser moving focus out of the
+ * document (to the next button, or the address bar). Low priority, so lists (nest an item),
+ * tables (next cell) and the suggestion menus handle Tab first. Shift+Tab deletes a tab right
+ * before the cursor; otherwise it still moves focus back, so the keyboard can always leave.
+ */
+export const TabKey = Extension.create({
+  name: 'tabKey',
+  priority: 10,
+
+  addKeyboardShortcuts() {
+    return {
+      Tab: ({ editor }) => {
+        if (!editor.isEditable || !editor.state.selection.$from.parent.isTextblock) return false
+        editor.view.dispatch(editor.state.tr.insertText('\t').scrollIntoView())
+        return true
+      },
+      'Shift-Tab': ({ editor }) => {
+        const { empty, $from } = editor.state.selection
+        if (!editor.isEditable || !empty || $from.nodeBefore?.text?.endsWith('\t') !== true) return false
+        editor.view.dispatch(editor.state.tr.delete($from.pos - 1, $from.pos))
+        return true
+      },
+    }
+  },
+})
+
 const today = () =>
   new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
