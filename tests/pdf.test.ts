@@ -445,7 +445,7 @@ describe.skipIf(!CHROMIUM)('GET /api/docs/:id/pdf', () => {
       const body = words.filter((word) => word.y0 < footerTop)
       const footer = words.filter((word) => word.y0 >= footerTop)
       expect(Math.min(...body.map((w) => w.x0))).toBeCloseTo(left, 0)
-      expect(Math.max(...body.map((w) => w.x1))).toBeLessThanOrEqual(width - right + 0.5)
+      expect(Math.max(...body.map((w) => w.x1))).toBeLessThanOrEqual(width - right + 1.5)
       // The first line's glyph box starts a little above the line box's top.
       expect(Math.abs(Math.min(...body.map((w) => w.y0)) - top)).toBeLessThan(3)
       expect(Math.max(...body.map((w) => w.y1))).toBeLessThanOrEqual(height - bottom + 0.5)

@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/react'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react'
 import type { Session } from '../editor/collab'
 import { marginsOf, MAX_MARGIN, setPageSetup, type PageSetup } from '../editor/page-setup'
 import { IN } from '../editor/paper'
@@ -23,7 +23,7 @@ const MIN_TEXT = IN
 export type RulerUnit = 'cm' | 'in'
 
 /** A4 and A5 are metric, Letter and Legal use inches: the ruler follows the paper, as Word follows the region. */
-export const rulerUnit = (setup: PageSetup): RulerUnit => (setup.size === 'a4' || setup.size === 'a5' ? 'cm' : 'in')
+const rulerUnit = (setup: PageSetup): RulerUnit => (setup.size === 'a4' || setup.size === 'a5' ? 'cm' : 'in')
 
 const unitPx = (unit: RulerUnit) => (unit === 'cm' ? CM : IN)
 /** A small arrow-key step: 1 mm, or 1/16 inch. */
@@ -244,7 +244,7 @@ export function Ruler({ editor, session, setup, pageWidth, zoom, editable }: Rul
     if (x !== h.x) h.commit(snap(h, x))
   }
 
-  const ticks = useMemo(() => {
+  const ticks = (() => {
     const out: { x: number; size: 'minor' | 'mid' | 'major'; text?: string }[] = []
     const per = unitPx(unit)
     const subdivisions = unit === 'cm' ? 4 : 8
@@ -258,7 +258,7 @@ export function Ruler({ editor, session, setup, pageWidth, zoom, editable }: Rul
       out.push({ x, size, text: whole && i !== 0 ? String(Math.abs(i / subdivisions)) : undefined })
     }
     return out
-  }, [unit, left, pageWidth])
+  })()
 
   const live = (h: Handle) => (drag?.id === h.id ? clamp(h, drag.x) : h.x)
   const marginLeftX = drag?.id === 'margin-left' ? clamp(handles[0], drag.x) : left

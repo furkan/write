@@ -1,6 +1,6 @@
 import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { TextSelection } from '@tiptap/pm/state'
-import type { Editor } from '@tiptap/react'
+import { useEditorState, type Editor } from '@tiptap/react'
 import { X } from 'lucide-react'
 import { navPanePref } from '../editor/view-prefs'
 
@@ -21,6 +21,9 @@ export function NavigationPane({ editor, toc }: { editor: Editor; toc: TableOfCo
     target.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
   }
 
+  // The heading the cursor is under: the last one at or before it.
+  const cursor = useEditorState({ editor, selector: ({ editor: e }) => e.state.selection.from })
+  const current = toc.findLast((item) => item.pos <= cursor)
   const minLevel = toc.reduce((min, item) => Math.min(min, item.level), 6)
 
   return (
@@ -41,8 +44,8 @@ export function NavigationPane({ editor, toc }: { editor: Editor; toc: TableOfCo
             <li key={item.id} style={{ paddingLeft: `${(item.level - minLevel) * 14}px` }}>
               <button
                 type="button"
-                className={item.isActive ? 'active' : undefined}
-                aria-current={item.isActive ? 'location' : undefined}
+                className={item === current ? 'active' : undefined}
+                aria-current={item === current ? 'location' : undefined}
                 onClick={() => jump(item.pos, item.dom)}
               >
                 {item.textContent || <span className="muted">Untitled</span>}

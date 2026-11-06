@@ -195,7 +195,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Ribbon',
           description:
-            'The ribbon is the whole top bar. <b>File</b> has new documents, copies, printing, import and export; <b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup; <b>View</b> has the layouts, what to show, and zoom. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow at the far right collapses the ribbon to this row.',
+            'The ribbon is the whole top bar. <b>File</b> has new documents, copies, printing, import and export; <b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup; <b>View</b> has the layouts, what to show (ruler, navigation pane, Dark page) and zoom. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow at the far right collapses the ribbon to this row.',
           side: 'bottom',
         },
       },
@@ -220,13 +220,12 @@ export const TOURS: Record<TourId, Tour> = {
       {
         element: '[data-tour="editor"]',
         popover: {
-          title: 'Menus inside the text',
+          title: 'Typing shortcuts',
           description: `<ul class="tour-list">
-            <li>${k('/')} opens the <b>block menu</b>. Start typing to filter it.</li>
+            <li>Formatting lives in the <b>ribbon</b>, as in Word. The right-click menu is your browser’s, so spelling suggestions work.</li>
+            <li>${k('/')} opens a quiet <b>block menu</b> for quick inserts. Start typing to filter it.</li>
             <li>${k('@')} mentions a person and ${k(':')} inserts an emoji.</li>
-            <li><b>Select text</b> to get a formatting bubble.</li>
-            <li>An <b>empty line</b> shows quick-insert buttons below it.</li>
-            <li>Hover a block and grab ${k('⋮⋮')} on its left to <b>drag it</b> somewhere else.</li>
+            <li>The <b>ruler</b> above the page (View tab) sets the margins and the indents of the paragraph you are in: drag the markers, or focus one and use the arrow keys.</li>
           </ul>`,
           side: 'top',
           align: 'start',
@@ -235,9 +234,9 @@ export const TOURS: Record<TourId, Tour> = {
       {
         element: '[data-tour="toc"]',
         popover: {
-          title: 'Table of contents',
-          description: 'Built from your headings as you type. Click an entry to jump to it.',
-          side: 'left',
+          title: 'Navigation pane',
+          description: 'Your headings, as you type, down the left side. Click one to jump to it; the one you are in is highlighted. Show or hide it from the <b>View</b> tab.',
+          side: 'right',
         },
       },
       {
@@ -301,7 +300,7 @@ export const TOURS: Record<TourId, Tour> = {
         element: '[data-tour="marks"]',
         popover: {
           title: 'Text marks',
-          description: `Bold ${k(`${mod}+B`)}, italic ${k(`${mod}+I`)}, underline ${k(`${mod}+U`)}, strike ${k(`${mod}+Shift+S`)}, code ${k(`${mod}+E`)}, subscript ${k(`${mod}+,`)}, superscript ${k(`${mod}+.`)}, and a custom <b>spoiler</b> mark ${k(`${mod}+Alt+S`)}. Links (${k(`${mod}+K`)}) are on the <b>Insert</b> tab.`,
+          description: `Bold ${k(`${mod}+B`)}, italic ${k(`${mod}+I`)}, underline ${k(`${mod}+U`)}, strike ${k(`${mod}+Shift+S`)}, code ${k(`${mod}+E`)}, subscript ${k(`${mod}+,`)}, superscript ${k(`${mod}+.`)}, and a custom <b>spoiler</b> mark ${k(`${mod}+Alt+S`)} (also under Insert → More). Line and paragraph spacing is the button next to Quote. Links (${k(`${mod}+K`)}) are on the <b>Insert</b> tab.`,
           side: 'bottom',
         },
       },
@@ -382,7 +381,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Insert anything',
           description:
-            'The <b>Insert</b> tab has tables, pictures, YouTube videos, links, equations, emoji, callouts, toggle sections, dividers and today’s date. Typing <kbd>/</kbd> in the document opens the same blocks.',
+            'The <b>Insert</b> tab has tables, pictures, YouTube videos, links, equations, emoji, dividers and today’s date. Callouts, toggle sections and spoilers are under <b>More</b>. Typing <kbd>/</kbd> in the document opens the same blocks.',
           side: 'bottom',
         },
       },
