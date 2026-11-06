@@ -781,7 +781,7 @@ html:has(.doc-shell) body {
   line-height: 1.08;
   color: var(--heading);
   /* A little room above a heading jumped to from the navigation pane. */
-  scroll-margin-top: 48px;
+  scroll-margin-top: 16px;
 }
 
 .tiptap h1 {
@@ -1837,116 +1837,37 @@ html:has(.doc-shell) body {
   }
 }
 
-/* ---------- Ruler (Print layout; components/Ruler.tsx) ---------- */
+/* ---------- Custom margins dialog (components/MarginsDialog.tsx; shares the share dialog's look) ---------- */
 
-/* Sticks to the top of the document area, over the page's width and centred like it. */
-.ruler-bar {
-  position: sticky;
-  top: 0;
-  z-index: 12;
-  padding: 6px 24px 4px;
-  background: var(--canvas);
+.margins-dialog {
+  width: min(380px, calc(100vw - 24px));
 }
 
-.ruler {
-  position: relative;
-  width: var(--ruler-width);
-  margin: 0 auto;
-  user-select: none;
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-width: 1px 0;
-  touch-action: none;
-}
-
-.ruler-scale {
-  display: block;
-}
-
-.ruler-text-area {
-  fill: var(--bg);
-}
-
-.ruler-tick {
-  stroke: var(--muted);
-  stroke-width: 1;
-}
-
-.ruler-tick.major {
-  stroke: var(--text);
-}
-
-.ruler-number {
-  font: 9px var(--sans);
-  fill: var(--text);
-}
-
-.ruler-handle {
-  position: absolute;
+.margins-grid {
   display: grid;
-  place-items: center;
-  transform: translateX(-50%);
-  cursor: pointer;
-  touch-action: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
 }
 
-.ruler-handle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.margins-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
-.ruler-handle svg {
-  display: block;
-  fill: var(--bg);
-  stroke: var(--text);
-  stroke-width: 1;
+.margins-grid input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
 }
 
-.ruler-handle:hover svg,
-.ruler-handle.dragging svg {
-  fill: var(--accent-bg);
-  stroke: var(--accent);
-}
-
-.ruler-indent.first {
-  top: 0;
-}
-
-.ruler-indent.hanging,
-.ruler-indent.right {
-  top: 17px;
-}
-
-.ruler-indent.left {
-  top: 27px;
-}
-
-/* The margin boundary: a bar across the ruler, wide enough to grab. */
-.ruler-margin {
-  top: 0;
-  bottom: 0;
-  width: 9px;
-  cursor: ew-resize;
-}
-
-.ruler-bar-grip {
-  width: 3px;
-  height: 100%;
-  background: var(--border-strong);
-  opacity: 0;
-}
-
-.ruler-margin:hover .ruler-bar-grip,
-.ruler-margin:focus-visible .ruler-bar-grip,
-.ruler-margin.dragging .ruler-bar-grip {
-  background: var(--accent);
-  opacity: 1;
-}
-
-.ruler-handle[aria-disabled='true'] {
-  cursor: default;
-}
-
-.ruler-margin[aria-disabled='true']:hover .ruler-bar-grip {
-  opacity: 0;
+.margins-grid input[aria-invalid='true'] {
+  border-color: var(--danger);
 }

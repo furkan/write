@@ -21,9 +21,6 @@ function pref(key: string, fallback: boolean, apply?: (on: boolean) => void) {
   }
 }
 
-/** The ruler above the page (Print layout). On by default, like Word's. */
-export const rulerPref = pref('write:ruler', true)
-
 /** The navigation pane on the left. On by default: the contents used to be on screen from the start. */
 export const navPanePref = pref('write:nav-pane', true)
 

@@ -195,7 +195,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Ribbon',
           description:
-            'The ribbon is the whole top bar. <b>File</b> has new documents, copies, printing, import and export; <b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup; <b>View</b> has the layouts, what to show (ruler, navigation pane, Dark page) and zoom. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow at the far right collapses the ribbon to this row.',
+            'The ribbon is the whole top bar. <b>File</b> has new documents, copies, printing, import and export; <b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup (margin presets or exact values, orientation, size); <b>View</b> has the layouts, what to show (navigation pane, Dark page) and zoom. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow at the far right collapses the ribbon to this row.',
           side: 'bottom',
         },
       },
@@ -225,7 +225,7 @@ export const TOURS: Record<TourId, Tour> = {
             <li>Formatting lives in the <b>ribbon</b>, as in Word. The right-click menu is your browser’s, so spelling suggestions work.</li>
             <li>${k('/')} opens a quiet <b>block menu</b> for quick inserts. Start typing to filter it.</li>
             <li>${k('@')} mentions a person and ${k(':')} inserts an emoji.</li>
-            <li>The <b>ruler</b> above the page (View tab) sets the margins and the indents of the paragraph you are in: drag the markers, or focus one and use the arrow keys.</li>
+            <li><b>Layout → Margins</b> has presets and <b>Custom margins…</b> for exact values.</li>
           </ul>`,
           side: 'top',
           align: 'start',

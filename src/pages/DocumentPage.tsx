@@ -24,7 +24,6 @@ import { SessionBanner } from '../components/SessionBanner'
 import { Toast } from '../components/Toast'
 import { ShareDialog } from '../components/ShareDialog'
 import { NavigationPane } from '../components/NavigationPane'
-import { Ruler } from '../components/Ruler'
 import { StatusBar } from '../components/StatusBar'
 import { adoptLegacyBackup, saveBackup } from '../editor/backup'
 import { collabUser, getSession, getTitle, isDocEmpty, resume, seedDoc, setTitle, type Session } from '../editor/collab'
@@ -33,7 +32,7 @@ import { useConnectionStatus, useDocTitle, usePendingChanges, usePresence, useRe
 import { pageGeometry, pageRules, trackPageSetupUndo, usePagedView, usePageSetup } from '../editor/page-setup'
 import { findTemplate, type Template } from '../editor/templates'
 import { setDocumentScroller } from '../editor/scroller'
-import { navPanePref, rulerPref } from '../editor/view-prefs'
+import { navPanePref } from '../editor/view-prefs'
 import { fitZoom, useZoomSetting, type ZoomFit } from '../editor/zoom'
 import { accountAction, setSessionExpired, useMe } from '../session'
 import { autoStartTour, setTourContext, startTour } from '../tours'
@@ -668,7 +667,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
   const zoom = fit ? (fitted ?? 100) : zoomSetting.percent
   useZoomAnchor(zoom, editor, scroller)
   const navPane = navPanePref.use()
-  const ruler = rulerPref.use()
 
   const canToggleReadOnly = canWrite && !closedWhileOpen
   const chrome = useMemo<DocumentChrome>(
@@ -744,7 +742,6 @@ function Workspace({ session, template, role }: WorkspaceProps) {
             <div className="workspace">
               <main className="main" ref={mainRef}>
                 <h1 className="sr-only">{title || 'Untitled document'}</h1>
-                {paged && ruler && <Ruler editor={editor} session={session} setup={pageSetup} pageWidth={pagination.pageWidth} zoom={zoom} editable={!readOnly} />}
                 <div className="editor-shell" data-tour="editor">
                   <EditorContent editor={editor} className="editor" />
                   <EditorMenus editor={editor} scrollTarget={scroller} />

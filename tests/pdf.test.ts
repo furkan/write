@@ -412,6 +412,8 @@ const SETUPS: PageSetup[] = [
   { size: 'letter', orientation: 'landscape', margins: 'narrow' },
   { size: 'a5', orientation: 'portrait', margins: 'wide' },
   { size: 'legal', orientation: 'portrait', margins: 'narrow' },
+  { size: 'a4', orientation: 'portrait', margins: 'moderate' },
+  { size: 'letter', orientation: 'portrait', margins: 'custom', customMargins: [48, 120, 72, 60] },
 ]
 const setupId = (setup: PageSetup) => `doc-${setup.size}-${setup.orientation}-${setup.margins}`
 
@@ -510,7 +512,8 @@ describe.skipIf(!CHROMIUM)('GET /api/docs/:id/pdf', () => {
       // Centred, and nothing else from the browser (date, URL, title) on the sheet.
       const first = footer.filter((w) => w.y0 === footer[0]?.y0)
       const centre = (Math.min(...first.map((w) => w.x0)) + Math.max(...first.map((w) => w.x1))) / 2
-      expect(Math.abs(centre - width / 2)).toBeLessThan(2)
+      // Centred between the margins (the page centre when they are equal).
+      expect(Math.abs(centre - (left + (width - left - right) / 2))).toBeLessThan(2)
       expect(words.filter((w) => w.y0 < top - 3)).toEqual([])
       expect(footer.every((w) => /^(Page|of|\d+)$/.test(w.text))).toBe(true)
     }

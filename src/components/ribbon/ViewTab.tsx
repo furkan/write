@@ -8,14 +8,13 @@ import {
   PanelLeft,
   Pilcrow,
   RectangleVertical,
-  Ruler,
   Search,
   SunMoon,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
 import { setLayoutMode, useLayoutMode, useNarrowScreen, usePagedView } from '../../editor/page-setup'
-import { darkPagePref, navPanePref, rulerPref } from '../../editor/view-prefs'
+import { darkPagePref, navPanePref } from '../../editor/view-prefs'
 import { useDarkTheme } from '../../theme'
 import { setZoom, setZoomFit, stepZoom, useZoomSetting, ZOOM_MAX, ZOOM_MIN } from '../../editor/zoom'
 import { ThemeMenuItems } from '../ThemeToggle'
@@ -35,7 +34,6 @@ export function ViewTab() {
   const narrow = useNarrowScreen()
   const canFit = usePagedView()
   const { fit } = useZoomSetting()
-  const ruler = rulerPref.use()
   const navPane = navPanePref.use()
   const darkPage = darkPagePref.use()
   const darkTheme = useDarkTheme()
@@ -68,15 +66,6 @@ export function ViewTab() {
       <RibbonGroup label="Show" tour="show">
         <div className="ribbon-row">
           <div className="ribbon-stack">
-            <RibbonButton
-              size="medium"
-              label="Ruler"
-              title={canFit ? 'Ruler: margins and indents' : 'Ruler (Print layout only)'}
-              icon={Ruler}
-              active={ruler && canFit}
-              disabled={!canFit}
-              onClick={() => rulerPref.set(!ruler)}
-            />
             <RibbonButton size="medium" label="Navigation pane" title="Navigation pane: the document's headings" icon={PanelLeft} active={navPane} onClick={() => navPanePref.set(!navPane)} />
             <RibbonButton
               size="medium"

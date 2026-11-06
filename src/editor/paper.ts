@@ -8,9 +8,9 @@
 
 export type PaperSize = 'a4' | 'letter' | 'legal' | 'a5'
 export type Orientation = 'portrait' | 'landscape'
-export type MarginPreset = 'normal' | 'narrow' | 'wide'
+export type MarginPreset = 'normal' | 'narrow' | 'moderate' | 'wide'
 export type Margins = readonly [top: number, right: number, bottom: number, left: number]
-/** `custom` is what dragging a margin on the ruler makes: `customMargins` (CSS px) then applies. */
+/** `custom` is what the Custom margins dialog makes: `customMargins` (CSS px) then applies. */
 export type PageSetup = { size: PaperSize; orientation: Orientation; margins: MarginPreset | 'custom'; customMargins?: Margins }
 
 const MM = 96 / 25.4
@@ -29,6 +29,7 @@ export const PAPER_SIZES: Record<PaperSize, { label: string; detail: string; wid
 export const MARGIN_PRESETS: Record<MarginPreset, { label: string; detail: string; margins: [number, number, number, number] }> = {
   normal: { label: 'Normal', detail: '1 in all round', margins: [IN, IN, IN, IN] },
   narrow: { label: 'Narrow', detail: '0.5 in all round', margins: [IN / 2, IN / 2, IN / 2, IN / 2] },
+  moderate: { label: 'Moderate', detail: '1 in top and bottom, 0.75 in sides', margins: [IN, 0.75 * IN, IN, 0.75 * IN] },
   wide: { label: 'Wide', detail: '1 in top and bottom, 2 in sides', margins: [IN, 2 * IN, IN, 2 * IN] },
 }
 
@@ -47,7 +48,7 @@ export const PAGE_SETUP_KEYS = {
   customMargins: 'pageMarginValues',
 } as const
 
-/** The largest margin the ruler can make: 3 inches. */
+/** The largest margin: 3 inches. */
 export const MAX_MARGIN = 3 * IN
 
 /** Top, right, bottom and left margins in CSS px: the preset's, or the custom ones. */
@@ -76,4 +77,40 @@ export function readPageSetup(meta: { get: (key: string) => unknown }): PageSetu
   const orientation = oneOf(meta.get(PAGE_SETUP_KEYS.orientation), ORIENTATIONS, DEFAULT_PAGE_SETUP.orientation)
   if (margins === 'custom' && customMargins) return { size, orientation, margins, customMargins }
   return { size, orientation, margins: oneOf(margins, MARGIN_PRESETS, 'normal') }
+}
+
+export type MarginUnit = 'cm' | 'in'
+
+/** Margins are entered in the paper's own unit: A4 and A5 in cm, Letter and Legal in inches (as Word follows the region). */
+export const marginUnit = (size: PaperSize): MarginUnit => (size === 'a4' || size === 'a5' ? 'cm' : 'in')
+
+export const PX_PER_UNIT: Record<MarginUnit, number> = { cm: IN / 2.54, in: IN }
+
+/** The least text the page keeps: an inch each way. */
+export const MIN_TEXT = IN
+
+export type MarginErrors = Partial<Record<'top' | 'bottom' | 'left' | 'right' | 'width' | 'height', string>>
+
+/**
+ * Checks margins (top, right, bottom, left in px) against the page: each between 0 and 3 inches,
+ * and at least an inch of text width and height left. Returns messages by field; empty when fine.
+ */
+export function validateMargins(setup: Pick<PageSetup, 'size' | 'orientation'>, margins: readonly (number | null)[], unit: MarginUnit = marginUnit(setup.size)): MarginErrors {
+  const paper = PAPER_SIZES[setup.size]
+  const landscape = setup.orientation === 'landscape'
+  const [pageWidth, pageHeight] = landscape ? [paper.height, paper.width] : [paper.width, paper.height]
+  const max = Math.round((MAX_MARGIN / PX_PER_UNIT[unit]) * 100) / 100
+  const errors: MarginErrors = {}
+  const names = ['top', 'right', 'bottom', 'left'] as const
+  names.forEach((name, i) => {
+    const m = margins[i]
+    if (m === null || !Number.isFinite(m)) errors[name] = `Enter a number for the ${name} margin.`
+    else if (m < -1e-6 || m > MAX_MARGIN + 1e-6) errors[name] = `The ${name} margin must be between 0 and ${max} ${unit}.`
+  })
+  const [top, right, bottom, left] = margins
+  if (!errors.left && !errors.right && pageWidth - (left as number) - (right as number) < MIN_TEXT - 1e-6)
+    errors.width = `Left and right margins leave too little text width: keep at least ${Math.round((MIN_TEXT / PX_PER_UNIT[unit]) * 100) / 100} ${unit}.`
+  if (!errors.top && !errors.bottom && pageHeight - (top as number) - (bottom as number) < MIN_TEXT - 1e-6)
+    errors.height = `Top and bottom margins leave too little text height: keep at least ${Math.round((MIN_TEXT / PX_PER_UNIT[unit]) * 100) / 100} ${unit}.`
+  return errors
 }

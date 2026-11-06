@@ -136,7 +136,7 @@ export function everyNodeJson(imageUrl: string): Json {
   }
 }
 
-export type Meta = Partial<{ title: string; pageSize: string; pageOrientation: string; pageMargins: string }>
+export type Meta = Partial<{ title: string; pageSize: string; pageOrientation: string; pageMargins: string; pageMarginValues: string }>
 
 /** A Yjs update for `json` with `meta` (title, page setup). */
 export function docState(json: Json, meta: Meta = {}) {
@@ -171,4 +171,5 @@ export const pageMeta =(setup: PageSetup): Meta => ({
   pageSize: setup.size,
   pageOrientation: setup.orientation,
   pageMargins: setup.margins,
+  ...(setup.customMargins ? { pageMarginValues: setup.customMargins.join(',') } : {}),
 })

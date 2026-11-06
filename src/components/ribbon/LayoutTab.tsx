@@ -1,5 +1,7 @@
 import { Check, Proportions, RotateCwSquare, ScanText } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { MarginsDialog } from '../MarginsDialog'
+import { marginUnit, PX_PER_UNIT, type MarginUnit } from '../../editor/paper'
 import {
   marginsOf,
   MARGIN_PRESETS,
@@ -19,8 +21,19 @@ const entries = <K extends string, V>(record: Record<K, V>) => Object.entries(re
 /** The tallest paper, so the Size menu's pages are drawn to one scale. */
 const LARGEST = Math.max(...Object.values(PAPER_SIZES).map((p) => p.height))
 
-/** Inches, Word style: 1″, 0.5″. */
-const inches = (px: number) => `${px / 96}″`
+/** A margin in the paper's unit: 2.54 cm, 0.75 in. */
+const amount = (px: number, unit: MarginUnit) => `${Math.round((px / PX_PER_UNIT[unit]) * 100) / 100} ${unit}`
+
+function MarginValues({ margins, unit }: { margins: readonly number[]; unit: MarginUnit }) {
+  const [top, right, bottom, left] = margins
+  return (
+    <>
+      Top {amount(top, unit)} · Bottom {amount(bottom, unit)}
+      <br />
+      Left {amount(left, unit)} · Right {amount(right, unit)}
+    </>
+  )
+}
 
 /**
  * Page setup for the whole document, like Word's Layout tab: margins, orientation and size, kept
@@ -30,6 +43,8 @@ export function LayoutTab({ session, disabled }: TabProps) {
   const setup = usePageSetup(session)
   const choose = (change: Partial<PageSetup>) => setPageSetup(session, change)
   const current = pageGeometry(setup)
+  const unit = marginUnit(setup.size)
+  const [customOpen, setCustomOpen] = useState(false)
 
   return (
     <RibbonGroup label="Page Setup" tour="page-setup">
@@ -37,37 +52,37 @@ export function LayoutTab({ session, disabled }: TabProps) {
         <RibbonMenuButton label="Margins" icon={ScanText} disabled={disabled}>
           {(close) => (
             <>
-              {entries(MARGIN_PRESETS).map(([margins, preset]) => {
-              const [top, right, bottom, left] = preset.margins
-              return (
+              {entries(MARGIN_PRESETS).map(([margins, preset]) => (
                 <PageOption
                   key={margins}
                   checked={setup.margins === margins}
                   icon={<PageIcon width={current.pageWidth} height={current.pageHeight} margins={preset.margins} />}
                   name={preset.label}
-                  detail={
-                    <>
-                      Top {inches(top)} · Bottom {inches(bottom)}
-                      <br />
-                      Left {inches(left)} · Right {inches(right)}
-                    </>
-                  }
+                  detail={<MarginValues margins={preset.margins} unit={unit} />}
                   onSelect={() => {
                     close()
                     choose({ margins })
                   }}
                 />
-              )
-              })}
+              ))}
               {setup.margins === 'custom' && (
                 <PageOption
                   checked
                   icon={<PageIcon width={current.pageWidth} height={current.pageHeight} margins={marginsOf(setup)} />}
                   name="Custom"
-                  detail="Set by dragging the ruler"
+                  detail={<MarginValues margins={marginsOf(setup)} unit={unit} />}
                   onSelect={close}
                 />
               )}
+              <hr />
+              <MenuItem
+                onSelect={() => {
+                  close()
+                  setCustomOpen(true)
+                }}
+              >
+                Custom margins…
+              </MenuItem>
             </>
           )}
         </RibbonMenuButton>
@@ -110,6 +125,7 @@ export function LayoutTab({ session, disabled }: TabProps) {
           }
         </RibbonMenuButton>
       </div>
+      {customOpen && <MarginsDialog session={session} setup={setup} onClose={() => setCustomOpen(false)} />}
     </RibbonGroup>
   )
 }
