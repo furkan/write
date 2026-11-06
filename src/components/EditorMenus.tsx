@@ -1,5 +1,5 @@
 import { DragHandle } from '@tiptap/extension-drag-handle-react'
-import { TextSelection } from '@tiptap/pm/state'
+import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import { useEditorState, type Editor } from '@tiptap/react'
 import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus'
 import { blockActions, setLink } from '../editor/blocks'
@@ -12,6 +12,34 @@ const QUICK_BLOCKS = ['h1', 'h2', 'bullet', 'task', 'quote', 'code', 'table', 'i
  * Bubble menu (on text selection), floating "+" menu (on empty lines) and the block drag handle.
  * `scrollTarget`: what scrolls the document (the page's scroller), so the menus follow it.
  */
+/** Alt text for the selected image: a labelled input, committed on every keystroke. */
+function ImageAltField({ editor }: { editor: Editor }) {
+  const alt = useEditorState({
+    editor,
+    selector: ({ editor: e }) => (e.getAttributes('image').alt as string | null) ?? '',
+  })
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px', fontSize: '0.75rem', color: 'var(--muted)' }}>
+      <span>Alt text</span>
+      <input
+        type="text"
+        style={{ width: 220, maxWidth: '60vw', height: 28, padding: '0 6px', font: 'inherit', fontSize: '0.85rem', color: 'var(--text)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4 }}
+        value={alt}
+        placeholder="Describe the image"
+        onChange={(e) => {
+          editor.chain().updateAttributes('image', { alt: e.target.value }).run()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === 'Escape') {
+            e.preventDefault()
+            editor.chain().focus().run()
+          }
+        }}
+      />
+    </label>
+  )
+}
+
 export function EditorMenus({ editor, scrollTarget }: { editor: Editor; scrollTarget: HTMLElement | null }) {
   const s = useEditorState({
     editor,
@@ -75,6 +103,17 @@ export function EditorMenus({ editor, scrollTarget }: { editor: Editor; scrollTa
         </ToolButton>
       </BubbleMenu>
 
+      <BubbleMenu
+        editor={editor}
+        className="bubble-menu"
+        options={{ placement: 'bottom', offset: 8, scrollTarget: scrollTarget ?? window }}
+        shouldShow={({ editor: e, state }) =>
+          e.isEditable && state.selection instanceof NodeSelection && state.selection.node.type.name === 'image'
+        }
+      >
+        <ImageAltField editor={editor} />
+      </BubbleMenu>
+
       <FloatingMenu editor={editor} className="floating-menu" options={{ placement: 'bottom-start', offset: 4, scrollTarget: scrollTarget ?? window }}>
         <span className="floating-plus" aria-hidden>
           ＋
@@ -92,7 +131,7 @@ export function EditorMenus({ editor, scrollTarget }: { editor: Editor; scrollTa
 
       {s.editable && (
         <DragHandle editor={editor} className="drag-handle-wrapper">
-          <div className="drag-handle" title="Drag to move · click to select" aria-label="Drag block">
+          <div className="drag-handle" title="Drag to move · click to select" aria-hidden="true">
             ⋮⋮
           </div>
         </DragHandle>

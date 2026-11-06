@@ -15,12 +15,44 @@ const scaleOf = (el: HTMLElement) => (el.offsetWidth ? el.getBoundingClientRect(
 
 // Images: ResizableNodeView turns the pointer's movement since the start into a size in
 // `handleResize` (for the mouse and touch alike). Wrapped once, on the shared prototype.
-type Resizable = { element: HTMLElement; handleResize(deltaX: number, deltaY: number): void }
+// The zoom is read once when a drag starts, not on every move (layout reads in a hot path).
+//
+// Tiptap also only ends a drag on `mouseup`, so a touch drag never committed its size and kept
+// resizing on later swipes. Touch end/cancel are made to finish it the same way, and the touchmove
+// listener it leaves behind is removed.
+type Resizable = {
+  element: HTMLElement
+  handleMap: Map<string, HTMLElement>
+  handleMouseUp: () => void
+  handleTouchMove: (event: TouchEvent) => void
+  dragScale?: number
+  attachHandles(): void
+  handleResizeStart(event: MouseEvent | TouchEvent, direction: string): void
+  handleResize(deltaX: number, deltaY: number): void
+}
 const resizable = ResizableNodeView.prototype as unknown as Resizable & { zoomAware?: true }
 if (!resizable.zoomAware) {
-  const handleResize = resizable.handleResize
+  const { attachHandles, handleResizeStart, handleResize } = resizable
+  resizable.attachHandles = function (this: Resizable) {
+    attachHandles.call(this)
+    // Without this the browser scrolls the page instead of delivering the drag.
+    this.handleMap.forEach((handle) => (handle.style.touchAction = 'none'))
+  }
+  resizable.handleResizeStart = function (this: Resizable, event, direction) {
+    handleResizeStart.call(this, event, direction)
+    this.dragScale = scaleOf(this.element)
+    if (!('touches' in event)) return
+    const end = () => {
+      document.removeEventListener('touchend', end)
+      document.removeEventListener('touchcancel', end)
+      document.removeEventListener('touchmove', this.handleTouchMove)
+      this.handleMouseUp()
+    }
+    document.addEventListener('touchend', end)
+    document.addEventListener('touchcancel', end)
+  }
   resizable.handleResize = function (this: Resizable, deltaX: number, deltaY: number) {
-    const scale = scaleOf(this.element)
+    const scale = this.dragScale ?? scaleOf(this.element)
     handleResize.call(this, deltaX / scale, deltaY / scale)
   }
   resizable.zoomAware = true

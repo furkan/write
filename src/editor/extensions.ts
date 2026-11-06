@@ -6,6 +6,8 @@ import type { TableOfContentData } from '@tiptap/extension-table-of-contents'
 import { Typography } from '@tiptap/extension-typography'
 import { CharacterCount, Focus, Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
+import { Extension } from '@tiptap/core'
+import { NodeSelection } from '@tiptap/pm/state'
 import { ReactNodeViewRenderer, type Editor, type Extensions } from '@tiptap/react'
 import { presenceLabel } from '../identity'
 import type { CollabUser, Session } from './collab'
@@ -42,7 +44,7 @@ async function insertImageFiles(editor: Editor, files: File[], pos?: number) {
   if (!accepted.length) return
   const sources = await Promise.all(accepted.map(readAsDataURL))
   if (editor.isDestroyed) return
-  const content = sources.map((src, i) => ({ type: 'image', attrs: { src, alt: accepted[i].name } }))
+  const content = sources.map((src) => ({ type: 'image', attrs: { src, alt: '' } }))
   if (pos === undefined) {
     editor.chain().focus().insertContent(content).run()
     return
@@ -159,6 +161,21 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
     schema.callout.extend({ addNodeView: () => ReactNodeViewRenderer(CalloutView) }),
     schema.spoiler,
     Shortcuts.configure({ onSave }),
+    // Math is edited by clicking it; Enter on a selected math node (reached with the keyboard) does the same.
+    Extension.create({
+      name: 'mathEnter',
+      priority: 1000,
+      addKeyboardShortcuts: () => ({
+        Enter: ({ editor }) => {
+          const sel = editor.state.selection
+          if (!editor.isEditable || !(sel instanceof NodeSelection)) return false
+          const name = sel.node.type.name
+          if (name !== 'inlineMath' && name !== 'blockMath') return false
+          editMath(editor, name === 'inlineMath' ? 'inline' : 'block', sel.node.attrs.latex, sel.from)
+          return true
+        },
+      }),
+    }),
     Pagination.configure(pagination),
     ZoomedResize,
 
