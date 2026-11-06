@@ -1196,6 +1196,19 @@ html:has(.doc-shell) body {
   text-shadow: 0 0 6px transparent;
 }
 
+/* A link around a spoiler: its underline belongs to the <a>, so hide and reveal it with the spoiler. */
+.tiptap a:has(.spoiler) {
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.2s;
+}
+
+.tiptap a:has(.spoiler:hover),
+.tiptap a:has(.spoiler:focus-within),
+.tiptap a:focus-within:has(.spoiler),
+.tiptap.ProseMirror-focused .has-focus a:has(.spoiler) {
+  text-decoration-color: currentColor;
+}
+
 /* Mentions + emoji */
 .tiptap .mention {
   padding: 1px 5px;
@@ -1748,7 +1761,7 @@ html:has(.doc-shell) body {
   background: color-mix(in srgb, var(--bg) 18%, transparent);
 }
 
-/* Alt text field in the image bubble menu. Enter on a selected image focuses it. */
+/* Alt text field in the image bubble menu. Alt+Enter on a selected image focuses it. */
 .image-alt {
   display: flex;
   align-items: center;

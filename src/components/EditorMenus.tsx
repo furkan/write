@@ -21,11 +21,12 @@ function ImageAltField({ editor }: { editor: Editor }) {
     selector: ({ editor: e }) => (e.getAttributes('image').alt as string | null) ?? '',
   })
   const input = useRef<HTMLInputElement>(null)
-  // Keyboard way in: with an image selected, Enter (or Alt+Enter) moves focus to the field.
+  // Keyboard way in: with an image selected, Alt+Enter moves focus to the field (plain Enter keeps its normal behaviour).
   useEffect(() => {
     const dom = editor.view.dom
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey) return
+      if (event.key !== 'Enter' || !event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) return
+      if (!editor.isEditable) return
       const { selection } = editor.state
       if (!(selection instanceof NodeSelection) || selection.node.type.name !== 'image') return
       event.preventDefault()

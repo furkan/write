@@ -37,10 +37,11 @@ function moveBlocks(editor: Editor, dir: -1 | 1) {
   const shift = dir < 0 ? -size : size
   const tr = state.tr.delete(start, end).insert(start + shift, moved)
   // Same selection, shifted with the blocks: whatever kind it is (text, node, table cells).
-  const json = selection.toJSON() as { type: string; anchor?: number; head?: number }
+  const json = selection.toJSON() as { type: string; anchor?: number; head?: number; pos?: number }
   if (json.type !== 'all') {
     if (json.anchor !== undefined) json.anchor += shift
     if (json.head !== undefined) json.head += shift
+    if (json.pos !== undefined) json.pos += shift // GapCursor
     try {
       tr.setSelection(Selection.fromJSON(tr.doc, json))
     } catch {

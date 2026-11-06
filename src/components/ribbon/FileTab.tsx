@@ -29,6 +29,14 @@ import type { TabProps } from './editorState'
 
 const fileSafe = (name: string) => name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'document'
 
+/** The editor's HTML without the editor-only `loading="lazy"` on embeds, removed structurally (text stays intact). */
+function exportHtml(html: string) {
+  const tpl = document.createElement('template')
+  tpl.innerHTML = html
+  tpl.content.querySelectorAll('iframe[loading]').forEach((el) => el.removeAttribute('loading'))
+  return tpl.innerHTML
+}
+
 function download(filename: string, content: string, type: string) {
   const url = URL.createObjectURL(new Blob([content], { type }))
   const a = document.createElement('a')
@@ -187,7 +195,7 @@ export function FileTab({ editor, session }: TabProps) {
               size="medium"
               label="Export HTML"
               icon={FileCode}
-              onClick={() => download(`${baseName()}.html`, editor.getHTML().replaceAll(' loading="lazy"', ''), 'text/html')}
+              onClick={() => download(`${baseName()}.html`, exportHtml(editor.getHTML()), 'text/html')}
             />
             <RibbonButton
               size="medium"
