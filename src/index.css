@@ -5,6 +5,8 @@
   --surface: #f6f5f8;
   --surface-2: #eeedf2;
   --border: #e5e4e7;
+  /* Input outlines and other boundaries that must be seen (3:1 on --bg and --surface). */
+  --border-strong: #857f90;
   --accent: #7c3aed;
   --accent-contrast: #ffffff;
   --accent-bg: rgba(124, 58, 237, 0.12);
@@ -13,6 +15,9 @@
   --danger: #dc2626;
   --success: #16a34a;
   --warning: #ca8a04;
+  /* Text-safe variants (4.5:1 on --bg and --surface); the plain ones are for fills and dots. */
+  --warning-text: #946000;
+  --success-text: #15803d;
   --info: #2563eb;
   --radius: 10px;
   --hl-keyword: #7c3aed;
@@ -20,6 +25,7 @@
   --hl-number: #c2410c;
   --hl-title: #2563eb;
   --hl-type: #b45309;
+  --hl-comment: #675f72;
   --page-shadow: 0 1px 3px rgba(20, 10, 40, 0.12);
   /* Print layout: the document's pages and the canvas around them. */
   --paper: var(--bg);
@@ -45,6 +51,8 @@
     --surface: #1f1c25;
     --surface-2: #2a2631;
     --border: #322d3a;
+  --border-strong: #847c91;
+    --border-strong: #847c91;
     --accent: #b388ff;
     --accent-contrast: #16141a;
     --accent-bg: rgba(179, 136, 255, 0.16);
@@ -53,12 +61,18 @@
     --danger: #f87171;
     --success: #4ade80;
     --warning: #facc15;
+  --warning-text: #facc15;
+  --success-text: #4ade80;
+    --warning-text: #facc15;
+    --success-text: #4ade80;
     --info: #60a5fa;
     --hl-keyword: #c4b5fd;
     --hl-string: #86efac;
     --hl-number: #fdba74;
     --hl-title: #93c5fd;
     --hl-type: #fcd34d;
+  --hl-comment: #a39cb0;
+    --hl-comment: #a39cb0;
     --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
     --paper: var(--surface);
     --paper-edge: var(--border);
@@ -97,6 +111,19 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* Visually hidden, still read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
 }
 
 body {

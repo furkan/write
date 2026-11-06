@@ -36,14 +36,21 @@
   padding: 0 14px;
   margin: 0 auto;
   background: var(--surface);
-  border: 1px solid transparent;
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
 }
 
 .search:focus-within {
   background: var(--bg);
-  border-color: var(--border);
+  border-color: var(--accent);
   box-shadow: var(--shadow);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.search input::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 
 .search input {
@@ -211,7 +218,7 @@
   padding: 0 8px;
   font-size: 0.85rem;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
 }
 

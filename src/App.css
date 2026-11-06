@@ -18,6 +18,21 @@
   animation: spin 0.8s linear infinite;
 }
 
+/* No spinning: a pulsing ring still shows that something is loading. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    border-top-color: var(--border);
+    background: var(--accent-bg);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -306,7 +321,7 @@ html:has(.doc-shell) body {
   height: 36px;
   padding: 0 10px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
 }
 
@@ -344,7 +359,7 @@ html:has(.doc-shell) body {
 
 .share-notice {
   font-size: 0.85rem;
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .share-list {
@@ -853,7 +868,7 @@ html:has(.doc-shell) body {
 
 .tiptap pre .hljs-comment,
 .tiptap pre .hljs-quote {
-  color: #8b8496;
+  color: var(--hl-comment);
   font-style: italic;
 }
 
@@ -967,6 +982,17 @@ html:has(.doc-shell) body {
   border-radius: 50%;
   opacity: 0;
   transition: opacity 0.15s;
+  /* Dragging a handle must not scroll or zoom the page. */
+  touch-action: none;
+}
+
+/* Touch: a 12px dot is too small to grab, so the hit area grows around it. */
+@media (pointer: coarse) {
+  .tiptap [data-resize-handle]::before {
+    position: absolute;
+    inset: -16px;
+    content: '';
+  }
 }
 
 .tiptap [data-resize-container]:hover [data-resize-handle],
@@ -993,6 +1019,24 @@ html:has(.doc-shell) body {
 .tiptap [data-resize-handle='bottom-right'] {
   transform: translate(50%, 50%);
   cursor: nwse-resize;
+}
+
+/* Text colours are stored as fixed values (picked for white paper), so lift them on dark paper to
+   keep them readable (4.5:1) in the same hue. Print is always light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .tiptap [style*='color:']:not([style*='background']) {
+    filter: brightness(1.5);
+  }
+}
+
+:root[data-theme='dark'] .tiptap [style*='color:']:not([style*='background']) {
+  filter: brightness(1.5);
+}
+
+@media print {
+  :root .tiptap [style*='color:']:not([style*='background']) {
+    filter: none !important;
+  }
 }
 
 /* YouTube */
@@ -1198,7 +1242,6 @@ html:has(.doc-shell) body {
   color: var(--muted);
   pointer-events: none;
   content: attr(data-placeholder);
-  opacity: 0.7;
 }
 
 /* Focus mode: dim everything except the block being edited */
@@ -1485,7 +1528,7 @@ html:has(.doc-shell) body {
 .badge {
   padding: 0 6px;
   font-weight: 600;
-  color: var(--warning);
+  color: var(--warning-text);
   border: 1px solid currentColor;
   border-radius: 999px;
 }
@@ -1625,7 +1668,8 @@ html:has(.doc-shell) body {
 }
 
 .doc-toast.error {
-  border-left: 4px solid var(--danger);
+  /* A danger tint, so an error reads differently from a notice without an accent stripe. */
+  background: color-mix(in srgb, var(--danger) 35%, var(--text));
 }
 
 .doc-toast-close {

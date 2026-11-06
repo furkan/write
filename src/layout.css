@@ -146,6 +146,38 @@
   background: var(--surface-2);
 }
 
+/* Touch: 24px at least for every status-bar control (WCAG 2.5.8); the bar grows a little. */
+@media (pointer: coarse) {
+  .status-toggle {
+    width: 32px;
+    height: 32px;
+  }
+
+  .status-bar .zoom-percent > button {
+    min-width: 48px;
+    height: 32px;
+  }
+
+  .zoom-range {
+    height: 32px;
+  }
+
+  .zoom-range::-webkit-slider-runnable-track {
+    height: 4px;
+  }
+
+  .zoom-range::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+    margin-top: -10px;
+  }
+
+  .zoom-range::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 /* ---------- Printing: only the document, on sheets that match its page setup ---------- */
 
 @media print {
@@ -157,18 +189,22 @@
     --surface: #f6f5f8;
     --surface-2: #eeedf2;
     --border: #e5e4e7;
+    --border-strong: #857f90;
     --accent: #7c3aed;
     --accent-bg: rgba(124, 58, 237, 0.12);
     --code-bg: #f4f3ec;
     --danger: #dc2626;
     --success: #16a34a;
     --warning: #ca8a04;
+    --warning-text: #946000;
+    --success-text: #15803d;
     --info: #2563eb;
     --hl-keyword: #7c3aed;
     --hl-string: #15803d;
     --hl-number: #c2410c;
     --hl-title: #2563eb;
     --hl-type: #b45309;
+    --hl-comment: #675f72;
     --paper: #ffffff;
     --canvas: #ffffff;
     color-scheme: light;
