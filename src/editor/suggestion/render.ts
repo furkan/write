@@ -13,7 +13,7 @@ import { SuggestionList, type SuggestionItem, type SuggestionListProps, type Sug
  */
 // The trigger character says what is being suggested; it names the listbox.
 const KIND_LABELS: Record<string, string> = { '/': 'Commands', '@': 'Mentions', ':': 'Emoji' }
-const ARIA_ATTRS = ['aria-activedescendant', 'aria-controls', 'aria-expanded', 'aria-autocomplete'] as const
+const ARIA_ATTRS = ['aria-activedescendant', 'aria-controls', 'aria-autocomplete'] as const
 let popupCount = 0
 
 export function renderSuggestionList(emptyText?: string, label?: string): SuggestionOptions<SuggestionItem>['render'] {
@@ -55,7 +55,6 @@ export function renderSuggestionList(emptyText?: string, label?: string): Sugges
         return
       }
       editorDom.setAttribute('aria-controls', listId)
-      editorDom.setAttribute('aria-expanded', 'true')
       editorDom.setAttribute('aria-autocomplete', 'list')
       editorDom.setAttribute('aria-activedescendant', activeId)
     }

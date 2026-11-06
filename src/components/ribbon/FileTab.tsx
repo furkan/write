@@ -187,7 +187,7 @@ export function FileTab({ editor, session }: TabProps) {
               size="medium"
               label="Export HTML"
               icon={FileCode}
-              onClick={() => download(`${baseName()}.html`, editor.getHTML(), 'text/html')}
+              onClick={() => download(`${baseName()}.html`, editor.getHTML().replaceAll(' loading="lazy"', ''), 'text/html')}
             />
             <RibbonButton
               size="medium"

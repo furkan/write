@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ariaKeys } from '../editor/platform'
 
 type ToolButtonProps = {
   title: string
@@ -8,9 +9,6 @@ type ToolButtonProps = {
   children: ReactNode
   shortcut?: string
 }
-
-/** "Ctrl+Shift+Z" / "⌘+B" as an aria-keyshortcuts value ("Control+Shift+Z", "Meta+B"). */
-const ariaKeys = (shortcut?: string) => shortcut?.replace('Ctrl', 'Control').replace('⌘', 'Meta')
 
 /** Toolbar button that keeps the editor selection (no focus steal on mousedown). */
 export function ToolButton({ title, onClick, active, disabled, children, shortcut }: ToolButtonProps) {

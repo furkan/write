@@ -40,7 +40,7 @@ type Lowlight = ReturnType<typeof createLowlight>
 let real: Lowlight | null = null
 const EMPTY_ROOT = { type: 'root', children: [] } as ReturnType<Lowlight['highlight']>
 // What `createLowlight(common).listLanguages()` returns, so the Code tab can list them at once.
-const COMMON_LANGUAGES = [
+export const COMMON_LANGUAGES = [
   'arduino', 'bash', 'c', 'cpp', 'csharp', 'css', 'diff', 'go', 'graphql', 'ini', 'java', 'javascript',
   'json', 'kotlin', 'less', 'lua', 'makefile', 'markdown', 'objectivec', 'perl', 'php', 'php-template',
   'plaintext', 'python', 'python-repl', 'r', 'ruby', 'rust', 'scss', 'shell', 'sql', 'swift', 'typescript',
@@ -71,8 +71,9 @@ if (!IN_BROWSER) await loadLanguages()
 // it changes. Rebuilding the plugin (a new instance, after removing the old one so ProseMirror
 // doesn't keep its state) colours blocks already on the page once the languages have loaded.
 function rehighlight(editor: Editor) {
+  if (editor.isDestroyed) return
   const old = editor.state.plugins.find((p) => (p.spec.key as { key?: string } | undefined)?.key?.startsWith('lowlight$'))
-  if (!old || editor.isDestroyed) return
+  if (!old) return
   editor.unregisterPlugin(old.spec.key as PluginKey)
   editor.registerPlugin(new Plugin(old.spec))
 }
@@ -86,9 +87,10 @@ const CodeBlock = CodeBlockLowlight.extend({
 
 export const KATEX_OPTIONS = { throwOnError: false }
 
-// Images and embeds below the fold needn't load with the page. Browser only: a print/PDF render
-// must have every image loaded, and lazy ones off-screen may not be.
-const LAZY_MEDIA = IN_BROWSER ? { loading: 'lazy', decoding: 'async' } : {}
+// The YouTube iframe below the fold needn't load with the page. Not images: they measure 0px until
+// loaded, which shifts page breaks, and lazy saves nothing for base64 images. Browser only, so a
+// print/PDF render isn't left with unloaded embeds.
+const LAZY_IFRAME = IN_BROWSER ? { loading: 'lazy' } : {}
 
 export function documentExtensions() {
   return {
@@ -109,7 +111,6 @@ export function documentExtensions() {
     taskItem: TaskItem.configure({ nested: true }),
     image: Image.configure({
       allowBase64: true,
-      HTMLAttributes: LAZY_MEDIA,
       resize: {
         enabled: true,
         directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
@@ -122,7 +123,7 @@ export function documentExtensions() {
     details: Details.configure({ persist: true }),
     detailsSummary: DetailsSummary,
     detailsContent: DetailsContent,
-    youtube: Youtube.configure({ HTMLAttributes: LAZY_MEDIA, nocookie: true, width: 640, height: 360 }),
+    youtube: Youtube.configure({ HTMLAttributes: LAZY_IFRAME, nocookie: true, width: 640, height: 360 }),
     emoji: Emoji.configure({ emojis: gitHubEmojis, enableEmoticons: true }),
     uniqueId: UniqueID.configure({
       // TableOfContents already owns the `id` attribute on headings; keep these separate.

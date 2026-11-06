@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { ChevronDown, LoaderCircle } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
+import { ariaKeys } from '../../editor/platform'
 import { Dropdown } from '../Dropdown'
 import { keepSelection, tooltip } from './editorState'
 import { setLastColor, useLastColor, type ColorKind } from './state'
@@ -17,9 +18,6 @@ export function RibbonGroup({ label, tour, children }: { label: string; tour?: s
     </div>
   )
 }
-
-/** "Ctrl+Shift+Z" / "⌘+B" as an aria-keyshortcuts value ("Control+Shift+Z", "Meta+B"). */
-const ariaKeys = (shortcut?: string) => shortcut?.replace('Ctrl', 'Control').replace('⌘', 'Meta')
 
 type ButtonProps = {
   label: string

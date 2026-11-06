@@ -1,5 +1,5 @@
 import { Extension, InputRule, textInputRule, type Editor } from '@tiptap/core'
-import { NodeSelection, TextSelection } from '@tiptap/pm/state'
+import { Selection } from '@tiptap/pm/state'
 import { setLink } from '../blocks'
 
 /**
@@ -36,9 +36,17 @@ function moveBlocks(editor: Editor, dir: -1 | 1) {
   const size = doc.child(sibling).nodeSize
   const shift = dir < 0 ? -size : size
   const tr = state.tr.delete(start, end).insert(start + shift, moved)
-  const from = selection.from + shift
-  const to = selection.to + shift
-  tr.setSelection(selection instanceof NodeSelection ? NodeSelection.create(tr.doc, from) : TextSelection.create(tr.doc, from, to))
+  // Same selection, shifted with the blocks: whatever kind it is (text, node, table cells).
+  const json = selection.toJSON() as { type: string; anchor?: number; head?: number }
+  if (json.type !== 'all') {
+    if (json.anchor !== undefined) json.anchor += shift
+    if (json.head !== undefined) json.head += shift
+    try {
+      tr.setSelection(Selection.fromJSON(tr.doc, json))
+    } catch {
+      // Keep ProseMirror's own mapping of the selection.
+    }
+  }
   view.dispatch(tr.scrollIntoView())
   return true
 }

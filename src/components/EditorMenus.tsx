@@ -1,5 +1,6 @@
 import { DragHandle } from '@tiptap/extension-drag-handle-react'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
+import { useEffect, useRef } from 'react'
 import { useEditorState, type Editor } from '@tiptap/react'
 import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus'
 import { blockActions, setLink } from '../editor/blocks'
@@ -18,12 +19,26 @@ function ImageAltField({ editor }: { editor: Editor }) {
     editor,
     selector: ({ editor: e }) => (e.getAttributes('image').alt as string | null) ?? '',
   })
+  const input = useRef<HTMLInputElement>(null)
+  // Keyboard way in: with an image selected, Enter (or Alt+Enter) moves focus to the field.
+  useEffect(() => {
+    const dom = editor.view.dom
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey) return
+      const { selection } = editor.state
+      if (!(selection instanceof NodeSelection) || selection.node.type.name !== 'image') return
+      event.preventDefault()
+      input.current?.focus()
+    }
+    dom.addEventListener('keydown', onKey, true)
+    return () => dom.removeEventListener('keydown', onKey, true)
+  }, [editor])
   return (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px', fontSize: '0.75rem', color: 'var(--muted)' }}>
+    <label className="image-alt">
       <span>Alt text</span>
       <input
+        ref={input}
         type="text"
-        style={{ width: 220, maxWidth: '60vw', height: 28, padding: '0 6px', font: 'inherit', fontSize: '0.85rem', color: 'var(--text)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4 }}
         value={alt}
         placeholder="Describe the image"
         onChange={(e) => {
