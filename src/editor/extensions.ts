@@ -110,10 +110,11 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
 
     // Small additions
     Placeholder.configure({
-      placeholder: ({ node }) => {
+      placeholder: ({ editor, node }) => {
         if (node.type.name === 'heading') return `Heading ${node.attrs.level}`
         if (node.type.name === 'detailsSummary') return 'Summary'
-        return "Type '/' for commands, '@' to mention, ':' for emoji…"
+        // Like Word: a hint only in a completely empty document, none on every empty line.
+        return editor.isEmpty ? 'Start writing, or type / to insert' : ''
       },
       includeChildren: true,
     }),

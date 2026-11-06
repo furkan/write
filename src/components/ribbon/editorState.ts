@@ -22,7 +22,7 @@ export const selectRibbonState = (e: Editor) => {
     link: e.isActive('link'),
     heading: HEADING_LEVELS.find((level) => e.isActive('heading', { level })) ?? 0,
     fontFamily: (textStyle.fontFamily as string | undefined) ?? '',
-    /** In rendered px; `null` for a selection that mixes sizes. */
+    /** In pt; `null` for a selection that mixes sizes. */
     fontSize: selectionFontSize(e.state),
     align: ALIGNMENTS.find((a) => e.isActive({ textAlign: a })) ?? 'left',
     bulletList: e.isActive('bulletList'),

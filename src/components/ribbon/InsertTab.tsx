@@ -1,7 +1,8 @@
 import {
   CalendarDays,
+  Ellipsis,
+  EyeOff,
   Image,
-  Info,
   Link,
   ListCollapse,
   SeparatorHorizontal,
@@ -134,23 +135,6 @@ export function InsertTab({ editor, s, disabled }: TabProps) {
 
       <RibbonGroup label="Blocks">
         <div className="ribbon-row">
-          <RibbonMenuButton label="Callout" icon={Info} disabled={disabled}>
-            {(close) =>
-              variantList.map((variant) => (
-                <MenuItem
-                  key={variant}
-                  hint={`:::${variant}`}
-                  onSelect={() => {
-                    close()
-                    chain().setCallout(variant).run()
-                  }}
-                >
-                  <span className="menu-icon">{CALLOUT_VARIANTS[variant].icon}</span> {CALLOUT_VARIANTS[variant].label}
-                </MenuItem>
-              ))
-            }
-          </RibbonMenuButton>
-          <RibbonButton size="large" label="Toggle" icon={ListCollapse} disabled={disabled} onClick={() => chain().setDetails().run()} />
           <RibbonButton
             size="large"
             label="Divider"
@@ -179,6 +163,52 @@ export function InsertTab({ editor, s, disabled }: TabProps) {
           disabled={disabled}
           onClick={() => chain().insertDate().run()}
         />
+      </RibbonGroup>
+
+      {/* Notion-style blocks stay in the schema (documents and the PDF keep them) but out of the way. */}
+      <RibbonGroup label="More">
+        <RibbonMenuButton label="More" icon={Ellipsis} disabled={disabled}>
+          {(close) => (
+            <>
+              {variantList.map((variant) => (
+                <MenuItem
+                  key={variant}
+                  hint={`:::${variant}`}
+                  onSelect={() => {
+                    close()
+                    chain().setCallout(variant).run()
+                  }}
+                >
+                  <span className="menu-icon">{CALLOUT_VARIANTS[variant].icon}</span> Callout: {CALLOUT_VARIANTS[variant].label}
+                </MenuItem>
+              ))}
+              <hr />
+              <MenuItem
+                onSelect={() => {
+                  close()
+                  chain().setDetails().run()
+                }}
+              >
+                <span className="menu-icon">
+                  <ListCollapse aria-hidden size={16} />
+                </span>{' '}
+                Toggle
+              </MenuItem>
+              <MenuItem
+                hint={`${mod}+Alt+S`}
+                onSelect={() => {
+                  close()
+                  chain().toggleSpoiler().run()
+                }}
+              >
+                <span className="menu-icon">
+                  <EyeOff aria-hidden size={16} />
+                </span>{' '}
+                Spoiler (selected text)
+              </MenuItem>
+            </>
+          )}
+        </RibbonMenuButton>
       </RibbonGroup>
     </>
   )

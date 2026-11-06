@@ -1,38 +1,60 @@
 :root {
-  --text: #1f1d24;
-  --muted: #6b6375;
-  --bg: #ffffff;
-  --surface: #f6f5f8;
-  --surface-2: #eeedf2;
-  --border: #e5e4e7;
+  /* Word-style neutrals and a Word blue. The --l-* copies are the light palette, which the page
+     itself keeps in dark mode (see "The page" below). */
+  --l-text: #201f1e;
+  --l-muted: #605e5c;
+  --l-bg: #ffffff;
+  --l-surface: #f3f2f1;
+  --l-surface-2: #e1dfdd;
+  --l-border: #d2d0ce;
+  --l-border-strong: #7a7775;
+  --l-accent: #185abd;
+  --l-accent-bg: rgba(24, 90, 189, 0.12);
+  --l-code-bg: #f3f2f1;
+  --l-danger: #c62828;
+  --l-success: #16a34a;
+  --l-warning: #ca8a04;
+  --l-warning-text: #946000;
+  --l-success-text: #15803d;
+  --l-info: #185abd;
+  --l-hl-comment: #5f5c5a;
+
+  --text: var(--l-text);
+  --muted: var(--l-muted);
+  --bg: var(--l-bg);
+  --surface: var(--l-surface);
+  --surface-2: var(--l-surface-2);
+  --border: var(--l-border);
   /* Input outlines and other boundaries that must be seen (3:1 on --bg and --surface). */
-  --border-strong: #857f90;
-  --accent: #7c3aed;
+  --border-strong: var(--l-border-strong);
+  --accent: var(--l-accent);
   --accent-contrast: #ffffff;
-  --accent-bg: rgba(124, 58, 237, 0.12);
-  --code-bg: #f4f3ec;
-  --shadow: 0 10px 30px -10px rgba(20, 10, 40, 0.25), 0 2px 6px rgba(20, 10, 40, 0.08);
-  --danger: #dc2626;
-  --success: #16a34a;
-  --warning: #ca8a04;
+  --accent-bg: var(--l-accent-bg);
+  --code-bg: var(--l-code-bg);
+  --shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.12);
+  --danger: var(--l-danger);
+  --success: var(--l-success);
+  --warning: var(--l-warning);
   /* Text-safe variants (4.5:1 on --bg and --surface); the plain ones are for fills and dots. */
-  --warning-text: #946000;
-  --success-text: #15803d;
-  --info: #2563eb;
-  --radius: 10px;
+  --warning-text: var(--l-warning-text);
+  --success-text: var(--l-success-text);
+  --info: var(--l-info);
+  --radius: 4px;
   --hl-keyword: #7c3aed;
   --hl-string: #15803d;
   --hl-number: #c2410c;
   --hl-title: #2563eb;
   --hl-type: #b45309;
-  --hl-comment: #675f72;
-  --page-shadow: 0 1px 3px rgba(20, 10, 40, 0.12);
+  --hl-comment: var(--l-hl-comment);
+  --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
   /* Print layout: the document's pages and the canvas around them. */
-  --paper: var(--bg);
-  --paper-edge: #dcdae2;
-  --canvas: #e8e7ed;
+  --paper: #ffffff;
+  --paper-edge: #c8c6c4;
+  --canvas: #e6e6e6;
   /* Pure black or white at 10%, never a tinted neutral: a hairline edge on images. */
   --image-edge: oklch(0 0 0 / 0.1);
+  /* Word's classic body font: Carlito is metric-compatible with Calibri. */
+  --page-font: 'Carlito', Calibri, 'Segoe UI', Arial, sans-serif;
 
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, 'SF Mono', Consolas, monospace;
@@ -44,27 +66,31 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Dark theme: follows the system unless the user picked Light, or when they picked Dark. */
+/*
+ * Dark theme: follows the system unless the user picked Light, or when they picked Dark. It
+ * darkens the app (ribbon, canvas, panels, status bar); the page stays white like Word's, unless
+ * the viewer turns on "Dark page" (`data-dark-page` on <html>, View tab).
+ */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --text: #ece9f1;
-    --muted: #9c95a8;
-    --bg: #16141a;
-    --surface: #1f1c25;
-    --surface-2: #2a2631;
-    --border: #322d3a;
-    --border-strong: #847c91;
-    --accent: #b388ff;
-    --accent-contrast: #16141a;
-    --accent-bg: rgba(179, 136, 255, 0.16);
-    --code-bg: #24212b;
-    --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.4);
+    --text: #f3f2f1;
+    --muted: #b3b0ad;
+    --bg: #292929;
+    --surface: #333333;
+    --surface-2: #404040;
+    --border: #484644;
+    --border-strong: #8a8886;
+    --accent: #6cb6ff;
+    --accent-contrast: #0b1b30;
+    --accent-bg: rgba(108, 182, 255, 0.18);
+    --code-bg: #333333;
+    --shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.4);
     --danger: #f87171;
     --success: #4ade80;
     --warning: #facc15;
     --warning-text: #facc15;
     --success-text: #4ade80;
-    --info: #60a5fa;
+    --info: #6cb6ff;
     --hl-keyword: #c4b5fd;
     --hl-string: #86efac;
     --hl-number: #fdba74;
@@ -72,33 +98,37 @@
     --hl-type: #fcd34d;
     --hl-comment: #a39cb0;
     --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-    --paper: var(--surface);
-    --paper-edge: var(--border);
-    --canvas: var(--bg);
+    --paper-edge: #1a1a1a;
+    --canvas: #1f1f1f;
     --image-edge: oklch(1 0 0 / 0.1);
     color-scheme: dark;
+  }
+
+  :root:not([data-theme='light'])[data-dark-page] {
+    --paper: var(--surface);
+    --paper-edge: var(--border);
   }
 }
 
 :root[data-theme='dark'] {
-  --text: #ece9f1;
-  --muted: #9c95a8;
-  --bg: #16141a;
-  --surface: #1f1c25;
-  --surface-2: #2a2631;
-  --border: #322d3a;
-  --border-strong: #847c91;
-  --accent: #b388ff;
-  --accent-contrast: #16141a;
-  --accent-bg: rgba(179, 136, 255, 0.16);
-  --code-bg: #24212b;
-  --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --text: #f3f2f1;
+  --muted: #b3b0ad;
+  --bg: #292929;
+  --surface: #333333;
+  --surface-2: #404040;
+  --border: #484644;
+  --border-strong: #8a8886;
+  --accent: #6cb6ff;
+  --accent-contrast: #0b1b30;
+  --accent-bg: rgba(108, 182, 255, 0.18);
+  --code-bg: #333333;
+  --shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.4);
   --danger: #f87171;
   --success: #4ade80;
   --warning: #facc15;
   --warning-text: #facc15;
   --success-text: #4ade80;
-  --info: #60a5fa;
+  --info: #6cb6ff;
   --hl-keyword: #c4b5fd;
   --hl-string: #86efac;
   --hl-number: #fdba74;
@@ -106,11 +136,47 @@
   --hl-type: #fcd34d;
   --hl-comment: #a39cb0;
   --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-  --paper: var(--surface);
-  --paper-edge: var(--border);
-  --canvas: var(--bg);
+  --paper-edge: #1a1a1a;
+  --canvas: #1f1f1f;
   --image-edge: oklch(1 0 0 / 0.1);
   color-scheme: dark;
+}
+
+:root[data-theme='dark'][data-dark-page] {
+  --paper: var(--surface);
+  --paper-edge: var(--border);
+}
+
+/*
+ * The page: its text, links, tables and callouts use the light palette whatever the theme, so
+ * the white page stays readable in dark mode. With "Dark page" on, they follow the app instead.
+ */
+:root:not([data-dark-page]) .editor .tiptap {
+  --text: var(--l-text);
+  --muted: var(--l-muted);
+  --bg: var(--l-bg);
+  --surface: var(--l-surface);
+  --surface-2: var(--l-surface-2);
+  --border: var(--l-border);
+  --border-strong: var(--l-border-strong);
+  --accent: var(--l-accent);
+  --accent-contrast: #ffffff;
+  --accent-bg: var(--l-accent-bg);
+  --code-bg: var(--l-code-bg);
+  --danger: var(--l-danger);
+  --success: var(--l-success);
+  --warning: var(--l-warning);
+  --warning-text: var(--l-warning-text);
+  --success-text: var(--l-success-text);
+  --info: var(--l-info);
+  --hl-keyword: #7c3aed;
+  --hl-string: #15803d;
+  --hl-number: #c2410c;
+  --hl-title: #2563eb;
+  --hl-type: #b45309;
+  --hl-comment: var(--l-hl-comment);
+  --image-edge: oklch(0 0 0 / 0.1);
+  color-scheme: light;
 }
 
 * {
@@ -164,4 +230,19 @@ kbd {
 
 .small {
   font-size: 0.82rem;
+}
+
+/* Dark page (View tab, dark theme only): headings and links lighten with the paper. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light'])[data-dark-page] .editor .tiptap {
+    --heading: #9db9ee;
+    --heading-dark: #b8cdf3;
+    --link: var(--accent);
+  }
+}
+
+:root[data-theme='dark'][data-dark-page] .editor .tiptap {
+  --heading: #9db9ee;
+  --heading-dark: #b8cdf3;
+  --link: var(--accent);
 }

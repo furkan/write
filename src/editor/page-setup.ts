@@ -104,7 +104,7 @@ export function pageRules(setup: PageSetup): string {
   const contentHeight = (pageGeometry(setup).pageHeight - top - bottom) / IN
   return [
     `@page { size: ${size}; margin: ${margin}; }`,
-    '@page { @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt system-ui, sans-serif; color: #6b6375; } }',
+    '@page { @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt Carlito, Calibri, Arial, sans-serif; color: #605e5c; } }',
     `@media print { :root { --print-content-height: ${Math.floor(contentHeight * 1000) / 1000}in; } }`,
   ].join('\n')
 }

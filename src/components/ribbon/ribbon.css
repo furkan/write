@@ -5,13 +5,9 @@
      its flyout and menus paint over them. */
   position: relative;
   z-index: 30;
-  padding: 0 8px 8px;
+  padding: 0;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-}
-
-.ribbon.collapsed {
-  padding-bottom: 0;
 }
 
 /*
@@ -24,6 +20,7 @@
   gap: 6px;
   align-items: center;
   height: 46px;
+  padding: 0 8px;
 }
 
 .ribbon-brand {
@@ -86,7 +83,7 @@
   color: var(--accent-contrast);
   background: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   transition: scale 0.1s ease-out;
 }
@@ -173,7 +170,7 @@
   color: var(--text);
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -224,17 +221,16 @@
 
 .ribbon-panel {
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 1px 2px rgba(20, 10, 40, 0.05);
+  border-top: 1px solid var(--border);
 }
 
 /* Collapsed: a tab opens its panel over the document. */
 .ribbon-panel.flyout {
   position: absolute;
-  top: calc(100% + 2px);
-  right: 8px;
-  left: 8px;
+  top: 100%;
+  right: 0;
+  left: 0;
+  border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow);
 }
 
@@ -258,7 +254,6 @@
     linear-gradient(to left, var(--bg) 40%, transparent) right / 28px 100% no-repeat local,
     linear-gradient(to right, color-mix(in srgb, var(--text) 14%, transparent), transparent) left / 14px 100% no-repeat scroll,
     linear-gradient(to left, color-mix(in srgb, var(--text) 14%, transparent), transparent) right / 14px 100% no-repeat scroll;
-  border-radius: 8px;
 }
 
 .ribbon-group {
@@ -709,7 +704,7 @@
   font-size: 1.25rem;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 

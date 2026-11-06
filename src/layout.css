@@ -196,32 +196,39 @@
 @media print {
   /* Paper is white whatever the theme. Specific enough to beat both dark theme rules. */
   :root:not([data-print-a]):not([data-print-b]) {
-    --text: #1f1d24;
-    --muted: #6b6375;
+    --text: #201f1e;
+    --muted: #605e5c;
     --bg: #ffffff;
-    --surface: #f6f5f8;
-    --surface-2: #eeedf2;
-    --border: #e5e4e7;
-    --border-strong: #857f90;
-    --accent: #7c3aed;
-    --accent-bg: rgba(124, 58, 237, 0.12);
-    --code-bg: #f4f3ec;
-    --danger: #dc2626;
+    --surface: #f3f2f1;
+    --surface-2: #e1dfdd;
+    --border: #d2d0ce;
+    --border-strong: #7a7775;
+    --accent: #185abd;
+    --accent-bg: rgba(24, 90, 189, 0.12);
+    --code-bg: #f3f2f1;
+    --danger: #c62828;
     --success: #16a34a;
     --warning: #ca8a04;
     --warning-text: #946000;
     --success-text: #15803d;
-    --info: #2563eb;
+    --info: #185abd;
     --hl-keyword: #7c3aed;
     --hl-string: #15803d;
     --hl-number: #c2410c;
     --hl-title: #2563eb;
     --hl-type: #b45309;
-    --hl-comment: #675f72;
+    --hl-comment: #5f5c5a;
     --paper: #ffffff;
     --canvas: #ffffff;
     --image-edge: oklch(0 0 0 / 0.1);
     color-scheme: light;
+  }
+
+  /* Headings and links keep their light colours on paper, even with "Dark page" on. */
+  :root:root:root:root:root .editor .tiptap {
+    --heading: #2f5496;
+    --heading-dark: #1f3763;
+    --link: #0563c1;
   }
 
   html,

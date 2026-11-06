@@ -5,7 +5,6 @@ import {
   Bold,
   ChevronDown,
   Code,
-  EyeOff,
   Highlighter,
   Italic,
   List,
@@ -34,7 +33,7 @@ import { FONT_SIZES, parseFontSize, stepFontSize } from './fontSize'
 import { useMediaQuery } from './state'
 
 const FONT_FAMILIES = [
-  { label: 'Default', value: '' },
+  { label: 'Carlito (Calibri)', value: '' },
   { label: 'Serif', value: 'Georgia, "Times New Roman", serif' },
   { label: 'Mono', value: 'ui-monospace, "SF Mono", Consolas, monospace' },
   { label: 'Rounded', value: '"Trebuchet MS", "Segoe UI", sans-serif' },
@@ -133,14 +132,6 @@ export function HomeTab({ editor, s, disabled }: TabProps) {
               onClick={() => chain().toggleSuperscript().run()}
             />
             <RibbonButton label="Inline code" shortcut={`${mod}+E`} icon={Code} active={s.code} disabled={disabled} onClick={() => chain().toggleCode().run()} />
-            <RibbonButton
-              label="Spoiler"
-              shortcut={`${mod}+Alt+S`}
-              icon={EyeOff}
-              active={s.spoiler}
-              disabled={disabled}
-              onClick={() => chain().toggleSpoiler().run()}
-            />
           </div>
           <div className="ribbon-cluster" data-tour="colors">
             <ColorSplitButton
@@ -303,18 +294,18 @@ function FontPicker({ editor, value, disabled }: { editor: Editor; value: string
   )
 }
 
-/** Editable font size in px: type a number and press Enter, or pick a preset. Empty for mixed sizes. */
+/** Editable font size in pt: type a number and press Enter, or pick a preset. Empty for mixed sizes. */
 function FontSize({ editor, size, disabled }: { editor: Editor; size: number | null; disabled: boolean }) {
   const [draft, setDraft] = useState<string | null>(null)
-  const apply = (px: number) => {
+  const apply = (pt: number) => {
     setDraft(null)
-    editor.chain().focus().setFontSize(`${px}px`).run()
+    editor.chain().focus().setFontSize(`${pt}pt`).run()
   }
   return (
     <div className="ribbon-combo font-size">
       <input
         aria-label="Font size"
-        title="Font size (px): type a size and press Enter"
+        title="Font size (pt): type a size and press Enter"
         inputMode="decimal"
         disabled={disabled}
         value={draft ?? (size === null ? '' : String(size))}
@@ -324,9 +315,9 @@ function FontSize({ editor, size, disabled }: { editor: Editor; size: number | n
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault()
-            const px = draft === null ? null : parseFontSize(draft)
-            if (px === null) setDraft(null)
-            else apply(px)
+            const pt = draft === null ? null : parseFontSize(draft)
+            if (pt === null) setDraft(null)
+            else apply(pt)
           } else if (e.key === 'Escape') {
             setDraft(null)
             editor.commands.focus()
@@ -342,18 +333,18 @@ function FontSize({ editor, size, disabled }: { editor: Editor; size: number | n
                 editor.chain().focus().unsetFontSize().run()
               }}
             >
-              Default
+              Default (11)
             </MenuItem>
-            {FONT_SIZES.map((px) => (
+            {FONT_SIZES.map((pt) => (
               <MenuItem
-                key={px}
-                checked={px === size}
+                key={pt}
+                checked={pt === size}
                 onSelect={() => {
                   close()
-                  apply(px)
+                  apply(pt)
                 }}
               >
-                {px}
+                {pt}
               </MenuItem>
             ))}
           </>

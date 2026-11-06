@@ -146,7 +146,7 @@
   text-decoration: none;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   box-shadow: var(--page-shadow);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -231,7 +231,7 @@
   font-size: 0.85rem;
   background: var(--bg);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .view-toggle {
@@ -239,7 +239,7 @@
   padding: 2px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 .view-toggle button {
@@ -249,7 +249,7 @@
   height: 28px;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -285,7 +285,7 @@
   text-align: center;
   letter-spacing: 0;
   background: var(--surface);
-  border-radius: 9px;
+  border-radius: 4px;
 }
 
 .shared-empty {
@@ -495,7 +495,7 @@
   font-size: 0.9rem;
   color: var(--bg);
   background: var(--text);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: var(--shadow);
   transform: translateX(-50%);
   animation: toast-in 0.2s ease-out backwards;
@@ -516,7 +516,7 @@
   color: color-mix(in srgb, var(--accent) 55%, var(--bg));
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -536,7 +536,7 @@
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -552,7 +552,7 @@
   text-align: center;
   color: var(--muted);
   background: var(--surface);
-  border-radius: 9px;
+  border-radius: 4px;
 }
 
 .trash-heading {
@@ -568,7 +568,7 @@
   color: var(--accent);
   background: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -617,7 +617,7 @@
   color: var(--danger);
   background: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 

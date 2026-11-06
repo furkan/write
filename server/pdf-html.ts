@@ -70,6 +70,27 @@ function katexStylesheet() {
   return katexCss
 }
 
+let carlitoCss: string | undefined
+/**
+ * The page font, Carlito (metric-compatible with Calibri), as `@font-face` rules with the fonts
+ * inlined as `data:` URLs: the page may not load anything, and the machine may not have it.
+ * Latin and Latin Extended only (about 0.5 MB base64); other scripts fall back to Arial.
+ */
+function fontStylesheet() {
+  if (carlitoCss !== undefined) return carlitoCss
+  const dist = dirname(require.resolve('@fontsource/carlito/package.json'))
+  carlitoCss = ['latin', 'latin-ext']
+    .flatMap((subset) => ['400', '400-italic', '700', '700-italic'].map((weight) => `${subset}-${weight}`))
+    .map((name) =>
+      readFileSync(join(dist, `${name}.css`), 'utf8').replace(/src:\s*url\(\.\/files\/([\w-]+)\.woff2\)[^;}]*/g, (_, file: string) => {
+        const font = readFileSync(join(dist, 'files', `${file}.woff2`)).toString('base64')
+        return `src:url(data:font/woff2;base64,${font}) format("woff2")`
+      }),
+    )
+    .join('\n')
+  return carlitoCss
+}
+
 let pdfCss: string | undefined
 const pdfStylesheet = () => (pdfCss ??= readFileSync(STYLESHEET, 'utf8'))
 
@@ -360,7 +381,7 @@ export function pageCss(setup: PageSetup) {
   const contentHeight = (pageHeight - margins[0] - margins[2]) / IN
   return [
     `@page { size: ${size}; margin: ${margins.map((m) => `${m / IN}in`).join(' ')}; }`,
-    '@page { @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt system-ui, sans-serif; color: #6b6375; } }',
+    '@page { @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt Carlito, Calibri, Arial, sans-serif; color: #605e5c; } }',
     `:root { --content-height: ${Math.floor(contentHeight * 1000) / 1000}in; }`,
   ].join('\n')
 }
@@ -420,7 +441,7 @@ export function documentPage(state: Uint8Array | null): PdfPage {
       '<meta charset="utf-8">',
       `<meta http-equiv="Content-Security-Policy" content="${CSP}">`,
       `<title>${escapeHtml(title || 'Untitled document')}</title>`,
-      `<style>${pdfStylesheet()}\n${pageCss(setup)}</style>`,
+      `<style>${fontStylesheet()}\n${pdfStylesheet()}\n${pageCss(setup)}</style>`,
       hasMath ? `<style>${katexStylesheet()}</style>` : '',
       '</head>',
       `<body>${main.outerHTML}</body>`,
