@@ -38,6 +38,7 @@
 .status-toggle {
   display: inline-grid;
   place-items: center;
+  position: relative;
   width: 26px;
   height: 22px;
   padding: 0;
@@ -46,6 +47,13 @@
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
+}
+
+/* A 28x32 hit area: as wide as the 2px gap allows, so neighbouring buttons never overlap. */
+.status-toggle::before {
+  position: absolute;
+  inset: -5px -1px;
+  content: '';
 }
 
 .status-toggle:hover:not([aria-disabled='true']) {
@@ -72,6 +80,11 @@
 .zoom-control .status-toggle:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* The slider sits 4px away on each side, so these two can reach 2px further. */
+.zoom-control .status-toggle::before {
+  inset: -5px -2px;
 }
 
 /* A thin track with a round thumb, like Word's. */
@@ -146,6 +159,38 @@
   background: var(--surface-2);
 }
 
+/* Touch: 24px at least for every status-bar control (WCAG 2.5.8); the bar grows a little. */
+@media (pointer: coarse) {
+  .status-toggle {
+    width: 32px;
+    height: 32px;
+  }
+
+  .status-bar .zoom-percent > button {
+    min-width: 48px;
+    height: 32px;
+  }
+
+  .zoom-range {
+    height: 32px;
+  }
+
+  .zoom-range::-webkit-slider-runnable-track {
+    height: 4px;
+  }
+
+  .zoom-range::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+    margin-top: -10px;
+  }
+
+  .zoom-range::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 /* ---------- Printing: only the document, on sheets that match its page setup ---------- */
 
 @media print {
@@ -157,20 +202,25 @@
     --surface: #f6f5f8;
     --surface-2: #eeedf2;
     --border: #e5e4e7;
+    --border-strong: #857f90;
     --accent: #7c3aed;
     --accent-bg: rgba(124, 58, 237, 0.12);
     --code-bg: #f4f3ec;
     --danger: #dc2626;
     --success: #16a34a;
     --warning: #ca8a04;
+    --warning-text: #946000;
+    --success-text: #15803d;
     --info: #2563eb;
     --hl-keyword: #7c3aed;
     --hl-string: #15803d;
     --hl-number: #c2410c;
     --hl-title: #2563eb;
     --hl-type: #b45309;
+    --hl-comment: #675f72;
     --paper: #ffffff;
     --canvas: #ffffff;
+    --image-edge: oklch(0 0 0 / 0.1);
     color-scheme: light;
   }
 

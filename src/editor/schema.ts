@@ -15,8 +15,10 @@ import { TextAlign } from '@tiptap/extension-text-align'
 import { TextStyleKit } from '@tiptap/extension-text-style'
 import { UniqueID } from '@tiptap/extension-unique-id'
 import { Youtube } from '@tiptap/extension-youtube'
+import { Plugin, type PluginKey } from '@tiptap/pm/state'
+import type { Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import { common, createLowlight } from 'lowlight'
+import type { createLowlight } from 'lowlight'
 import { Callout } from './extensions/callout.ts'
 import { Spoiler } from './extensions/spoiler.ts'
 
@@ -27,9 +29,68 @@ import { Spoiler } from './extensions/spoiler.ts'
  * the PDF export (`server/pdf-html.ts`). So no React and no DOM in this module or what it imports.
  */
 
-export const lowlight = createLowlight(common)
+/** The browser (as opposed to the server rendering the PDF, which has no global `document`). */
+const IN_BROWSER = typeof document !== 'undefined'
+
+type Lowlight = ReturnType<typeof createLowlight>
+
+// highlight.js's `common` languages are ~140 kB, so the browser loads them after the editor
+// opens: a code block shows plain until they arrive, then `rehighlight` colours it. Until then
+// this stands in for the real lowlight, which `loadLanguages` swaps in.
+let real: Lowlight | null = null
+const EMPTY_ROOT = { type: 'root', children: [] } as ReturnType<Lowlight['highlight']>
+// What `createLowlight(common).listLanguages()` returns, so the Code tab can list them at once.
+export const COMMON_LANGUAGES = [
+  'arduino', 'bash', 'c', 'cpp', 'csharp', 'css', 'diff', 'go', 'graphql', 'ini', 'java', 'javascript',
+  'json', 'kotlin', 'less', 'lua', 'makefile', 'markdown', 'objectivec', 'perl', 'php', 'php-template',
+  'plaintext', 'python', 'python-repl', 'r', 'ruby', 'rust', 'scss', 'shell', 'sql', 'swift', 'typescript',
+  'vbnet', 'wasm', 'xml', 'yaml',
+]
+
+export const lowlight = {
+  highlight: (language: string, value: string, options?: Parameters<Lowlight['highlight']>[2]) =>
+    real ? real.highlight(language, value, options) : EMPTY_ROOT,
+  highlightAuto: (value: string, options?: Parameters<Lowlight['highlightAuto']>[1]) =>
+    real ? real.highlightAuto(value, options) : EMPTY_ROOT,
+  listLanguages: () => (real ? real.listLanguages() : COMMON_LANGUAGES),
+  registered: (language: string) => (real ? real.registered(language) : false),
+} as unknown as Lowlight
+
+let loading: Promise<void> | undefined
+/** Loads the `common` languages (once). The server awaits this at import, below. */
+export function loadLanguages() {
+  loading ??= import('lowlight').then(({ common, createLowlight }) => {
+    real = createLowlight(common)
+  })
+  return loading
+}
+// The PDF render is synchronous, so the server has the languages before anything else runs.
+if (!IN_BROWSER) await loadLanguages()
+
+// A code block's colours are decorations computed from the document, which only recompute when
+// it changes. Rebuilding the plugin (a new instance, after removing the old one so ProseMirror
+// doesn't keep its state) colours blocks already on the page once the languages have loaded.
+function rehighlight(editor: Editor) {
+  if (editor.isDestroyed) return
+  const old = editor.state.plugins.find((p) => (p.spec.key as { key?: string } | undefined)?.key?.startsWith('lowlight$'))
+  if (!old) return
+  editor.unregisterPlugin(old.spec.key as PluginKey)
+  editor.registerPlugin(new Plugin(old.spec))
+}
+
+const CodeBlock = CodeBlockLowlight.extend({
+  onCreate() {
+    if (real) return
+    void loadLanguages().then(() => rehighlight(this.editor))
+  },
+})
 
 export const KATEX_OPTIONS = { throwOnError: false }
+
+// The YouTube iframe below the fold needn't load with the page. Not images: they measure 0px until
+// loaded, which shifts page breaks, and lazy saves nothing for base64 images. Browser only, so a
+// print/PDF render isn't left with unloaded embeds.
+const LAZY_IFRAME = IN_BROWSER ? { loading: 'lazy' } : {}
 
 export function documentExtensions() {
   return {
@@ -62,7 +123,7 @@ export function documentExtensions() {
     details: Details.configure({ persist: true }),
     detailsSummary: DetailsSummary,
     detailsContent: DetailsContent,
-    youtube: Youtube.configure({ nocookie: true, width: 640, height: 360 }),
+    youtube: Youtube.configure({ HTMLAttributes: LAZY_IFRAME, nocookie: true, width: 640, height: 360 }),
     emoji: Emoji.configure({ emojis: gitHubEmojis, enableEmoticons: true }),
     uniqueId: UniqueID.configure({
       // TableOfContents already owns the `id` attribute on headings; keep these separate.
@@ -72,7 +133,7 @@ export function documentExtensions() {
       filterTransaction: (transaction) => !isChangeOrigin(transaction),
     }),
     mention: Mention.configure({ HTMLAttributes: { class: 'mention' } }),
-    codeBlock: CodeBlockLowlight.configure({ lowlight, defaultLanguage: 'plaintext' }),
+    codeBlock: CodeBlock.configure({ lowlight, defaultLanguage: 'plaintext' }),
     tableOfContents: TableOfContents,
     callout: Callout,
     spoiler: Spoiler,

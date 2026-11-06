@@ -1,5 +1,5 @@
 import { autoUpdate, computePosition, flip, hide, offset, shift, size } from '@floating-ui/dom'
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 
 type DropdownProps = {
   label: ReactNode
@@ -21,6 +21,13 @@ type DropdownProps = {
   fixed?: boolean
 }
 
+const menuItems = (menu: HTMLElement | null) => [...(menu?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? [])]
+
+const focusFirstItem = (menu: HTMLElement | null) => {
+  const items = menuItems(menu)
+  ;(items.find((i) => i.getAttribute('aria-checked') === 'true') ?? items[0])?.focus()
+}
+
 /** A small accessible popover menu that closes on outside click or Escape. */
 export function Dropdown({ label, title, children, align = 'start', className, tour, disabled, kind = 'menu', fixed }: DropdownProps) {
   const [open, setOpen] = useState(false)
@@ -28,6 +35,15 @@ export function Dropdown({ label, title, children, align = 'start', className, t
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuId = useId()
+  // A fixed menu is hidden until positioned, and a hidden item can't take focus: it waits for that.
+  const focusPending = useRef(false)
+  // Focus moves into the menu only when it was opened from the keyboard: a mouse or touch open
+  // leaves focus (and the text selection) in the editor.
+  const byKeyboard = useRef(false)
+  // Whether focus is inside the menu, so closing it knows to give focus back to the trigger.
+  const focusInMenu = useRef(false)
+  const wasOpen = useRef(false)
+  const typeahead = useRef({ text: '', timer: 0 })
 
   // Disabled while open (say, a demotion to viewer): close, so its items can't run.
   if (disabled && open) setOpen(false)
@@ -36,6 +52,7 @@ export function Dropdown({ label, title, children, align = 'start', className, t
     const root = rootRef.current
     const menu = menuRef.current
     if (!open || !fixed || !root || !menu) return
+    focusPending.current = kind === 'menu' && byKeyboard.current
     return autoUpdate(root, menu, () => {
       void computePosition(root, menu, {
         strategy: 'fixed',
@@ -50,14 +67,78 @@ export function Dropdown({ label, title, children, align = 'start', className, t
           hide(),
         ],
       }).then(({ x, y, middlewareData }) =>
-        Object.assign(menu.style, {
-          left: `${x}px`,
-          top: `${y}px`,
-          visibility: middlewareData.hide?.referenceHidden ? 'hidden' : 'visible',
-        }),
+        {
+          Object.assign(menu.style, {
+            left: `${x}px`,
+            top: `${y}px`,
+            visibility: middlewareData.hide?.referenceHidden ? 'hidden' : 'visible',
+          })
+          if (focusPending.current && menu.style.visibility === 'visible') {
+            focusPending.current = false
+            focusFirstItem(menu)
+          }
+        },
       )
     })
-  }, [open, fixed, align])
+  }, [open, fixed, align, kind])
+
+  // A menu opens with focus on its current (checked) item, else the first one.
+  useEffect(() => {
+    if (open && kind === 'menu' && !fixed && byKeyboard.current) focusFirstItem(menuRef.current)
+  }, [open, kind, fixed])
+
+  // When the menu closes with focus inside it (the focused item vanishes, leaving <body>), focus
+  // goes back to the trigger, unless the chosen action put it elsewhere (the editor, a dialog).
+  useEffect(() => {
+    if (open) {
+      wasOpen.current = true
+      return
+    }
+    if (!wasOpen.current) return
+    wasOpen.current = false
+    if (!focusInMenu.current) return
+    focusInMenu.current = false
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement
+      if (!active || active === document.body) buttonRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [open])
+
+  const close = useCallback(() => setOpen(false), [])
+
+  const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (kind !== 'menu' || event.altKey || event.ctrlKey || event.metaKey) return
+    const items = menuItems(menuRef.current)
+    const at = items.indexOf(document.activeElement as HTMLElement)
+    const go = (i: number) => {
+      event.preventDefault()
+      items[(i + items.length) % items.length]?.focus()
+    }
+    if (event.key === 'Tab') {
+      // Focus the trigger first, so Tab carries on from there rather than from a vanished item.
+      buttonRef.current?.focus()
+      setOpen(false)
+    } else if (event.key === 'ArrowDown') go(at + 1)
+    else if (event.key === 'ArrowUp') go(at < 0 ? -1 : at - 1)
+    else if (event.key === 'Home') go(0)
+    else if (event.key === 'End') go(-1)
+    else if (event.key.length === 1 && event.key !== ' ') {
+      // Type-ahead: letters typed in quick succession match the start of an item's text.
+      const t = typeahead.current
+      window.clearTimeout(t.timer)
+      t.text += event.key.toLowerCase()
+      t.timer = window.setTimeout(() => (t.text = ''), 600)
+      const starts = (i: HTMLElement) => i.textContent.trim().toLowerCase().startsWith(t.text)
+      // Search from the item after the current one, wrapping round.
+      const order = [...items.slice(at + 1), ...items.slice(0, at + 1)]
+      const hit = order.find(starts) ?? (t.text.length > 1 ? items.find(starts) : undefined)
+      if (hit) {
+        event.preventDefault()
+        hit.focus()
+      }
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -93,7 +174,18 @@ export function Dropdown({ label, title, children, align = 'start', className, t
         aria-controls={menuId}
         disabled={disabled}
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setOpen((o) => !o)}
+        onClick={(event) => {
+          // `detail` is 0 for a click from the keyboard (Enter, Space).
+          byKeyboard.current = event.detail === 0
+          setOpen((o) => !o)
+        }}
+        onKeyDown={(event) => {
+          if (kind === 'menu' && !open && event.key === 'ArrowDown') {
+            event.preventDefault()
+            byKeyboard.current = true
+            setOpen(true)
+          }
+        }}
       >
         {label}
       </button>
@@ -104,8 +196,13 @@ export function Dropdown({ label, title, children, align = 'start', className, t
           role={kind === 'menu' ? 'menu' : 'group'}
           aria-label={kind === 'menu' ? undefined : title}
           id={menuId}
+          onKeyDown={onMenuKey}
+          onFocus={() => (focusInMenu.current = true)}
+          onBlur={(event) => {
+            if (!menuRef.current?.contains(event.relatedTarget)) focusInMenu.current = false
+          }}
         >
-          {children(() => setOpen(false))}
+          {children(close)}
         </div>
       )}
     </div>

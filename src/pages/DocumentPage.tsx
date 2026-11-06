@@ -751,6 +751,7 @@ function Workspace({ session, template, role }: WorkspaceProps) {
         <div className="doc-scroll" ref={setScroller} tabIndex={-1}>
           <div className="workspace">
             <main className="main" ref={mainRef}>
+              <h1 className="sr-only">{title || 'Untitled document'}</h1>
               <div className="editor-shell" data-tour="editor">
                 <EditorContent editor={editor} className="editor" />
                 <EditorMenus editor={editor} scrollTarget={scroller} />

@@ -11,11 +11,20 @@ import { SuggestionList, type SuggestionItem, type SuggestionListProps, type Sug
  * that scroller, and the popup stays inside it (off the ribbon and the status bar), hidden while
  * the caret is scrolled out of view.
  */
-export function renderSuggestionList(emptyText?: string): SuggestionOptions<SuggestionItem>['render'] {
+// The trigger character says what is being suggested; it names the listbox.
+const KIND_LABELS: Record<string, string> = { '/': 'Commands', '@': 'Mentions', ':': 'Emoji' }
+const ARIA_ATTRS = ['aria-activedescendant', 'aria-controls', 'aria-autocomplete'] as const
+let popupCount = 0
+
+export function renderSuggestionList(emptyText?: string, label?: string): SuggestionOptions<SuggestionItem>['render'] {
   return () => {
     let renderer: ReactRenderer<SuggestionListRef, SuggestionListProps> | null = null
     let clientRect: (() => DOMRect | null) | null | undefined
     let stopAutoUpdate: (() => void) | null = null
+    let editorDom: HTMLElement | null = null
+    let activeId: string | null = null
+    let kind = label ?? 'Suggestions'
+    const listId = `suggestion-list-${++popupCount}`
 
     const reference: VirtualElement = {
       getBoundingClientRect: () => clientRect?.() ?? new DOMRect(),
@@ -36,13 +45,40 @@ export function renderSuggestionList(emptyText?: string): SuggestionOptions<Sugg
       })
     }
 
+    // The editor keeps focus, so the highlighted option is announced through the editor's own
+    // attributes. Present only while there is a visible list to point at.
+    const syncAria = () => {
+      if (!editorDom) return
+      const element = renderer?.element as HTMLElement | undefined
+      if (!element || element.hidden || !activeId || !editorDom.matches(':focus')) {
+        for (const name of ARIA_ATTRS) editorDom.removeAttribute(name)
+        return
+      }
+      editorDom.setAttribute('aria-controls', listId)
+      editorDom.setAttribute('aria-autocomplete', 'list')
+      editorDom.setAttribute('aria-activedescendant', activeId)
+    }
+
+    const onActiveChange = (id: string | null) => {
+      activeId = id
+      syncAria()
+    }
+
     const toListProps = (props: SuggestionProps<SuggestionItem>): SuggestionListProps => ({
       items: props.items,
       command: props.command,
       emptyText,
+      listId,
+      label: kind,
+      onActiveChange,
     })
 
     const destroy = () => {
+      activeId = null
+      syncAria()
+      editorDom?.removeEventListener('blur', syncAria)
+      editorDom?.removeEventListener('focus', syncAria)
+      editorDom = null
       stopAutoUpdate?.()
       stopAutoUpdate = null
       renderer?.element.remove()
@@ -53,12 +89,17 @@ export function renderSuggestionList(emptyText?: string): SuggestionOptions<Sugg
     return {
       onStart: (props) => {
         clientRect = props.clientRect
-        reference.contextElement = props.editor.view.dom
+        editorDom = props.editor.view.dom
+        editorDom.addEventListener('blur', syncAria)
+        editorDom.addEventListener('focus', syncAria)
+        kind = label ?? KIND_LABELS[props.text?.[0] ?? ''] ?? kind
+        reference.contextElement = editorDom
         renderer = new ReactRenderer(SuggestionList, { props: toListProps(props), editor: props.editor })
         const element = renderer.element as HTMLElement
         element.classList.add('suggestion-popup')
         document.body.appendChild(element)
         stopAutoUpdate = autoUpdate(reference, element, position)
+        syncAria()
       },
 
       onUpdate: (props) => {
@@ -67,12 +108,14 @@ export function renderSuggestionList(emptyText?: string): SuggestionOptions<Sugg
         const element = renderer?.element as HTMLElement | undefined
         if (element) element.hidden = false
         position()
+        syncAria()
       },
 
       onKeyDown: ({ event }: SuggestionKeyDownProps) => {
         if (event.key === 'Escape') {
           const element = renderer?.element as HTMLElement | undefined
           if (element) element.hidden = true
+          syncAria()
           return true
         }
         const element = renderer?.element as HTMLElement | undefined

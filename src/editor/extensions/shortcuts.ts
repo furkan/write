@@ -1,4 +1,5 @@
 import { Extension, InputRule, textInputRule, type Editor } from '@tiptap/core'
+import { Selection } from '@tiptap/pm/state'
 import { setLink } from '../blocks'
 
 /**
@@ -12,6 +13,43 @@ declare module '@tiptap/core' {
       insertDate: () => ReturnType
     }
   }
+}
+
+/**
+ * Moves the top-level block(s) the selection touches one place up or down, as a single plain
+ * transaction (so it syncs like any edit). The keyboard path for what the drag handle does.
+ */
+function moveBlocks(editor: Editor, dir: -1 | 1) {
+  if (!editor.isEditable) return false
+  const { state, view } = editor
+  const { doc, selection } = state
+  // `to - 1` so a selection ending at the start of the next block doesn't drag that block along.
+  const first = doc.resolve(selection.from).index(0)
+  const last = doc.resolve(Math.max(selection.from, selection.to - 1)).index(0)
+  const sibling = dir < 0 ? first - 1 : last + 1
+  if (sibling < 0 || sibling >= doc.childCount) return true
+  let start = 0
+  for (let i = 0; i < first; i++) start += doc.child(i).nodeSize
+  let end = start
+  for (let i = first; i <= last; i++) end += doc.child(i).nodeSize
+  const moved = doc.slice(start, end).content
+  const size = doc.child(sibling).nodeSize
+  const shift = dir < 0 ? -size : size
+  const tr = state.tr.delete(start, end).insert(start + shift, moved)
+  // Same selection, shifted with the blocks: whatever kind it is (text, node, table cells).
+  const json = selection.toJSON() as { type: string; anchor?: number; head?: number; pos?: number }
+  if (json.type !== 'all') {
+    if (json.anchor !== undefined) json.anchor += shift
+    if (json.head !== undefined) json.head += shift
+    if (json.pos !== undefined) json.pos += shift // GapCursor
+    try {
+      tr.setSelection(Selection.fromJSON(tr.doc, json))
+    } catch {
+      // Keep ProseMirror's own mapping of the selection.
+    }
+  }
+  view.dispatch(tr.scrollIntoView())
+  return true
 }
 
 const today = () =>
@@ -41,6 +79,8 @@ export const Shortcuts = Extension.create<ShortcutsOptions>({
   addKeyboardShortcuts() {
     return {
       'Mod-Shift-d': () => this.editor.commands.insertDate(),
+      'Alt-Shift-ArrowUp': () => moveBlocks(this.editor, -1),
+      'Alt-Shift-ArrowDown': () => moveBlocks(this.editor, 1),
       'Mod-k': () => {
         if (this.editor.isEditable) setLink(this.editor)
         return true

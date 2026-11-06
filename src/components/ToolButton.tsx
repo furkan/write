@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ariaKeys } from '../editor/platform'
 
 type ToolButtonProps = {
   title: string
@@ -16,7 +17,8 @@ export function ToolButton({ title, onClick, active, disabled, children, shortcu
     <button
       type="button"
       title={label}
-      aria-label={label}
+      aria-label={title}
+      aria-keyshortcuts={ariaKeys(shortcut)}
       aria-pressed={active}
       className={active ? 'active' : undefined}
       disabled={disabled}

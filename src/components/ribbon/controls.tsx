@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { ChevronDown, LoaderCircle } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
+import { ariaKeys } from '../../editor/platform'
 import { Dropdown } from '../Dropdown'
 import { keepSelection, tooltip } from './editorState'
 import { setLastColor, useLastColor, type ColorKind } from './state'
@@ -50,7 +51,8 @@ export function RibbonButton({ label, title, shortcut, icon, glyph, size = 'smal
       type="button"
       className={`ribbon-btn ${size}${active ? ' active' : ''}${tone ? ` ${tone}` : ''}`}
       title={tooltip(title ?? label, shortcut)}
-      aria-label={tooltip(label, shortcut)}
+      aria-label={label}
+      aria-keyshortcuts={ariaKeys(shortcut)}
       aria-pressed={active}
       aria-busy={busy || undefined}
       aria-disabled={busy || undefined}
@@ -129,6 +131,7 @@ export function ColorSplitButton({ label, shortcut, glyph, colors, kind, clearLa
         className="ribbon-btn small"
         title={tooltip(title, shortcut)}
         aria-label={title}
+        aria-keyshortcuts={ariaKeys(shortcut)}
         disabled={disabled}
         onMouseDown={keepSelection}
         onClick={() => onApply(last)}

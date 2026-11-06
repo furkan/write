@@ -1,4 +1,5 @@
-import { useEditorState, type Editor } from '@tiptap/react'
+import type { Editor } from '@tiptap/react'
+import { useEffect, useState } from 'react'
 import { FileText, Globe, type LucideIcon } from 'lucide-react'
 import type { Role } from '../api'
 import type { ConnectionStatus } from '../editor/hooks'
@@ -62,18 +63,45 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
 }
 
 /**
+ * The word and character counts. A document is recounted only when it changes (typing, or a
+ * collaborator's edit: both emit `update`), never for cursor moves or presence, and at most every
+ * 300 ms while someone types. The first count is immediate.
+ */
+function useCounts(editor: Editor) {
+  const count = () => ({
+    words: editor.storage.characterCount.words() as number,
+    characters: editor.storage.characterCount.characters() as number,
+  })
+  const [counts, setCounts] = useState(count)
+  useEffect(() => {
+    const update = () =>
+      setCounts((prev) => {
+        const next = count()
+        return next.words === prev.words && next.characters === prev.characters ? prev : next
+      })
+    update() // a different editor, or the document changed before we subscribed
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onUpdate = () => {
+      clearTimeout(timer)
+      timer = setTimeout(update, 300)
+    }
+    editor.on('update', onUpdate)
+    return () => {
+      clearTimeout(timer)
+      editor.off('update', onUpdate)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `count` only reads `editor`
+  }, [editor])
+  return counts
+}
+
+/**
  * Like Word's status bar: the word count (characters in its tooltip), whether you can edit, the
  * sync status, the layout buttons and the zoom. Nothing about the editor's internals.
  */
 export function StatusBar({ editor, status, pending, retrying, readOnly, role, zoom }: StatusBarProps) {
   const viewer = role === 'viewer'
-  const counts = useEditorState({
-    editor,
-    selector: ({ editor: e }) => ({
-      words: e.storage.characterCount.words() as number,
-      characters: e.storage.characterCount.characters() as number,
-    }),
-  })
+  const counts = useCounts(editor)
 
   // "Synced" only when the server has also confirmed our changes, not just when connected.
   const unsaved = !retrying && status === 'connected' && pending

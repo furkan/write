@@ -12,10 +12,12 @@ type ClosedPageProps = {
 /** A full-page message instead of the document or library: no access, trashed, signed out… */
 export function ClosedPage({ title, children, actions, role = 'alert' }: ClosedPageProps) {
   return (
-    <div className="loading deleted" role={role}>
-      <p className="deleted-title">{title}</p>
-      {children && <p className="muted closed-text">{children}</p>}
-      {actions && <div className="closed-actions">{actions}</div>}
-    </div>
+    <main>
+      <div className="loading deleted" role={role}>
+        <h1 className="deleted-title">{title}</h1>
+        {children && <p className="muted closed-text">{children}</p>}
+        {actions && <div className="closed-actions">{actions}</div>}
+      </div>
+    </main>
   )
 }

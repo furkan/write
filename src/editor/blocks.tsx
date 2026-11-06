@@ -1,3 +1,5 @@
+import { CalendarDays, Image as ImageIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { Editor } from '@tiptap/react'
 import { CALLOUT_VARIANTS, type CalloutVariant } from './extensions/callout-variants'
 
@@ -8,7 +10,7 @@ import { CALLOUT_VARIANTS, type CalloutVariant } from './extensions/callout-vari
 export type BlockAction = {
   id: string
   label: string
-  icon: string
+  icon: ReactNode
   hint?: string
   keywords?: string
   run: (editor: Editor) => void
@@ -79,7 +81,7 @@ export const blockActions: BlockAction[] = [
     keywords: 'grid rows columns',
     run: (e) => e.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
   },
-  { id: 'image', label: 'Image', icon: '🖼', keywords: 'picture photo', hint: 'or drop / paste', run: insertImage },
+  { id: 'image', label: 'Image', icon: <ImageIcon aria-hidden size={16} />, keywords: 'picture photo', hint: 'or drop / paste', run: insertImage },
   { id: 'youtube', label: 'YouTube video', icon: '▶', keywords: 'embed video', run: insertYoutube },
   { id: 'details', label: 'Toggle section', icon: '▸', keywords: 'details collapsible accordion', run: (e) => e.chain().focus().setDetails().run() },
   callout('info'),
@@ -88,7 +90,7 @@ export const blockActions: BlockAction[] = [
   callout('danger'),
   { id: 'math-inline', label: 'Inline math', icon: '∑', hint: '$$x$$', keywords: 'latex katex formula equation', run: insertInlineMath },
   { id: 'math-block', label: 'Math block', icon: '∫', hint: '$$$x$$$', keywords: 'latex katex formula equation', run: insertBlockMath },
-  { id: 'date', label: "Today's date", icon: '📅', hint: '!today', keywords: 'time now', run: (e) => e.chain().focus().insertDate().run() },
+  { id: 'date', label: "Today's date", icon: <CalendarDays aria-hidden size={16} />, hint: '!today', keywords: 'time now', run: (e) => e.chain().focus().insertDate().run() },
 ]
 
 export function filterBlockActions(query: string): BlockAction[] {

@@ -3,8 +3,8 @@
  * No React or DOM here, so they are unit-tested in `tests/identity-unit.test.ts`.
  */
 
-/** Caret and avatar colours; readable with white text on both themes. */
-export const USER_COLORS = ['#e11d48', '#ea580c', '#ca8a04', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#c026d3']
+/** Caret and avatar colours; each is at least 4.5:1 against the white initial and label text. */
+export const USER_COLORS = ['#be123c', '#c2410c', '#a16207', '#15803d', '#0e7490', '#2563eb', '#7c3aed', '#a21caf']
 
 /** The Caret label: the part of the email before the last `@` (the whole string if there is none). */
 export function localPart(email: string): string {

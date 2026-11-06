@@ -12,6 +12,12 @@ export type SuggestionListProps = {
   items: SuggestionItem[]
   command: (item: SuggestionItem) => void
   emptyText?: string
+  /** Id of the listbox, and the prefix of its options' ids (`<listId>-option-<index>`). */
+  listId: string
+  /** The listbox's accessible name: Commands, Mentions or Emoji. */
+  label: string
+  /** The highlighted option's id, or null when there is none to point at (no matches). */
+  onActiveChange?: (optionId: string | null) => void
 }
 
 export type SuggestionListRef = {
@@ -20,13 +26,27 @@ export type SuggestionListRef = {
 
 /** Keyboard-navigable popup list shared by slash commands, mentions and emoji. */
 export const SuggestionList = forwardRef<SuggestionListRef, SuggestionListProps>(function SuggestionList(
-  { items, command, emptyText = 'No results' },
+  { items, command, emptyText = 'No results', listId, label, onActiveChange },
   ref,
 ) {
   const [selected, setSelected] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => setSelected(0), [items])
+
+  // `selected` lags `items` by one render when the list shrinks.
+  const active = items.length ? `${listId}-option-${Math.min(selected, items.length - 1)}` : null
+  useEffect(() => {
+    onActiveChange?.(active)
+  }, [active, onActiveChange])
+
+  // The empty message goes in a live region that was already mounted (they announce changes, not
+  // arrivals), so it is filled in a render after the popup opens.
+  const [announce, setAnnounce] = useState('')
+  const noMatches = items.length === 0
+  useEffect(() => {
+    setAnnounce(noMatches ? emptyText : '')
+  }, [noMatches, emptyText])
 
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
@@ -57,27 +77,42 @@ export const SuggestionList = forwardRef<SuggestionListRef, SuggestionListProps>
   }))
 
   return (
-    <div className="suggestion-list" role="listbox" ref={listRef}>
-      {items.length === 0 ? (
-        <div className="suggestion-empty">{emptyText}</div>
-      ) : (
-        items.map((item, index) => (
-          <button
-            type="button"
-            role="option"
-            key={item.id}
-            aria-selected={index === selected}
-            className="suggestion-item"
-            onMouseEnter={() => setSelected(index)}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => choose(index)}
-          >
-            {item.icon !== undefined && <span className="suggestion-icon">{item.icon}</span>}
-            <span className="suggestion-label">{item.label}</span>
-            {item.hint && <span className="suggestion-hint">{item.hint}</span>}
-          </button>
-        ))
-      )}
-    </div>
+    <>
+      <div
+        className="suggestion-list"
+        id={listId}
+        role={noMatches ? undefined : 'listbox'}
+        aria-label={noMatches ? undefined : label}
+        ref={listRef}
+      >
+        {noMatches ? (
+          <div className="suggestion-empty" aria-hidden>
+            {emptyText}
+          </div>
+        ) : (
+          items.map((item, index) => (
+            <button
+              type="button"
+              role="option"
+              id={`${listId}-option-${index}`}
+              key={item.id}
+              aria-selected={index === selected}
+              tabIndex={-1}
+              className="suggestion-item"
+              onMouseEnter={() => setSelected(index)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => choose(index)}
+            >
+              {item.icon !== undefined && <span className="suggestion-icon">{item.icon}</span>}
+              <span className="suggestion-label">{item.label}</span>
+              {item.hint && <span className="suggestion-hint">{item.hint}</span>}
+            </button>
+          ))
+        )}
+      </div>
+      <div className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </div>
+    </>
   )
 })

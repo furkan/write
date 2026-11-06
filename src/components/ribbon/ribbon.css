@@ -88,6 +88,11 @@
   border: 1px solid var(--accent);
   border-radius: 6px;
   cursor: pointer;
+  transition: scale 0.1s ease-out;
+}
+
+.ribbon-share:active {
+  scale: 0.96;
 }
 
 .ribbon-share:hover {
@@ -426,12 +431,12 @@
   align-items: stretch;
   height: 28px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
 }
 
 .ribbon-combo:hover:not(:has(:disabled)) {
-  border-color: color-mix(in srgb, var(--muted) 60%, var(--border));
+  border-color: var(--muted);
 }
 
 .ribbon-combo:focus-within {
@@ -502,6 +507,17 @@
   border-radius: 0 3px 3px 0;
 }
 
+/* Touch: the arrows are too narrow to hit (WCAG 2.5.8 wants 24px). */
+@media (pointer: coarse) {
+  .ribbon .combo-arrow > button {
+    width: 26px;
+  }
+
+  .ribbon .ribbon-split-arrow > button {
+    width: 26px;
+  }
+}
+
 .color-glyph {
   display: inline-flex;
   flex-direction: column;
@@ -538,9 +554,6 @@
   max-width: 100%;
   height: 68px;
   overflow: hidden;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
 }
 
 .style-row {
@@ -618,7 +631,7 @@
 }
 
 .style-name {
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   white-space: nowrap;
   color: var(--muted);
 }
@@ -661,6 +674,12 @@
 .table-picker-grid button.on {
   background: var(--accent-bg);
   border-color: var(--accent);
+}
+
+.table-picker-grid button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+  background: var(--accent);
 }
 
 .table-picker-caption {
@@ -869,5 +888,13 @@
 
   .ribbon-pin {
     order: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ribbon-share,
+  .ribbon-share:active {
+    transition: none;
+    scale: none;
   }
 }

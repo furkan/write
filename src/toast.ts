@@ -1,3 +1,4 @@
+import { useEffect, useState, type FocusEvent } from 'react'
 import { createStore } from './store'
 
 /**
@@ -13,4 +14,54 @@ let nextId = 1
 
 export function showToast(text: string, tone: ToastMessage['tone'] = 'info') {
   toast.set({ id: nextId++, text, tone })
+}
+
+/**
+ * Props for a toast element: `paused` is true while the pointer is over it or focus is inside it,
+ * so the auto-dismiss timer can wait (someone reading it, or on its way to "Undo", keeps it).
+ */
+export function usePauseOnInteraction() {
+  const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
+  return {
+    paused: hovered || focused,
+    props: {
+      onMouseEnter: () => setHovered(true),
+      onMouseLeave: () => setHovered(false),
+      onFocus: () => setFocused(true),
+      onBlur: (e: FocusEvent<HTMLElement>) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false)
+      },
+    },
+  }
+}
+
+/**
+ * Text for a persistent live region. Identical text is not announced twice, so it is cleared and
+ * set again on the next frame whenever `key` (the toast's id) changes.
+ */
+export function useAnnouncement(text: string, key: unknown) {
+  const [shown, setShown] = useState<{ text: string; key: unknown } | null>(null)
+  useEffect(() => {
+    if (!text) return
+    const frame = requestAnimationFrame(() => setShown({ text, key }))
+    return () => cancelAnimationFrame(frame)
+  }, [text, key])
+  // Derived: empty the moment the key changes, filled again a frame later.
+  return shown && shown.text === text && Object.is(shown.key, key) ? text : ''
+}
+
+/**
+ * Keeps the last value for `ms` after `value` becomes null, so a toast can fade out instead of
+ * vanishing. `leaving` is true during that short window; the live regions never depend on it.
+ */
+export function useExit<T>(value: T | null, ms = 150) {
+  const [held, setHeld] = useState<T | null>(value)
+  if (value && value !== held) setHeld(value)
+  useEffect(() => {
+    if (value || !held) return
+    const timer = window.setTimeout(() => setHeld(null), ms)
+    return () => window.clearTimeout(timer)
+  }, [value, held, ms])
+  return { shown: value ?? held, leaving: !value && held !== null }
 }

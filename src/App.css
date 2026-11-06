@@ -18,6 +18,21 @@
   animation: spin 0.8s linear infinite;
 }
 
+/* No spinning: a pulsing ring still shows that something is loading. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    border-top-color: var(--border);
+    background: var(--accent-bg);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -111,15 +126,6 @@ html:has(.doc-shell) body {
   color: var(--muted);
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
 .danger-text {
   color: var(--danger);
 }
@@ -138,6 +144,11 @@ html:has(.doc-shell) body {
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
+  transition: scale 0.1s ease-out;
+}
+
+.primary-button:active:not(:disabled) {
+  scale: 0.96;
 }
 
 .secondary-button {
@@ -306,7 +317,7 @@ html:has(.doc-shell) body {
   height: 36px;
   padding: 0 10px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
 }
 
@@ -344,7 +355,7 @@ html:has(.doc-shell) body {
 
 .share-notice {
   font-size: 0.85rem;
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .share-list {
@@ -415,6 +426,7 @@ html:has(.doc-shell) body {
 
 .deleted-title {
   margin: 0;
+  text-wrap: balance;
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text);
@@ -643,7 +655,7 @@ html:has(.doc-shell) body {
   text-align: left;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px; /* popup radius 10 - padding 6 */
   cursor: pointer;
 }
 
@@ -693,10 +705,12 @@ html:has(.doc-shell) body {
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
+  transition: box-shadow 0.12s ease-out;
 }
 
+/* A ring rather than a scale: it can't cover the neighbouring swatches. */
 .swatch:hover {
-  transform: scale(1.1);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--text);
 }
 
 /* ---------- Editor content ---------- */
@@ -853,7 +867,7 @@ html:has(.doc-shell) body {
 
 .tiptap pre .hljs-comment,
 .tiptap pre .hljs-quote {
-  color: #8b8496;
+  color: var(--hl-comment);
   font-style: italic;
 }
 
@@ -945,16 +959,19 @@ html:has(.doc-shell) body {
 }
 
 /* Images (resizable node view) */
-.tiptap img {
+.tiptap img[src] {
   display: block;
   max-width: 100%;
   height: auto;
   border-radius: 8px;
+  outline: 1px solid var(--image-edge);
+  outline-offset: -1px;
 }
 
 .tiptap img.ProseMirror-selectednode,
 .tiptap [data-resize-container].ProseMirror-selectednode img {
   outline: 3px solid var(--accent);
+  outline-offset: 0;
 }
 
 .tiptap [data-resize-handle] {
@@ -967,6 +984,17 @@ html:has(.doc-shell) body {
   border-radius: 50%;
   opacity: 0;
   transition: opacity 0.15s;
+  /* Dragging a handle must not scroll or zoom the page. */
+  touch-action: none;
+}
+
+/* Touch: a 12px dot is too small to grab, so the hit area grows around it. */
+@media (pointer: coarse) {
+  .tiptap [data-resize-handle]::before {
+    position: absolute;
+    inset: -16px;
+    content: '';
+  }
 }
 
 .tiptap [data-resize-container]:hover [data-resize-handle],
@@ -993,6 +1021,24 @@ html:has(.doc-shell) body {
 .tiptap [data-resize-handle='bottom-right'] {
   transform: translate(50%, 50%);
   cursor: nwse-resize;
+}
+
+/* Text colours are stored as fixed values (picked for white paper), so lift them on dark paper to
+   keep them readable (4.5:1) in the same hue. Print is always light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .tiptap span[style*='color:']:not([style*='background']):not(.collaboration-carets__caret) {
+    filter: brightness(1.5);
+  }
+}
+
+:root[data-theme='dark'] .tiptap span[style*='color:']:not([style*='background']):not(.collaboration-carets__caret) {
+  filter: brightness(1.5);
+}
+
+@media print {
+  :root .tiptap [style*='color:']:not([style*='background']) {
+    filter: none !important;
+  }
 }
 
 /* YouTube */
@@ -1137,14 +1183,30 @@ html:has(.doc-shell) body {
   padding: 0 2px;
   background: var(--surface-2);
   border-radius: 3px;
-  filter: blur(4px);
-  transition: filter 0.2s;
+  /* Blurred by a text shadow with a fixed radius; only colours fade, so hover never re-runs a filter. */
+  color: transparent;
+  text-shadow: 0 0 6px var(--text);
+  transition: color 0.2s, text-shadow 0.2s;
 }
 
 .tiptap .spoiler:hover,
 .tiptap .spoiler:focus-within,
 .tiptap.ProseMirror-focused .has-focus .spoiler {
-  filter: none;
+  color: inherit;
+  text-shadow: 0 0 6px transparent;
+}
+
+/* A link around a spoiler: its underline belongs to the <a>, so hide and reveal it with the spoiler. */
+.tiptap a:has(.spoiler) {
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.2s;
+}
+
+.tiptap a:has(.spoiler:hover),
+.tiptap a:has(.spoiler:focus-within),
+.tiptap a:focus-within:has(.spoiler),
+.tiptap.ProseMirror-focused .has-focus a:has(.spoiler) {
+  text-decoration-color: currentColor;
 }
 
 /* Mentions + emoji */
@@ -1160,6 +1222,7 @@ html:has(.doc-shell) body {
 
 .tiptap [data-type='emoji'] img {
   display: inline;
+  outline: none; /* inline glyphs, not pictures */
   width: 1em;
   height: 1em;
   vertical-align: -0.1em;
@@ -1198,7 +1261,6 @@ html:has(.doc-shell) body {
   color: var(--muted);
   pointer-events: none;
   content: attr(data-placeholder);
-  opacity: 0.7;
 }
 
 /* Focus mode: dim everything except the block being edited */
@@ -1280,15 +1342,21 @@ html:has(.doc-shell) body {
 }
 
 .drag-handle {
+  position: relative;
   display: grid;
   place-items: center;
   width: 20px;
   height: 24px;
-  font-size: 0.8rem;
-  letter-spacing: -2px;
   color: var(--muted);
   border-radius: 4px;
   cursor: grab;
+}
+
+/* 32x32 hit area, grown away from the text so it never covers the block it moves. */
+.drag-handle::before {
+  position: absolute;
+  inset: -4px 0 -4px -12px;
+  content: '';
 }
 
 .drag-handle:hover {
@@ -1332,7 +1400,7 @@ html:has(.doc-shell) body {
   text-align: left;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px; /* popup radius 10 - padding 6 */
   cursor: pointer;
 }
 
@@ -1350,7 +1418,7 @@ html:has(.doc-shell) body {
   font-weight: 600;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px; /* no room inside a 4px item for more than this */
 }
 
 .suggestion-label {
@@ -1485,7 +1553,7 @@ html:has(.doc-shell) body {
 .badge {
   padding: 0 6px;
   font-weight: 600;
-  color: var(--warning);
+  color: var(--warning-text);
   border: 1px solid currentColor;
   border-radius: 999px;
 }
@@ -1622,10 +1690,57 @@ html:has(.doc-shell) body {
   border-radius: 8px;
   box-shadow: var(--shadow);
   transform: translateX(-50%);
+  animation: toast-in 0.2s ease-out backwards;
+}
+
+.doc-toast.leaving {
+  pointer-events: none;
+  animation: toast-out 0.15s ease-out forwards;
 }
 
 .doc-toast.error {
-  border-left: 4px solid var(--danger);
+  /* A danger tint, so an error reads differently from a notice without an accent stripe. */
+  background: color-mix(in srgb, var(--danger) 35%, var(--text));
+}
+
+/* Shared with the library's toast. Enters 8px below its place, leaves 4px lower and faster. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+}
+
+@keyframes toast-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes toast-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Opacity only: nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .doc-toast,
+  .toast {
+    animation-name: toast-fade-in;
+  }
+
+  .doc-toast.leaving,
+  .toast.leaving {
+    animation-name: toast-fade-out;
+  }
 }
 
 .doc-toast-close {
@@ -1644,4 +1759,42 @@ html:has(.doc-shell) body {
 
 .doc-toast-close:hover {
   background: color-mix(in srgb, var(--bg) 18%, transparent);
+}
+
+/* Alt text field in the image bubble menu. Alt+Enter on a selected image focuses it. */
+.image-alt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.image-alt input {
+  width: 220px;
+  max-width: 60vw;
+  height: 28px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+@media (pointer: coarse) {
+  .image-alt input {
+    height: 44px;
+    font-size: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary-button,
+  .primary-button:active:not(:disabled) {
+    transition: none;
+    scale: none;
+  }
 }

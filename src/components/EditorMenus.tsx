@@ -1,5 +1,7 @@
 import { DragHandle } from '@tiptap/extension-drag-handle-react'
-import { TextSelection } from '@tiptap/pm/state'
+import { NodeSelection, TextSelection } from '@tiptap/pm/state'
+import { GripVertical } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { useEditorState, type Editor } from '@tiptap/react'
 import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus'
 import { blockActions, setLink } from '../editor/blocks'
@@ -12,6 +14,49 @@ const QUICK_BLOCKS = ['h1', 'h2', 'bullet', 'task', 'quote', 'code', 'table', 'i
  * Bubble menu (on text selection), floating "+" menu (on empty lines) and the block drag handle.
  * `scrollTarget`: what scrolls the document (the page's scroller), so the menus follow it.
  */
+/** Alt text for the selected image: a labelled input, committed on every keystroke. */
+function ImageAltField({ editor }: { editor: Editor }) {
+  const alt = useEditorState({
+    editor,
+    selector: ({ editor: e }) => (e.getAttributes('image').alt as string | null) ?? '',
+  })
+  const input = useRef<HTMLInputElement>(null)
+  // Keyboard way in: with an image selected, Alt+Enter moves focus to the field (plain Enter keeps its normal behaviour).
+  useEffect(() => {
+    const dom = editor.view.dom
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || !event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) return
+      if (!editor.isEditable) return
+      const { selection } = editor.state
+      if (!(selection instanceof NodeSelection) || selection.node.type.name !== 'image') return
+      event.preventDefault()
+      input.current?.focus()
+    }
+    dom.addEventListener('keydown', onKey, true)
+    return () => dom.removeEventListener('keydown', onKey, true)
+  }, [editor])
+  return (
+    <label className="image-alt">
+      <span>Alt text</span>
+      <input
+        ref={input}
+        type="text"
+        value={alt}
+        placeholder="Describe the image"
+        onChange={(e) => {
+          editor.chain().updateAttributes('image', { alt: e.target.value }).run()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === 'Escape') {
+            e.preventDefault()
+            editor.chain().focus().run()
+          }
+        }}
+      />
+    </label>
+  )
+}
+
 export function EditorMenus({ editor, scrollTarget }: { editor: Editor; scrollTarget: HTMLElement | null }) {
   const s = useEditorState({
     editor,
@@ -75,6 +120,17 @@ export function EditorMenus({ editor, scrollTarget }: { editor: Editor; scrollTa
         </ToolButton>
       </BubbleMenu>
 
+      <BubbleMenu
+        editor={editor}
+        className="bubble-menu"
+        options={{ placement: 'bottom', offset: 8, scrollTarget: scrollTarget ?? window }}
+        shouldShow={({ editor: e, state }) =>
+          e.isEditable && state.selection instanceof NodeSelection && state.selection.node.type.name === 'image'
+        }
+      >
+        <ImageAltField editor={editor} />
+      </BubbleMenu>
+
       <FloatingMenu editor={editor} className="floating-menu" options={{ placement: 'bottom-start', offset: 4, scrollTarget: scrollTarget ?? window }}>
         <span className="floating-plus" aria-hidden>
           ＋
@@ -92,8 +148,8 @@ export function EditorMenus({ editor, scrollTarget }: { editor: Editor; scrollTa
 
       {s.editable && (
         <DragHandle editor={editor} className="drag-handle-wrapper">
-          <div className="drag-handle" title="Drag to move · click to select" aria-label="Drag block">
-            ⋮⋮
+          <div className="drag-handle" title="Drag to move · click to select" aria-hidden="true">
+            <GripVertical aria-hidden size={16} />
           </div>
         </DragHandle>
       )}
