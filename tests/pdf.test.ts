@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { docFileName, pdfDisposition } from '../server/collab.ts'
 import { cleanStyle, documentPage, MAX_FORMULA_CHARS, MAX_HIGHLIGHT_CHARS } from '../server/pdf-html.ts'
 import { createPdfRenderer, defaultChromium, PdfBusy, PdfTimeout, PdfTooLarge, PdfUnavailable } from '../server/pdf.ts'
-import { IN, MARGIN_PRESETS, PAPER_SIZES, type PageSetup } from '../src/editor/paper.ts'
+import { IN, marginsOf, PAPER_SIZES, type PageSetup } from '../src/editor/paper.ts'
 import { api, connectDocument, DEV_PORTS, startServer, typeParagraph, type RunningServer } from './helpers.ts'
 import { blockMathJson, codeJson, docState, everyNodeJson, matrixLatex, pageMeta, paragraphsJson, PNG_DATA_URL, type Meta } from './pdf-fixtures.ts'
 
@@ -165,6 +165,24 @@ describe('PDF page (HTML)', () => {
     expect(html).toContain('@page { @bottom-center { content: "Page " counter(page) " of " counter(pages);')
   })
 
+  test('paragraph spacing and indents become inline styles, and stay out of the way when unset', () => {
+    const para = (value: string, attrs: Record<string, unknown> = {}) => ({ type: 'paragraph', attrs, content: [{ type: 'text', text: value }] })
+    const { html } = documentPage(
+      docState({
+        type: 'doc',
+        content: [
+          para('Spaced', { lineHeight: 1.5, spaceBefore: 6, spaceAfter: 12, indentLeft: 36, indentFirstLine: -18 }),
+          { type: 'heading', attrs: { level: 2, indentLeft: 18, indentRight: 9 }, content: [{ type: 'text', text: 'Heading' }] },
+          para('Plain'),
+        ],
+      }),
+    )
+    const body = html.slice(html.indexOf('<body>'))
+    for (const style of ['line-height: 1.5', 'margin-top: 6pt', 'margin-bottom: 12pt', 'margin-left: 36pt', 'text-indent: -18pt']) expect(body).toContain(style)
+    expect(body).toMatch(/<h2[^>]*style="[^"]*margin-left: 18pt[^"]*margin-right: 9pt/)
+    expect(body).toContain('<p>Plain</p>')
+  })
+
   test('an empty or unknown document is an empty page', () => {
     expect(documentPage(null).html).toContain('<main class="tiptap"></main>')
   })
@@ -244,6 +262,42 @@ describe('PDF page (HTML)', () => {
 
 describe.skipIf(!CHROMIUM)('PDF renderer', () => {
   const settings = { chromium: CHROMIUM, maxConcurrent: 2, maxQueue: 8, timeoutMs: 30_000, maxBytes: 1e8 }
+
+  test.skipIf(!POPPLER)('paragraph spacing, line spacing and indents reach the PDF', async () => {
+    const para = (value: string, attrs: Record<string, unknown> = {}) => ({ type: 'paragraph', attrs, content: [{ type: 'text', text: value }] })
+    const long = Array.from({ length: 80 }, (_, i) => `w${i}`).join(' ')
+    const renderer = createPdfRenderer(settings)
+    try {
+      const { pdf } = await renderer.exportDocument(
+        docState({
+          type: 'doc',
+          content: [
+            para('Alpha', { spaceAfter: 0 }),
+            para('Bravo', { spaceAfter: 0 }),
+            para('Charlie', { spaceBefore: 50, spaceAfter: 0 }),
+            para(long, { lineHeight: 3, spaceBefore: 0, indentLeft: 72, indentFirstLine: 36 }),
+          ],
+        }),
+      )
+      const { words } = await layout(pdf)
+      const at = (text: string) => words.find((w) => w.text === text)!
+      const left = 1 * 72
+      // Bravo is one line below Alpha; Charlie one line plus the 50 pt before it below Bravo.
+      const line = at('Bravo').y0 - at('Alpha').y0
+      expect(line).toBeGreaterThan(10)
+      expect(Math.abs(at('Charlie').y0 - at('Bravo').y0 - (line + 50))).toBeLessThan(1.5)
+      // Line spacing 3: the wrapped paragraph's lines are 3 / 1.08 times as far apart as Alpha and Bravo (Normal is 1.08).
+      const rows = [...new Set(words.filter((w) => w.text.startsWith('w')).map((w) => Math.round(w.y0)))].sort((a, b) => a - b)
+      expect(rows.length).toBeGreaterThan(2)
+      expect(Math.abs(rows[1] - rows[0] - (line * 3) / 1.08)).toBeLessThan(2.5)
+      // Left indent 72 pt, the first line a further 36 pt in.
+      expect(Math.abs(at('w0').x0 - (left + 72 + 36))).toBeLessThan(1.5)
+      const second = words.find((w) => Math.round(w.y0) === rows[1] && w.text.startsWith('w'))!
+      expect(Math.abs(second.x0 - (left + 72))).toBeLessThan(1.5)
+    } finally {
+      await renderer.close()
+    }
+  }, 60_000)
 
   test('no request leaves the page, whatever the HTML asks for', async () => {
     let hits = 0
@@ -358,6 +412,8 @@ const SETUPS: PageSetup[] = [
   { size: 'letter', orientation: 'landscape', margins: 'narrow' },
   { size: 'a5', orientation: 'portrait', margins: 'wide' },
   { size: 'legal', orientation: 'portrait', margins: 'narrow' },
+  { size: 'a4', orientation: 'portrait', margins: 'moderate' },
+  { size: 'letter', orientation: 'portrait', margins: 'custom', customMargins: [48, 120, 72, 60] },
 ]
 const setupId = (setup: PageSetup) => `doc-${setup.size}-${setup.orientation}-${setup.margins}`
 
@@ -439,13 +495,13 @@ describe.skipIf(!CHROMIUM)('GET /api/docs/:id/pdf', () => {
       expect(Math.abs(height - expectedHeight)).toBeLessThan(2)
       expect(pages).toBeGreaterThan(1)
 
-      const [top, right, bottom, left] = MARGIN_PRESETS[setup.margins].margins.map((m) => m * PT)
+      const [top, right, bottom, left] = marginsOf(setup).map((m) => m * PT)
       // The footer sits in the bottom margin; everything else inside the margins.
       const footerTop = height - bottom
       const body = words.filter((word) => word.y0 < footerTop)
       const footer = words.filter((word) => word.y0 >= footerTop)
       expect(Math.min(...body.map((w) => w.x0))).toBeCloseTo(left, 0)
-      expect(Math.max(...body.map((w) => w.x1))).toBeLessThanOrEqual(width - right + 0.5)
+      expect(Math.max(...body.map((w) => w.x1))).toBeLessThanOrEqual(width - right + 1.5)
       // The first line's glyph box starts a little above the line box's top.
       expect(Math.abs(Math.min(...body.map((w) => w.y0)) - top)).toBeLessThan(3)
       expect(Math.max(...body.map((w) => w.y1))).toBeLessThanOrEqual(height - bottom + 0.5)
@@ -456,7 +512,8 @@ describe.skipIf(!CHROMIUM)('GET /api/docs/:id/pdf', () => {
       // Centred, and nothing else from the browser (date, URL, title) on the sheet.
       const first = footer.filter((w) => w.y0 === footer[0]?.y0)
       const centre = (Math.min(...first.map((w) => w.x0)) + Math.max(...first.map((w) => w.x1))) / 2
-      expect(Math.abs(centre - width / 2)).toBeLessThan(2)
+      // Centred between the margins (the page centre when they are equal).
+      expect(Math.abs(centre - (left + (width - left - right) / 2))).toBeLessThan(2)
       expect(words.filter((w) => w.y0 < top - 3)).toEqual([])
       expect(footer.every((w) => /^(Page|of|\d+)$/.test(w.text))).toBe(true)
     }

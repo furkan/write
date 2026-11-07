@@ -17,7 +17,7 @@ import { documentExtensions } from './schema'
 import { Pagination, type PaginationOptions } from './extensions/pagination/Pagination'
 import { ZoomedResize } from './extensions/ZoomedResize'
 import { tocScrollParent } from './scroller'
-import { Shortcuts } from './extensions/shortcuts'
+import { Shortcuts, TabKey } from './extensions/shortcuts'
 import { SlashCommand } from './extensions/slash-command'
 import { emojiSuggestion, mentionSuggestion } from './suggestions'
 
@@ -110,16 +110,18 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
 
     // Small additions
     Placeholder.configure({
-      placeholder: ({ node }) => {
+      placeholder: ({ editor, node }) => {
         if (node.type.name === 'heading') return `Heading ${node.attrs.level}`
         if (node.type.name === 'detailsSummary') return 'Summary'
-        return "Type '/' for commands, '@' to mention, ':' for emoji…"
+        // Like Word: a hint only in a completely empty document, none on every empty line.
+        return editor.isEmpty ? 'Start writing, or type / to insert' : ''
       },
       includeChildren: true,
     }),
     CharacterCount,
     Focus.configure({ className: 'has-focus', mode: 'deepest' }),
     schema.textAlign,
+    schema.paragraphFormat,
     schema.highlight,
     schema.textStyle,
     schema.subscript,
@@ -161,6 +163,7 @@ export function buildExtensions({ session, user, onSave, getEditor, onTableOfCon
     schema.callout.extend({ addNodeView: () => ReactNodeViewRenderer(CalloutView) }),
     schema.spoiler,
     Shortcuts.configure({ onSave }),
+    TabKey,
     // Math is edited by clicking it; Enter on a selected math node (reached with the keyboard) does the same.
     Extension.create({
       name: 'mathEnter',

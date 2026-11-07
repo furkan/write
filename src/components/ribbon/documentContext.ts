@@ -6,7 +6,6 @@ export type ViewOptions = {
   readOnly: boolean
   invisibles: boolean
   focusMode: boolean
-  sidebar: boolean
 }
 
 /**

@@ -1,3 +1,4 @@
+import { navPanePref } from './editor/view-prefs'
 import { driver, type DriveStep } from 'driver.js'
 import 'driver.js/dist/driver.css'
 import { flushSync } from 'react-dom'
@@ -26,7 +27,16 @@ export const setTourContext = (next: TourContext) => void (context = next)
  * A step, shown only when `when` (if any) says it applies to the current user. `tab`: the ribbon
  * tab whose group the step points at; it is selected when the step shows.
  */
-type TourStep = Omit<DriveStep, 'element'> & { element?: string; when?: (ctx: TourContext) => boolean; tab?: RibbonTab }
+type TourStep = Omit<DriveStep, 'element'> & {
+  element?: string
+  when?: (ctx: TourContext) => boolean
+  tab?: RibbonTab
+  /**
+   * Runs (synchronously) when the step shows, to put its element on the page: the navigation pane
+   * may be closed. Returns how to undo that, which runs when the tour ends.
+   */
+  reveal?: () => (() => void) | void
+}
 
 /** On a narrow screen the bar's actions fold into the "⋯" menu, so a step about one points there. */
 const orMore = (name: string) => `[data-tour="${name}"], [data-tour="more"]`
@@ -195,7 +205,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Ribbon',
           description:
-            'The ribbon is the whole top bar. <b>File</b> has new documents, copies, printing, import and export; <b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup; <b>View</b> has the layouts, what to show, and zoom. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow at the far right collapses the ribbon to this row.',
+            'The ribbon is the whole top bar. <b>File</b> has new documents, copies, printing, import and export; <b>Home</b> has fonts, marks, colours, paragraphs and styles; <b>Insert</b> has tables, media, links, equations and blocks; <b>Layout</b> has the page setup (margin presets or exact values, orientation, size); <b>View</b> has the layouts, what to show (navigation pane, Dark page) and zoom. Hover any button to see its keyboard shortcut. A <b>Table</b> or <b>Code</b> tab appears while you are in a table or code block. The arrow at the far right collapses the ribbon to this row.',
           side: 'bottom',
         },
       },
@@ -220,13 +230,12 @@ export const TOURS: Record<TourId, Tour> = {
       {
         element: '[data-tour="editor"]',
         popover: {
-          title: 'Menus inside the text',
+          title: 'Typing shortcuts',
           description: `<ul class="tour-list">
-            <li>${k('/')} opens the <b>block menu</b>. Start typing to filter it.</li>
+            <li>Formatting lives in the <b>ribbon</b>, as in Word. The right-click menu is your browser’s, so spelling suggestions work.</li>
+            <li>${k('/')} opens a quiet <b>block menu</b> for quick inserts. Start typing to filter it.</li>
             <li>${k('@')} mentions a person and ${k(':')} inserts an emoji.</li>
-            <li><b>Select text</b> to get a formatting bubble.</li>
-            <li>An <b>empty line</b> shows quick-insert buttons below it.</li>
-            <li>Hover a block and grab ${k('⋮⋮')} on its left to <b>drag it</b> somewhere else.</li>
+            <li><b>Layout → Margins</b> has presets and <b>Custom margins…</b> for exact values.</li>
           </ul>`,
           side: 'top',
           align: 'start',
@@ -234,10 +243,15 @@ export const TOURS: Record<TourId, Tour> = {
       },
       {
         element: '[data-tour="toc"]',
+        reveal: () => {
+          if (navPanePref.get()) return
+          navPanePref.set(true)
+          return () => navPanePref.set(false)
+        },
         popover: {
-          title: 'Table of contents',
-          description: 'Built from your headings as you type. Click an entry to jump to it.',
-          side: 'left',
+          title: 'Navigation pane',
+          description: 'Your headings, as you type, down the left side. Click one to jump to it; the one you are in is highlighted. Show or hide it from the <b>View</b> tab.',
+          side: 'right',
         },
       },
       {
@@ -301,7 +315,7 @@ export const TOURS: Record<TourId, Tour> = {
         element: '[data-tour="marks"]',
         popover: {
           title: 'Text marks',
-          description: `Bold ${k(`${mod}+B`)}, italic ${k(`${mod}+I`)}, underline ${k(`${mod}+U`)}, strike ${k(`${mod}+Shift+S`)}, code ${k(`${mod}+E`)}, subscript ${k(`${mod}+,`)}, superscript ${k(`${mod}+.`)}, and a custom <b>spoiler</b> mark ${k(`${mod}+Alt+S`)}. Links (${k(`${mod}+K`)}) are on the <b>Insert</b> tab.`,
+          description: `Bold ${k(`${mod}+B`)}, italic ${k(`${mod}+I`)}, underline ${k(`${mod}+U`)}, strike ${k(`${mod}+Shift+S`)}, code ${k(`${mod}+E`)}, subscript ${k(`${mod}+,`)}, superscript ${k(`${mod}+.`)}, and a custom <b>spoiler</b> mark ${k(`${mod}+Alt+S`)} (also under Insert → More). Line and paragraph spacing is the button next to Quote. Links (${k(`${mod}+K`)}) are on the <b>Insert</b> tab.`,
           side: 'bottom',
         },
       },
@@ -382,7 +396,7 @@ export const TOURS: Record<TourId, Tour> = {
         popover: {
           title: 'Insert anything',
           description:
-            'The <b>Insert</b> tab has tables, pictures, YouTube videos, links, equations, emoji, callouts, toggle sections, dividers and today’s date. Typing <kbd>/</kbd> in the document opens the same blocks.',
+            'The <b>Insert</b> tab has tables, pictures, YouTube videos, links, equations, emoji, dividers and today’s date. Callouts, toggle sections and spoilers are under <b>More</b>. Typing <kbd>/</kbd> in the document opens the same blocks.',
           side: 'bottom',
         },
       },
@@ -579,15 +593,30 @@ const onTab = (tab: RibbonTab, selector: string) => () => {
   return document.querySelector(selector) ?? document.body
 }
 
+/** A step that opens what it points at first; a card in the middle of the page if that isn't visible (a phone). */
+const onReveal = (reveal: NonNullable<TourStep['reveal']>, selector: string, undo: (() => void)[]) => () => {
+  flushSync(() => {
+    const restore = reveal()
+    if (restore) undo.push(restore)
+  })
+  const target = document.querySelector<HTMLElement>(selector)
+  return target && target.offsetParent !== null ? target : document.body
+}
+
 function runTour(id: TourId) {
   const tour = TOURS[id]
   // Skip steps whose element isn't on the page right now (e.g. an empty library or a
   // hidden sidebar), instead of showing a floating card about something that isn't there.
   // A step on another ribbon tab is there once the tab is selected.
+  // What the steps opened to show their element (the navigation pane), closed again when the tour ends.
+  const undo: (() => void)[] = []
   const steps: DriveStep[] = tour.steps
     .filter((step) => step.when?.(context) ?? true)
-    .filter((step) => step.tab || !step.element || document.querySelector(step.element))
-    .map(({ when: _when, tab, element, ...step }) => ({ ...step, element: tab && element ? onTab(tab, element) : element }))
+    .filter((step) => step.tab || step.reveal || !step.element || document.querySelector(step.element))
+    .map(({ when: _when, tab, reveal, element, ...step }) => ({
+      ...step,
+      element: tab && element ? onTab(tab, element) : reveal && element ? onReveal(reveal, element, undo) : element,
+    }))
   const instance = driver({
     showProgress: true,
     animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -603,6 +632,7 @@ function runTour(id: TourId) {
     // Not `onDestroyed`: driver.js skips it when the tour ends mid-animation (a quick Done).
     onDestroyStarted: () => {
       closeFlyout()
+      for (const restore of undo.splice(0)) restore()
       if (id === 'welcome' || id === 'library') writeStorage(seenKey(id), '1')
       instance.destroy()
     },

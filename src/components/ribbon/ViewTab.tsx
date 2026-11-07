@@ -3,8 +3,9 @@ import {
   Focus,
   Globe,
   Lock,
+  Moon,
   MoveHorizontal,
-  PanelRight,
+  PanelLeft,
   Pilcrow,
   RectangleVertical,
   Search,
@@ -13,6 +14,8 @@ import {
   ZoomOut,
 } from 'lucide-react'
 import { setLayoutMode, useLayoutMode, useNarrowScreen, usePagedView } from '../../editor/page-setup'
+import { darkPagePref, navPanePref } from '../../editor/view-prefs'
+import { useDarkTheme } from '../../theme'
 import { setZoom, setZoomFit, stepZoom, useZoomSetting, ZOOM_MAX, ZOOM_MIN } from '../../editor/zoom'
 import { ThemeMenuItems } from '../ThemeToggle'
 import { ZoomMenuItems } from '../ZoomControls'
@@ -31,6 +34,9 @@ export function ViewTab() {
   const narrow = useNarrowScreen()
   const canFit = usePagedView()
   const { fit } = useZoomSetting()
+  const navPane = navPanePref.use()
+  const darkPage = darkPagePref.use()
+  const darkTheme = useDarkTheme()
 
   return (
     <>
@@ -58,16 +64,29 @@ export function ViewTab() {
       </RibbonGroup>
 
       <RibbonGroup label="Show" tour="show">
-        <div className="ribbon-stack">
-          <RibbonButton size="medium" label="Contents" title="Contents sidebar" icon={PanelRight} active={view.sidebar} onClick={() => setView({ sidebar: !view.sidebar })} />
-          <RibbonButton
-            size="medium"
-            label="Invisible characters"
-            icon={Pilcrow}
-            active={view.invisibles}
-            onClick={() => setView({ invisibles: !view.invisibles })}
-          />
-          <RibbonButton size="medium" label="Focus mode" icon={Focus} active={view.focusMode} onClick={() => setView({ focusMode: !view.focusMode })} />
+        <div className="ribbon-row">
+          <div className="ribbon-stack">
+            <RibbonButton size="medium" label="Navigation pane" title="Navigation pane: the document's headings" icon={PanelLeft} active={navPane} onClick={() => navPanePref.set(!navPane)} />
+            <RibbonButton
+              size="medium"
+              label="Invisible characters"
+              icon={Pilcrow}
+              active={view.invisibles}
+              onClick={() => setView({ invisibles: !view.invisibles })}
+            />
+          </div>
+          <div className="ribbon-stack">
+            <RibbonButton size="medium" label="Focus mode" icon={Focus} active={view.focusMode} onClick={() => setView({ focusMode: !view.focusMode })} />
+            <RibbonButton
+              size="medium"
+              label="Dark page"
+              title={darkTheme ? 'Dark page: the page follows the dark theme (printing is always white)' : 'Dark page (needs the dark theme)'}
+              icon={Moon}
+              active={darkPage && darkTheme}
+              disabled={!darkTheme}
+              onClick={() => darkPagePref.set(!darkPage)}
+            />
+          </div>
         </div>
       </RibbonGroup>
 

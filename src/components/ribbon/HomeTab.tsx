@@ -5,9 +5,9 @@ import {
   Bold,
   ChevronDown,
   Code,
-  EyeOff,
   Highlighter,
   Italic,
+  LineHeight,
   List,
   ListIndentDecrease,
   ListIndentIncrease,
@@ -29,12 +29,13 @@ import { useState } from 'react'
 import { mod } from '../../editor/platform'
 import { Dropdown, MenuItem } from '../Dropdown'
 import { ColorSplitButton, RibbonButton, RibbonGroup } from './controls'
-import { HEADING_LEVELS, keepSelection, tooltip, type TabProps } from './editorState'
+import { HEADING_LEVELS, keepSelection, tooltip, type RibbonState, type TabProps } from './editorState'
 import { FONT_SIZES, parseFontSize, stepFontSize } from './fontSize'
+import { ADDED_SPACE, DEFAULT_LINE_HEIGHT, LINE_SPACINGS } from './paragraph'
 import { useMediaQuery } from './state'
 
 const FONT_FAMILIES = [
-  { label: 'Default', value: '' },
+  { label: 'Carlito (Calibri)', value: '' },
   { label: 'Serif', value: 'Georgia, "Times New Roman", serif' },
   { label: 'Mono', value: 'ui-monospace, "SF Mono", Consolas, monospace' },
   { label: 'Rounded', value: '"Trebuchet MS", "Segoe UI", sans-serif' },
@@ -133,14 +134,6 @@ export function HomeTab({ editor, s, disabled }: TabProps) {
               onClick={() => chain().toggleSuperscript().run()}
             />
             <RibbonButton label="Inline code" shortcut={`${mod}+E`} icon={Code} active={s.code} disabled={disabled} onClick={() => chain().toggleCode().run()} />
-            <RibbonButton
-              label="Spoiler"
-              shortcut={`${mod}+Alt+S`}
-              icon={EyeOff}
-              active={s.spoiler}
-              disabled={disabled}
-              onClick={() => chain().toggleSpoiler().run()}
-            />
           </div>
           <div className="ribbon-cluster" data-tour="colors">
             <ColorSplitButton
@@ -235,6 +228,7 @@ export function HomeTab({ editor, s, disabled }: TabProps) {
             ))}
           </div>
           <div className="ribbon-cluster">
+            <SpacingMenu editor={editor} spacing={s.spacing} disabled={disabled} />
             <RibbonButton
               label="Quote"
               shortcut={`${mod}+Shift+B`}
@@ -259,6 +253,61 @@ export function HomeTab({ editor, s, disabled }: TabProps) {
         <StyleGallery editor={editor} current={s.heading} disabled={disabled} />
       </RibbonGroup>
     </>
+  )
+}
+
+/** Word's "Line and paragraph spacing": line spacing, and space before and after, for every selected block. */
+function SpacingMenu({ editor, spacing, disabled }: { editor: Editor; spacing: RibbonState['spacing']; disabled: boolean }) {
+  const set = (change: Parameters<Editor['commands']['setParagraphFormat']>[0]) => editor.chain().focus().setParagraphFormat(change).run()
+  const hasBefore = (spacing.spaceBefore ?? 0) > 0
+  const hasAfter = (spacing.spaceAfter ?? 0) > 0
+  return (
+    <Dropdown
+      fixed
+      className="ribbon-combo spacing-menu"
+      title="Line and paragraph spacing"
+      disabled={disabled}
+      label={
+        <>
+          <LineHeight aria-hidden size={16} />
+          <ChevronDown aria-hidden size={10} />
+        </>
+      }
+    >
+      {(close) => (
+        <>
+          {LINE_SPACINGS.map((value) => (
+            <MenuItem
+              key={value}
+              checked={spacing.lineHeight === value}
+              onSelect={() => {
+                close()
+                set({ lineHeight: value === DEFAULT_LINE_HEIGHT ? null : value })
+              }}
+            >
+              {Number.isInteger(value) ? value.toFixed(1) : String(value)}
+            </MenuItem>
+          ))}
+          <hr />
+          <MenuItem
+            onSelect={() => {
+              close()
+              set({ spaceBefore: hasBefore ? 0 : ADDED_SPACE })
+            }}
+          >
+            {hasBefore ? 'Remove space before paragraph' : 'Add space before paragraph'}
+          </MenuItem>
+          <MenuItem
+            onSelect={() => {
+              close()
+              set({ spaceAfter: hasAfter ? 0 : ADDED_SPACE })
+            }}
+          >
+            {hasAfter ? 'Remove space after paragraph' : 'Add space after paragraph'}
+          </MenuItem>
+        </>
+      )}
+    </Dropdown>
   )
 }
 
@@ -303,18 +352,18 @@ function FontPicker({ editor, value, disabled }: { editor: Editor; value: string
   )
 }
 
-/** Editable font size in px: type a number and press Enter, or pick a preset. Empty for mixed sizes. */
+/** Editable font size in pt: type a number and press Enter, or pick a preset. Empty for mixed sizes. */
 function FontSize({ editor, size, disabled }: { editor: Editor; size: number | null; disabled: boolean }) {
   const [draft, setDraft] = useState<string | null>(null)
-  const apply = (px: number) => {
+  const apply = (pt: number) => {
     setDraft(null)
-    editor.chain().focus().setFontSize(`${px}px`).run()
+    editor.chain().focus().setFontSize(`${pt}pt`).run()
   }
   return (
     <div className="ribbon-combo font-size">
       <input
         aria-label="Font size"
-        title="Font size (px): type a size and press Enter"
+        title="Font size (pt): type a size and press Enter"
         inputMode="decimal"
         disabled={disabled}
         value={draft ?? (size === null ? '' : String(size))}
@@ -324,9 +373,9 @@ function FontSize({ editor, size, disabled }: { editor: Editor; size: number | n
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault()
-            const px = draft === null ? null : parseFontSize(draft)
-            if (px === null) setDraft(null)
-            else apply(px)
+            const pt = draft === null ? null : parseFontSize(draft)
+            if (pt === null) setDraft(null)
+            else apply(pt)
           } else if (e.key === 'Escape') {
             setDraft(null)
             editor.commands.focus()
@@ -342,18 +391,18 @@ function FontSize({ editor, size, disabled }: { editor: Editor; size: number | n
                 editor.chain().focus().unsetFontSize().run()
               }}
             >
-              Default
+              Default (11)
             </MenuItem>
-            {FONT_SIZES.map((px) => (
+            {FONT_SIZES.map((pt) => (
               <MenuItem
-                key={px}
-                checked={px === size}
+                key={pt}
+                checked={pt === size}
                 onSelect={() => {
                   close()
-                  apply(px)
+                  apply(pt)
                 }}
               >
-                {px}
+                {pt}
               </MenuItem>
             ))}
           </>

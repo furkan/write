@@ -65,17 +65,27 @@ html:has(.doc-shell) body {
   overflow: hidden;
 }
 
-.doc-shell > :not(.doc-scroll) {
+.doc-shell > :not(.doc-body) {
   flex: none;
+}
+
+/* The navigation pane beside the document's scroller. */
+.doc-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .doc-scroll {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+  /* The canvas around the page, in both layouts. */
+  background: var(--canvas);
 }
 
 /* Focusable only so the scrolling keys work before a click (see useDocumentScroller). */
@@ -93,7 +103,7 @@ html:has(.doc-shell) body {
   width: 36px;
   height: 36px;
   text-decoration: none;
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 .logo-link:hover {
@@ -108,7 +118,7 @@ html:has(.doc-shell) body {
   font-weight: 600;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   text-overflow: ellipsis;
 }
 
@@ -142,7 +152,7 @@ html:has(.doc-shell) body {
   text-decoration: none;
   background: var(--accent);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
   transition: scale 0.1s ease-out;
 }
@@ -318,7 +328,7 @@ html:has(.doc-shell) body {
   padding: 0 10px;
   background: var(--bg);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 .share-person select {
@@ -407,7 +417,7 @@ html:has(.doc-shell) body {
   color: var(--muted);
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -463,7 +473,7 @@ html:has(.doc-shell) body {
   font-size: 0.9rem;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -516,23 +526,9 @@ html:has(.doc-shell) body {
 .workspace {
   display: grid;
   flex: 1;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 24px;
-  width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 0 16px;
-}
-
-.no-sidebar .workspace {
   grid-template-columns: minmax(0, 1fr);
-  max-width: 900px;
-}
-
-@media (max-width: 1000px) {
-  .workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  width: 100%;
+  padding: 0 16px;
 }
 
 /*
@@ -551,8 +547,6 @@ html:has(.doc-shell) body {
 
 /* ---------- Menu buttons ---------- */
 
-.bubble-menu button,
-.floating-menu button,
 .dropdown > button {
   display: inline-flex;
   align-items: center;
@@ -563,19 +557,12 @@ html:has(.doc-shell) body {
   font-size: 0.9rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
-.bubble-menu button:hover:not(:disabled),
-.floating-menu button:hover:not(:disabled),
 .dropdown > button:hover:not(:disabled) {
   background: var(--surface-2);
-}
-
-.bubble-menu button.active {
-  color: var(--accent);
-  background: var(--accent-bg);
 }
 
 .dropdown > button:disabled {
@@ -703,7 +690,7 @@ html:has(.doc-shell) body {
   width: 28px;
   height: 28px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   transition: box-shadow 0.12s ease-out;
 }
@@ -722,14 +709,32 @@ html:has(.doc-shell) body {
 
 .editor .tiptap {
   min-height: 60vh;
+  /* Tab stops every half inch, like Word's defaults (a count first, for browsers without lengths). */
+  tab-size: 11;
+  tab-size: 0.5in;
   padding: 16px 8px 16px 40px;
   outline: none;
   word-wrap: break-word;
+  /* Word's defaults: Normal is Carlito (Calibri's metrics) 11pt, single line at 1.08. */
+  font-family: var(--page-font);
+  font-size: 11pt;
+  line-height: 1.08;
+  color: var(--text);
   /*
    * The viewer's zoom (src/editor/zoom.ts). In Print layout the page grows or shrinks; in one
    * continuous page the width stays the column's, so the text reflows at its new size.
    */
   zoom: var(--zoom, 1);
+}
+
+/* Web layout: one continuous white sheet on the canvas (Print layout's pages: pagination.css). */
+.editor .tiptap:not(.paginated) {
+  max-width: 960px;
+  margin: 0 auto;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--paper-edge),
+    var(--page-shadow);
 }
 
 @media (max-width: 640px) {
@@ -738,69 +743,111 @@ html:has(.doc-shell) body {
   }
 }
 
-.editor .tiptap > * + * {
-  margin-top: 0.75em;
+.editor .tiptap {
+  --heading: #2f5496;
+  --heading-dark: #1f3763;
+  --link: #0563c1;
 }
 
-.tiptap h1,
-.tiptap h2,
-.tiptap h3,
-.tiptap h4,
-.tiptap h5,
-.tiptap h6 {
-  margin-bottom: 0.2em;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
+/* Every block has 8pt after it (Word's default); a paragraph's own spacing is inline style. */
+.tiptap > * {
+  margin: 0 0 8pt;
 }
 
-.tiptap h1 {
-  font-size: 2rem;
+.tiptap p {
+  margin: 0 0 8pt;
 }
 
-/* A little room above a heading jumped to from the table of contents. */
+.tiptap :is(li, td, th) > p {
+  margin: 0;
+}
+
+/* Word's contextual spacing: no space between list items, nested lists included; the list as a
+   whole keeps the 8pt after it. */
+.tiptap li :is(ul, ol),
+.tiptap li > p {
+  margin: 0;
+}
+
+.tiptap :is(blockquote, [data-type='detailsContent']) > :last-child {
+  margin-bottom: 0;
+}
+
+.editor .tiptap > :first-child {
+  margin-top: 0;
+}
+
+/* Headings, as in Word 2013-2019: regular weight, dark blue, little room after. */
 .tiptap :is(h1, h2, h3, h4, h5, h6) {
+  margin: 2pt 0 0;
+  font-weight: 400;
+  line-height: 1.08;
+  color: var(--heading);
+  /* A little room above a heading jumped to from the navigation pane. */
   scroll-margin-top: 16px;
 }
 
+.tiptap h1 {
+  margin-top: 12pt;
+  font-size: 16pt;
+}
+
 .tiptap h2 {
-  margin-top: 1.6em;
-  font-size: 1.5rem;
+  font-size: 13pt;
+}
+
+.tiptap h3 {
+  font-size: 12pt;
+  color: var(--heading-dark);
+}
+
+.tiptap :is(h4, h5, h6) {
+  font-size: 11pt;
+}
+
+.tiptap h4 {
+  font-style: italic;
+}
+
+.tiptap h6 {
+  color: var(--heading-dark);
 }
 
 .tiptap a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: underline;
-  text-underline-offset: 2px;
   cursor: pointer;
 }
 
 .tiptap code {
-  padding: 0.1em 0.35em;
-  font: 0.88em var(--mono);
+  padding: 0 0.15em;
+  font: 0.92em var(--mono);
   background: var(--code-bg);
-  border-radius: 4px;
-}
-
-.tiptap mark {
-  padding: 0 2px;
-  /* Highlight colours are light in both themes, so keep the text dark. */
-  color: #1f1d24;
-  background: #fef08a;
   border-radius: 2px;
 }
 
+.tiptap mark {
+  padding: 0;
+  /* Highlight colours are light, so the text on them is always dark. The highlight mark sets
+     `color: inherit` inline, which would be white on a dark page, hence !important. */
+  color: #201f1e !important;
+  background: #fef08a;
+}
 
+/* Word's Quote style: italic and indented, no rule. */
 .tiptap blockquote {
-  margin-left: 0;
-  padding-left: 1em;
+  margin-right: 0.5in;
+  margin-left: 0.5in;
+  padding: 0;
+  font-style: italic;
   color: var(--muted);
-  border-left: 3px solid var(--border);
+  border: none;
 }
 
 .tiptap hr {
-  margin: 1.5em 0;
+  margin: 12pt 0;
   border: none;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-strong);
 }
 
 .tiptap hr.ProseMirror-selectednode {
@@ -809,13 +856,13 @@ html:has(.doc-shell) body {
 
 .tiptap ul,
 .tiptap ol {
-  padding-left: 1.5em;
+  padding-left: 0.5in;
 }
 
 /* A task item's paragraph sits one level deeper, in the div beside its checkbox. */
 .tiptap li > p,
 .tiptap ul[data-type='taskList'] li > div > p {
-  margin: 0.15em 0;
+  margin: 0;
 }
 
 /* Task list */
@@ -837,9 +884,15 @@ html:has(.doc-shell) body {
   user-select: none;
 }
 
+.tiptap ul[data-type='taskList'] li > label {
+  /* No taller than the text line, so every item is one line high (the checkbox's own margins and line box made it 22px). */
+  line-height: 0;
+}
+
 .tiptap ul[data-type='taskList'] li > label input {
   width: 1em;
   height: 1em;
+  margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
 }
@@ -855,9 +908,9 @@ html:has(.doc-shell) body {
 
 /* Code blocks + lowlight */
 .tiptap pre {
-  padding: 14px 16px;
+  padding: 10px 12px;
   overflow-x: auto;
-  font: 0.88rem/1.55 var(--mono);
+  font: 10pt/1.4 var(--mono);
   background: var(--code-bg);
   border-radius: var(--radius);
 }
@@ -907,7 +960,7 @@ html:has(.doc-shell) body {
 
 /* Tables */
 .tiptap .tableWrapper {
-  margin: 1em 0;
+  margin: 0 0 8pt;
   overflow-x: auto;
 }
 
@@ -922,13 +975,13 @@ html:has(.doc-shell) body {
 .tiptap td {
   position: relative;
   min-width: 60px;
-  padding: 6px 10px;
+  padding: 3px 7px;
   vertical-align: top;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
 }
 
 .tiptap th {
-  font-weight: 600;
+  font-weight: 700;
   text-align: left;
   background: var(--surface);
 }
@@ -966,7 +1019,6 @@ html:has(.doc-shell) body {
   display: block;
   max-width: 100%;
   height: auto;
-  border-radius: 8px;
   outline: 1px solid var(--image-edge);
   outline-offset: -1px;
 }
@@ -1026,15 +1078,16 @@ html:has(.doc-shell) body {
   cursor: nwse-resize;
 }
 
-/* Text colours are stored as fixed values (picked for white paper), so lift them on dark paper to
-   keep them readable (4.5:1) in the same hue. Print is always light. */
+/* Text colours are stored as fixed values (picked for white paper): they read as they are on the
+   white page. Only on a dark page ("Dark page" in the View tab) are they lifted to keep 4.5:1 in
+   the same hue. Print is always light. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .tiptap span[style*='color:']:not([style*='background']):not(.collaboration-carets__caret) {
+  :root:not([data-theme='light'])[data-dark-page] .tiptap span[style*='color:']:not([style*='background']):not(.collaboration-carets__caret) {
     filter: brightness(1.5);
   }
 }
 
-:root[data-theme='dark'] .tiptap span[style*='color:']:not([style*='background']):not(.collaboration-carets__caret) {
+:root[data-theme='dark'][data-dark-page] .tiptap span[style*='color:']:not([style*='background']):not(.collaboration-carets__caret) {
   filter: brightness(1.5);
 }
 
@@ -1156,7 +1209,7 @@ html:has(.doc-shell) body {
   line-height: 1;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -1219,7 +1272,7 @@ html:has(.doc-shell) body {
   color: var(--accent);
   white-space: nowrap;
   background: var(--accent-bg);
-  border-radius: 6px;
+  border-radius: 4px;
   box-decoration-break: clone;
 }
 
@@ -1320,10 +1373,9 @@ html:has(.doc-shell) body {
   caret-color: transparent;
 }
 
-/* ---------- Bubble / floating menus + drag handle ---------- */
+/* ---------- Image bubble menu (alt text) ---------- */
 
-.bubble-menu,
-.floating-menu {
+.bubble-menu {
   display: flex;
   gap: 2px;
   padding: 4px;
@@ -1331,44 +1383,6 @@ html:has(.doc-shell) body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-}
-
-.floating-menu {
-  align-items: center;
-  flex-wrap: wrap;
-  max-width: min(92vw, 460px);
-}
-
-.floating-plus {
-  padding: 0 6px;
-  color: var(--muted);
-}
-
-.drag-handle {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 24px;
-  color: var(--muted);
-  border-radius: 4px;
-  cursor: grab;
-}
-
-/* 32x32 hit area, grown away from the text so it never covers the block it moves. */
-.drag-handle::before {
-  position: absolute;
-  inset: -4px 0 -4px -12px;
-  content: '';
-}
-
-.drag-handle:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-
-.drag-handle:active {
-  cursor: grabbing;
 }
 
 /* ---------- Suggestion popup ---------- */
@@ -1442,40 +1456,63 @@ html:has(.doc-shell) body {
   color: var(--muted);
 }
 
-/* ---------- Sidebar ---------- */
+/* ---------- Navigation pane ---------- */
 
-.sidebar {
+.nav-pane {
   display: flex;
+  flex: 0 0 260px;
   flex-direction: column;
-  gap: 16px;
   min-width: 0;
-  padding: 10px 0 120px;
-}
-
-@media (min-width: 1001px) {
-  .sidebar {
-    position: sticky;
-    top: 0;
-    align-self: start;
-    max-height: var(--doc-view-height, 100%);
-    overflow-y: auto;
-  }
-}
-
-.panel {
-  padding: 12px;
+  overflow-y: auto;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-right: 1px solid var(--border);
 }
 
-.panel-title {
-  margin: 0 0 8px;
-  font-size: 0.75rem;
-  font-weight: 700;
+.nav-pane-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 6px 14px;
+}
+
+.nav-pane-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.nav-pane-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.nav-pane-close:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.nav-pane-empty {
+  margin: 0;
+  padding: 4px 14px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Phones have no room beside the page: the pane is for wider screens. */
+@media (max-width: 700px) {
+  .nav-pane {
+    display: none;
+  }
 }
 
 .link-button {
@@ -1494,14 +1531,14 @@ html:has(.doc-shell) body {
 
 .toc {
   margin: 0;
-  padding: 0;
+  padding: 0 0 24px;
   list-style: none;
 }
 
 .toc button {
   display: block;
   width: 100%;
-  padding: 3px 8px;
+  padding: 5px 14px 5px 11px;
   overflow: hidden;
   font-size: 0.88rem;
   text-align: left;
@@ -1509,21 +1546,22 @@ html:has(.doc-shell) body {
   text-overflow: ellipsis;
   background: none;
   border: none;
-  border-left: 2px solid transparent;
-  border-radius: 0 4px 4px 0;
+  border-left: 3px solid transparent;
   cursor: pointer;
+}
+
+.toc li {
+  margin: 0;
 }
 
 .toc button:hover {
   background: var(--surface-2);
 }
 
-.toc button.passed {
-  color: var(--muted);
-}
-
 .toc button.active {
+  font-weight: 600;
   color: var(--accent);
+  background: var(--accent-bg);
   border-left-color: var(--accent);
 }
 
@@ -1598,7 +1636,7 @@ html:has(.doc-shell) body {
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 6px;
   box-shadow: var(--shadow);
 }
 
@@ -1638,7 +1676,7 @@ html:has(.doc-shell) body {
   text-shadow: none;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 .driver-popover.write-tour .driver-popover-next-btn {
@@ -1690,7 +1728,7 @@ html:has(.doc-shell) body {
   line-height: 1.4;
   color: var(--bg);
   background: var(--text);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: var(--shadow);
   transform: translateX(-50%);
   animation: toast-in 0.2s ease-out backwards;
@@ -1756,7 +1794,7 @@ html:has(.doc-shell) body {
   color: inherit;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -1800,4 +1838,39 @@ html:has(.doc-shell) body {
     transition: none;
     scale: none;
   }
+}
+
+/* ---------- Custom margins dialog (components/MarginsDialog.tsx; shares the share dialog's look) ---------- */
+
+.margins-dialog {
+  width: min(380px, calc(100vw - 24px));
+}
+
+.margins-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+
+.margins-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.margins-grid input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+
+.margins-grid input[aria-invalid='true'] {
+  border-color: var(--danger);
 }

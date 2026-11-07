@@ -3,7 +3,7 @@ export const initialContent = `
 <h1>Welcome to Write ✍️</h1>
 <p>A playground for <strong>Tiptap</strong>. Everything here is live and shared with anyone who opens this page, so open it on a second device to see their cursor. Press <code>?</code> in the top bar for guided tours.</p>
 
-<div data-type="callout" data-variant="info"><p>Type <code>/</code> on an empty line for the block menu, <code>@</code> to mention someone and <code>:</code> for emoji. Select text to get the formatting bubble.</p></div>
+<div data-type="callout" data-variant="info"><p>Type <code>/</code> for the block menu, <code>@</code> to mention someone and <code>:</code> for emoji. Formatting is in the ribbon above; the navigation pane is on the View tab.</p></div>
 
 <h2>Formatting</h2>
 <p><strong>Bold</strong>, <em>italic</em>, <u>underline</u>, <s>strike</s>, <code>inline code</code>, H<sub>2</sub>O, x<sup>2</sup>, <mark>highlight</mark>, <mark data-color="#bbf7d0" style="background-color: #bbf7d0">green highlight</mark>, <span style="color: #7c3aed">coloured text</span>, <span style="font-family: Georgia, serif">a serif font</span> and a <span data-spoiler class="spoiler">hidden spoiler</span> (hover it).</p>

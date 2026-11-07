@@ -6,23 +6,28 @@
  */
 
 :root {
-  --text: #1f1d24;
-  --muted: #6b6375;
-  --surface: #f6f5f8;
-  --surface-2: #eeedf2;
-  --border: #e5e4e7;
-  --accent: #7c3aed;
-  --accent-bg: rgba(124, 58, 237, 0.12);
-  --code-bg: #f4f3ec;
-  --danger: #dc2626;
+  --text: #201f1e;
+  --muted: #605e5c;
+  --surface: #f3f2f1;
+  --surface-2: #e1dfdd;
+  --border: #d2d0ce;
+  --accent: #185abd;
+  --accent-bg: rgba(24, 90, 189, 0.12);
+  --code-bg: #f3f2f1;
+  --danger: #c62828;
   --success: #16a34a;
   --warning: #ca8a04;
-  --info: #2563eb;
-  --radius: 10px;
+  --info: #185abd;
+  --radius: 4px;
+  --heading: #2f5496;
+  --heading-dark: #1f3763;
+  --link: #0563c1;
+  /* Carlito is embedded (see fontStylesheet in pdf-html.ts); Calibri if the machine has it. */
+  --page-font: 'Carlito', Calibri, 'Segoe UI', Arial, sans-serif;
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --mono: ui-monospace, 'SF Mono', Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   color-scheme: light;
-  font: 16px/1.6 var(--sans);
+  font: 11pt/1.08 var(--page-font);
   color: var(--text);
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
@@ -43,8 +48,9 @@ body {
   overflow-wrap: break-word;
 }
 
-.tiptap > * + * {
-  margin-top: 0.75em;
+/* Every block has 8pt after it (Word's default); a paragraph's own spacing is inline style. */
+.tiptap > * {
+  margin: 0 0 8pt;
 }
 
 .tiptap > :first-child {
@@ -52,79 +58,107 @@ body {
 }
 
 p {
+  margin: 0 0 8pt;
+}
+
+:is(li, td, th) > p {
   margin: 0;
 }
 
-/* Headings */
+/* Contextual spacing, as in the editor: nested lists add no space between items. */
+li :is(ul, ol) {
+  margin: 0;
+}
+
+:is(blockquote, [data-type='detailsContent']) > :last-child {
+  margin-bottom: 0;
+}
+
+/* Headings, as in Word 2013-2019: regular weight, dark blue, little room after. */
 h1,
 h2,
 h3,
 h4,
 h5,
 h6 {
-  margin-bottom: 0.2em;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
+  margin: 2pt 0 0;
+  font-weight: 400;
+  line-height: 1.08;
+  color: var(--heading);
   break-after: avoid;
   break-inside: avoid;
 }
 
 h1 {
-  font-size: 2rem;
+  margin-top: 12pt;
+  font-size: 16pt;
 }
 
 h2 {
-  margin-top: 1.6em;
-  font-size: 1.5rem;
+  font-size: 13pt;
 }
 
 h3 {
-  font-size: 1.2rem;
+  font-size: 12pt;
+  color: var(--heading-dark);
+}
+
+h4,
+h5,
+h6 {
+  font-size: 11pt;
+}
+
+h4 {
+  font-style: italic;
+}
+
+h6 {
+  color: var(--heading-dark);
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 code {
-  padding: 0.1em 0.35em;
-  font: 0.88em var(--mono);
+  padding: 0 0.15em;
+  font: 0.92em var(--mono);
   background: var(--code-bg);
-  border-radius: 4px;
-}
-
-mark {
-  padding: 0 2px;
-  color: #1f1d24;
-  background: #fef08a;
   border-radius: 2px;
 }
 
+mark {
+  padding: 0;
+  color: #201f1e !important;
+  background: #fef08a;
+}
+
+/* Word's Quote style: italic and indented, no rule. */
 blockquote {
-  margin-left: 0;
-  margin-right: 0;
-  padding-left: 1em;
+  margin-right: 0.5in;
+  margin-left: 0.5in;
+  padding: 0;
+  font-style: italic;
   color: var(--muted);
-  border-left: 3px solid var(--border);
 }
 
 hr {
-  margin: 1.5em 0;
+  margin: 12pt 0;
   border: none;
-  border-top: 1px solid #d4d2d9;
+  border-top: 1px solid #7a7775;
 }
 
 /* Lists */
 ul,
 ol {
-  margin: 0;
-  padding-left: 1.5em;
+  margin: 0 0 8pt;
+  padding-left: 0.5in;
 }
 
 li > p {
-  margin: 0.15em 0;
+  margin: 0;
 }
 
 ul[data-type='taskList'] {
@@ -173,11 +207,17 @@ li[data-checked='true'] > div > p {
   text-decoration: line-through;
 }
 
+/* Typed spaces and tabs show as in the editor (which keeps whitespace); tab stops every half inch. */
+:is(p, h1, h2, h3, h4, h5, h6) {
+  white-space: pre-wrap;
+  tab-size: 0.5in;
+}
+
 /* Code blocks (lowlight) */
 pre {
-  margin: 0;
-  padding: 14px 16px;
-  font: 0.88rem/1.55 var(--mono);
+  margin: 0 0 8pt;
+  padding: 10px 12px;
+  font: 10pt/1.4 var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   background: var(--code-bg);
@@ -231,7 +271,7 @@ pre .hljs-meta {
 /* Tables: header rows repeat on every page (thead), rows don't split. */
 table {
   width: 100%;
-  margin: 1em 0;
+  margin: 0 0 8pt;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -246,14 +286,14 @@ tr {
 
 th,
 td {
-  padding: 6px 10px;
+  padding: 3px 7px;
   vertical-align: top;
   overflow-wrap: anywhere;
-  border: 1px solid #d4d2d9;
+  border: 1px solid #7a7775;
 }
 
 th {
-  font-weight: 600;
+  font-weight: 700;
   text-align: left;
   background: var(--surface);
 }
@@ -270,7 +310,6 @@ img {
   height: auto;
   max-height: var(--content-height, 9in);
   object-fit: contain;
-  border-radius: 8px;
   break-inside: avoid;
 }
 
