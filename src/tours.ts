@@ -31,8 +31,11 @@ type TourStep = Omit<DriveStep, 'element'> & {
   element?: string
   when?: (ctx: TourContext) => boolean
   tab?: RibbonTab
-  /** Runs (synchronously) when the step shows, to put its element on the page: the navigation pane may be closed. */
-  reveal?: () => void
+  /**
+   * Runs (synchronously) when the step shows, to put its element on the page: the navigation pane
+   * may be closed. Returns how to undo that, which runs when the tour ends.
+   */
+  reveal?: () => (() => void) | void
 }
 
 /** On a narrow screen the bar's actions fold into the "⋯" menu, so a step about one points there. */
@@ -240,7 +243,11 @@ export const TOURS: Record<TourId, Tour> = {
       },
       {
         element: '[data-tour="toc"]',
-        reveal: () => navPanePref.set(true),
+        reveal: () => {
+          if (navPanePref.get()) return
+          navPanePref.set(true)
+          return () => navPanePref.set(false)
+        },
         popover: {
           title: 'Navigation pane',
           description: 'Your headings, as you type, down the left side. Click one to jump to it; the one you are in is highlighted. Show or hide it from the <b>View</b> tab.',
@@ -587,8 +594,11 @@ const onTab = (tab: RibbonTab, selector: string) => () => {
 }
 
 /** A step that opens what it points at first; a card in the middle of the page if that isn't visible (a phone). */
-const onReveal = (reveal: () => void, selector: string) => () => {
-  flushSync(reveal)
+const onReveal = (reveal: NonNullable<TourStep['reveal']>, selector: string, undo: (() => void)[]) => () => {
+  flushSync(() => {
+    const restore = reveal()
+    if (restore) undo.push(restore)
+  })
   const target = document.querySelector<HTMLElement>(selector)
   return target && target.offsetParent !== null ? target : document.body
 }
@@ -598,12 +608,14 @@ function runTour(id: TourId) {
   // Skip steps whose element isn't on the page right now (e.g. an empty library or a
   // hidden sidebar), instead of showing a floating card about something that isn't there.
   // A step on another ribbon tab is there once the tab is selected.
+  // What the steps opened to show their element (the navigation pane), closed again when the tour ends.
+  const undo: (() => void)[] = []
   const steps: DriveStep[] = tour.steps
     .filter((step) => step.when?.(context) ?? true)
     .filter((step) => step.tab || step.reveal || !step.element || document.querySelector(step.element))
     .map(({ when: _when, tab, reveal, element, ...step }) => ({
       ...step,
-      element: tab && element ? onTab(tab, element) : reveal && element ? onReveal(reveal, element) : element,
+      element: tab && element ? onTab(tab, element) : reveal && element ? onReveal(reveal, element, undo) : element,
     }))
   const instance = driver({
     showProgress: true,
@@ -620,6 +632,7 @@ function runTour(id: TourId) {
     // Not `onDestroyed`: driver.js skips it when the tour ends mid-animation (a quick Done).
     onDestroyStarted: () => {
       closeFlyout()
+      for (const restore of undo.splice(0)) restore()
       if (id === 'welcome' || id === 'library') writeStorage(seenKey(id), '1')
       instance.destroy()
     },

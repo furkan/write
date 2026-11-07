@@ -67,8 +67,10 @@ export const TabKey = Extension.create({
       Tab: ({ editor }) => {
         const { $from } = editor.state.selection
         if (!editor.isEditable || !$from.parent.isTextblock) return false
-        // In a list item that can't be nested (the first one) Tab does nothing, rather than typing a tab.
-        for (let d = $from.depth; d > 0; d--) if (['listItem', 'taskItem'].includes($from.node(d).type.name)) return true
+        // In a list item that can't be nested (the first one) Tab does nothing, rather than typing a
+        // tab. A code block types its tab even inside a list item.
+        if (!$from.parent.type.spec.code)
+          for (let d = $from.depth; d > 0; d--) if (['listItem', 'taskItem'].includes($from.node(d).type.name)) return true
         editor.view.dispatch(editor.state.tr.insertText('\t').scrollIntoView())
         return true
       },
