@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { IN, marginsOf, marginUnit, MAX_MARGIN, readPageSetup, validateMargins } from '../src/editor/paper.ts'
+import { IN, marginsOf, marginUnit, MAX_MARGIN, PAPER_SIZES, readPageSetup, validateMargins } from '../src/editor/paper.ts'
 
 const meta = (values: Record<string, unknown>) => ({ get: (key: string) => values[key] })
 
@@ -36,5 +36,26 @@ describe('margins', () => {
     expect(Object.keys(validateMargins(a5, [IN, 3 * IN, IN, 3 * IN]))).toEqual(['width'])
     expect(Object.keys(validateMargins({ size: 'a5', orientation: 'landscape' }, [3 * IN, IN, 3 * IN, IN]))).toEqual(['height'])
     expect(validateMargins({ size: 'a4', orientation: 'portrait' }, [3 * IN + 1, IN, IN, IN]).top).toContain('0 and 7.62 cm')
+  })
+})
+
+describe('custom margins on other paper', () => {
+  test('large custom margins are scaled down so an inch of text is left', () => {
+    const big = [3 * IN, 3 * IN, 3 * IN, 3 * IN] as const
+    // On A4 they fit (A4 is 8.27 in wide): untouched.
+    expect([...marginsOf({ size: 'a4', orientation: 'portrait', margins: 'custom', customMargins: big })]).toEqual([...big])
+    // On A5 (5.83 in wide, 8.27 in high) the sides are scaled to leave exactly an inch; top and bottom still fit.
+    const a5 = marginsOf({ size: 'a5', orientation: 'portrait', margins: 'custom', customMargins: big })
+    expect(a5[3] + a5[1]).toBeCloseTo(PAPER_SIZES.a5.width - IN, 5)
+    expect(a5[3]).toBeCloseTo(a5[1], 5)
+    expect(a5[0]).toBe(3 * IN)
+    // Landscape A5 is 5.83 in high: top and bottom are scaled instead.
+    const land = marginsOf({ size: 'a5', orientation: 'landscape', margins: 'custom', customMargins: big })
+    expect(land[0] + land[2]).toBeCloseTo(PAPER_SIZES.a5.width - IN, 5)
+    // Unequal margins keep their proportion.
+    const uneven = marginsOf({ size: 'a5', orientation: 'portrait', margins: 'custom', customMargins: [IN, 3 * IN, IN, IN] })
+    expect(uneven[1] / uneven[3]).toBeCloseTo(3, 5)
+    // Presets are never changed.
+    expect([...marginsOf({ size: 'a5', orientation: 'portrait', margins: 'wide' })]).toEqual([IN, 2 * IN, IN, 2 * IN])
   })
 })

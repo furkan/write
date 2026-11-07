@@ -238,6 +238,8 @@ kbd {
     --heading: #9db9ee;
     --heading-dark: #b8cdf3;
     --link: var(--accent);
+    /* Code needs to stand out from the dark page, which is the same grey as --code-bg. */
+    --code-bg: #232323;
   }
 }
 
@@ -245,4 +247,5 @@ kbd {
   --heading: #9db9ee;
   --heading-dark: #b8cdf3;
   --link: var(--accent);
+  --code-bg: #232323;
 }

@@ -113,6 +113,11 @@ export function lengthToPt(value: string | null | undefined): number | null {
   return Number.isFinite(pt) ? Math.round(pt * 10) / 10 : null
 }
 
+/** Sane limits for pasted and typed values: space up to 2 in, indents from -1 in to 6 in (a page's width). */
+const MAX_SPACE = 144
+const MIN_INDENT = -72
+const MAX_INDENT = 432
+
 const finite = (min: number, max: number) => (value: unknown) => {
   const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN
   return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n * 100) / 100)) : null
@@ -129,11 +134,11 @@ const FIELDS: Field[] = [
     read: (el) => (/^\d*\.?\d+$/.test(el.style.lineHeight) ? Number(el.style.lineHeight) : null),
     clean: finite(0.5, 10),
   },
-  { attr: 'spaceBefore', css: 'margin-top', unit: 'pt', read: (el) => lengthToPt(el.style.marginTop), clean: finite(0, 1584) },
-  { attr: 'spaceAfter', css: 'margin-bottom', unit: 'pt', read: (el) => lengthToPt(el.style.marginBottom), clean: finite(0, 1584) },
-  { attr: 'indentLeft', css: 'margin-left', unit: 'pt', read: (el) => lengthToPt(el.style.marginLeft), clean: finite(-1584, 1584) },
-  { attr: 'indentRight', css: 'margin-right', unit: 'pt', read: (el) => lengthToPt(el.style.marginRight), clean: finite(-1584, 1584) },
-  { attr: 'indentFirstLine', css: 'text-indent', unit: 'pt', read: (el) => lengthToPt(el.style.textIndent), clean: finite(-1584, 1584) },
+  { attr: 'spaceBefore', css: 'margin-top', unit: 'pt', read: (el) => lengthToPt(el.style.marginTop), clean: finite(0, MAX_SPACE) },
+  { attr: 'spaceAfter', css: 'margin-bottom', unit: 'pt', read: (el) => lengthToPt(el.style.marginBottom), clean: finite(0, MAX_SPACE) },
+  { attr: 'indentLeft', css: 'margin-left', unit: 'pt', read: (el) => lengthToPt(el.style.marginLeft), clean: finite(MIN_INDENT, MAX_INDENT) },
+  { attr: 'indentRight', css: 'margin-right', unit: 'pt', read: (el) => lengthToPt(el.style.marginRight), clean: finite(MIN_INDENT, MAX_INDENT) },
+  { attr: 'indentFirstLine', css: 'text-indent', unit: 'pt', read: (el) => lengthToPt(el.style.textIndent), clean: finite(MIN_INDENT, MAX_INDENT) },
 ]
 
 declare module '@tiptap/core' {
@@ -157,7 +162,7 @@ export const ParagraphFormat = Extension.create({
             attr,
             {
               default: null,
-              parseHTML: (element: HTMLElement) => read(element),
+              parseHTML: (element: HTMLElement) => clean(read(element)),
               renderHTML: (attributes: Record<string, unknown>) => {
                 const value = clean(attributes[attr])
                 return value === null ? {} : { style: `${css}: ${value}${unit}` }

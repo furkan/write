@@ -65,7 +65,10 @@ export const TabKey = Extension.create({
   addKeyboardShortcuts() {
     return {
       Tab: ({ editor }) => {
-        if (!editor.isEditable || !editor.state.selection.$from.parent.isTextblock) return false
+        const { $from } = editor.state.selection
+        if (!editor.isEditable || !$from.parent.isTextblock) return false
+        // In a list item that can't be nested (the first one) Tab does nothing, rather than typing a tab.
+        for (let d = $from.depth; d > 0; d--) if (['listItem', 'taskItem'].includes($from.node(d).type.name)) return true
         editor.view.dispatch(editor.state.tr.insertText('\t').scrollIntoView())
         return true
       },

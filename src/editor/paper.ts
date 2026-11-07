@@ -53,9 +53,27 @@ export const MAX_MARGIN = 3 * IN
 
 /** Top, right, bottom and left margins in CSS px: the preset's, or the custom ones. */
 export function marginsOf(setup: PageSetup): Margins {
-  if (setup.margins === 'custom' && setup.customMargins) return setup.customMargins
+  if (setup.margins === 'custom' && setup.customMargins) return fitMargins(setup, setup.customMargins)
   // `custom` without values reads as the default, as an unknown value does.
   return MARGIN_PRESETS[setup.margins === 'custom' ? 'normal' : setup.margins].margins
+}
+
+/**
+ * Custom margins were chosen for some paper; on a smaller one (A4 to A5, or landscape) they could
+ * leave no text. Where less than MIN_TEXT of width or height would remain, the pair of margins is
+ * scaled down together to leave exactly that.
+ */
+export function fitMargins(setup: Pick<PageSetup, 'size' | 'orientation'>, [top, right, bottom, left]: Margins): Margins {
+  const paper = PAPER_SIZES[setup.size]
+  const landscape = setup.orientation === 'landscape'
+  const [width, height] = landscape ? [paper.height, paper.width] : [paper.width, paper.height]
+  const fit = (a: number, b: number, room: number): [number, number] => {
+    const allowed = Math.max(0, room - MIN_TEXT)
+    return a + b <= allowed ? [a, b] : [(a * allowed) / (a + b), (b * allowed) / (a + b)]
+  }
+  const [l, r] = fit(left, right, width)
+  const [t, b] = fit(top, bottom, height)
+  return [t, r, b, l]
 }
 
 export const serializeMargins = (margins: Margins) => margins.map((m) => Math.round(m * 10) / 10).join(',')

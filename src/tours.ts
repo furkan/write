@@ -1,3 +1,4 @@
+import { navPanePref } from './editor/view-prefs'
 import { driver, type DriveStep } from 'driver.js'
 import 'driver.js/dist/driver.css'
 import { flushSync } from 'react-dom'
@@ -26,7 +27,13 @@ export const setTourContext = (next: TourContext) => void (context = next)
  * A step, shown only when `when` (if any) says it applies to the current user. `tab`: the ribbon
  * tab whose group the step points at; it is selected when the step shows.
  */
-type TourStep = Omit<DriveStep, 'element'> & { element?: string; when?: (ctx: TourContext) => boolean; tab?: RibbonTab }
+type TourStep = Omit<DriveStep, 'element'> & {
+  element?: string
+  when?: (ctx: TourContext) => boolean
+  tab?: RibbonTab
+  /** Runs (synchronously) when the step shows, to put its element on the page: the navigation pane may be closed. */
+  reveal?: () => void
+}
 
 /** On a narrow screen the bar's actions fold into the "⋯" menu, so a step about one points there. */
 const orMore = (name: string) => `[data-tour="${name}"], [data-tour="more"]`
@@ -233,6 +240,7 @@ export const TOURS: Record<TourId, Tour> = {
       },
       {
         element: '[data-tour="toc"]',
+        reveal: () => navPanePref.set(true),
         popover: {
           title: 'Navigation pane',
           description: 'Your headings, as you type, down the left side. Click one to jump to it; the one you are in is highlighted. Show or hide it from the <b>View</b> tab.',
@@ -578,6 +586,13 @@ const onTab = (tab: RibbonTab, selector: string) => () => {
   return document.querySelector(selector) ?? document.body
 }
 
+/** A step that opens what it points at first; a card in the middle of the page if that isn't visible (a phone). */
+const onReveal = (reveal: () => void, selector: string) => () => {
+  flushSync(reveal)
+  const target = document.querySelector<HTMLElement>(selector)
+  return target && target.offsetParent !== null ? target : document.body
+}
+
 function runTour(id: TourId) {
   const tour = TOURS[id]
   // Skip steps whose element isn't on the page right now (e.g. an empty library or a
@@ -585,8 +600,11 @@ function runTour(id: TourId) {
   // A step on another ribbon tab is there once the tab is selected.
   const steps: DriveStep[] = tour.steps
     .filter((step) => step.when?.(context) ?? true)
-    .filter((step) => step.tab || !step.element || document.querySelector(step.element))
-    .map(({ when: _when, tab, element, ...step }) => ({ ...step, element: tab && element ? onTab(tab, element) : element }))
+    .filter((step) => step.tab || step.reveal || !step.element || document.querySelector(step.element))
+    .map(({ when: _when, tab, reveal, element, ...step }) => ({
+      ...step,
+      element: tab && element ? onTab(tab, element) : reveal && element ? onReveal(reveal, element) : element,
+    }))
   const instance = driver({
     showProgress: true,
     animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
